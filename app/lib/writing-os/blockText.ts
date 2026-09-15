@@ -24,9 +24,9 @@ export function blockPlainText(block: { content?: unknown }): string {
 
 /**
  * Wraps a plain string as a single default paragraph block — used to adapt
- * simple seed/demo text (see `lib/data.ts`) into real BlockNote content
- * without hand-authoring BlockNote JSON. A literal "\n" in `text` becomes a
- * soft line break (BlockNote's own round-trip convention for Shift+Enter).
+ * plain text into real BlockNote content without hand-authoring BlockNote
+ * JSON. A literal "\n" in `text` becomes a soft line break (BlockNote's own
+ * round-trip convention for Shift+Enter).
  */
 export function paragraphBlock(id: string, text: string): DraftPartialBlock {
   return { id, type: "paragraph", content: text };
