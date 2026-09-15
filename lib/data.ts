@@ -1,6 +1,6 @@
 import { paragraphBlock, sectionBlock } from "@/app/lib/writing-os/blockText";
 import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
-import type { Comment, Note } from "@/app/lib/writing-os/types";
+import type { Comment } from "@/app/lib/writing-os/types";
 
 /**
  * Dummy/seed data for the Writing OS demo. This stands in for what would
@@ -36,15 +36,6 @@ export const initialDocument: DraftPartialBlock[] = [
       "In the end, the future of local AI isn't just about better tools. It's about a more intentional relationship with technology — one where you stay in control, your ideas stay yours, and your writing environment works for you, not the other way around."
     ),
   ]),
-];
-
-export const initialNotes: Note[] = [
-  { id: 1, bucket: "opening", body: "More writers are experimenting with local models, from creative professionals to independent creators.", time: "2 min ago", resolved: false },
-  { id: 2, bucket: "opening", body: "Recent articles highlight growing concerns around data privacy and the rise of offline AI tools.", time: "5 min ago", resolved: true, attachment: { kind: "link", label: "eff.org/local-first-ai-privacy" } },
-  { id: 3, bucket: "body", body: "Local AI also enables customization, better workflows, and deeper integration with your tools.", time: "8 min ago", resolved: false },
-  { id: 4, bucket: "body", body: "Visual comparison of data flow and control between cloud-based and local AI setups.", time: "12 min ago", resolved: false, attachment: { kind: "image", label: "local-vs-cloud-diagram.png" } },
-  { id: 5, bucket: "body", body: "Examples of independent writers and small teams running local models for creative work.", time: "18 min ago", resolved: false, attachment: { kind: "link", label: "writingtools.dev/case-studies" } },
-  { id: 6, bucket: "conclusion", body: "Local AI isn't just a tool — it's a shift in how we think about ownership, privacy, and creative freedom.", time: "25 min ago", resolved: false },
 ];
 
 export const initialComments: Record<string, Comment[]> = {

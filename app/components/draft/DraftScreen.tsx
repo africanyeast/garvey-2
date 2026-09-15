@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useDraftEditor } from "@/app/lib/writing-os/editor-context";
@@ -35,11 +35,17 @@ export function DraftScreen({ project }: { project: Project }) {
 function DraftScreenInner({ project }: { project: Project }) {
   const title = project.title;
   const subtitle = project.agenda;
-  const { docMode, setDocMode, expandedItem, panelMode } = useWritingOS();
+  const { docMode, setDocMode, expandedItem, panelMode, setActiveProject, setActiveProjectSlug } = useWritingOS();
   // Aliased from the global `document` it'd otherwise shadow.
   const { document: draftDoc } = useDraftEditor();
   const [briefOpen, setBriefOpen] = useState(false);
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+
+  useEffect(() => {
+    setActiveProject(project.title);
+    setActiveProjectSlug(project.slug);
+    return () => setActiveProjectSlug(null);
+  }, [project.slug, project.title, setActiveProject, setActiveProjectSlug]);
 
   // The main document always stays visible — an expanded block/note takes
   // over the right dock (in place of the notes panel) rather than replacing

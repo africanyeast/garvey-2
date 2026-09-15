@@ -8,10 +8,7 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
-import {
-  initialComments,
-  initialNotes,
-} from "@/lib/data";
+import { initialComments } from "@/lib/data";
 import type {
   Comment,
   DocMode,
@@ -40,6 +37,9 @@ interface WritingOSState {
   commentsData: Record<string, Comment[]>;
   inboxItems: InboxItem[];
   activeProject: string;
+  setActiveProject: (title: string) => void;
+  activeProjectSlug: string | null;
+  setActiveProjectSlug: (slug: string | null) => void;
 
   // ui
   panelMode: PanelPresentation;
@@ -60,9 +60,9 @@ interface WritingOSState {
   closeMenu: () => void;
   openExpanded: (kind: ExpandedItem["kind"], key: string | number, backTo?: ExpandedItem | null) => void;
   closeExpanded: () => void;
-  toggleNoteResolved: (id: number) => void;
+  toggleNoteResolved: (id: string) => void;
   toggleInboxResolved: (id: string) => void;
-  updateNoteBody: (id: number, body: string) => void;
+  updateNoteBody: (id: string, body: string) => void;
   updateInboxBody: (id: string, body: string) => void;
   openSectionPanel: (sec: SectionKey) => void;
   closeSectionPanel: () => void;
@@ -91,10 +91,11 @@ interface WritingOSState {
 const WritingOSContext = createContext<WritingOSState | null>(null);
 
 export function WritingOSProvider({ children }: { children: ReactNode }) {
-  const [notesData, setNotesData] = useState<Note[]>(initialNotes);
+  const [notesData, setNotesData] = useState<Note[]>([]);
   const [commentsData, setCommentsData] = useState<Record<string, Comment[]>>(initialComments);
   const [inboxItems, setInboxItems] = useState<InboxItem[]>([]);
-  const [activeProject, setActiveProject] = useState("Future of Local AI");
+  const [activeProject, setActiveProject] = useState("");
+  const [activeProjectSlug, setActiveProjectSlug] = useState<string | null>(null);
 
   useEffect(() => {
     fetch("/api/inbox")
@@ -103,6 +104,17 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
       .catch(() => {});
   }, []);
 
+  useEffect(() => {
+    if (!activeProjectSlug) {
+      setNotesData([]);
+      return;
+    }
+    fetch(`/api/projects/${activeProjectSlug}/notes`)
+      .then((res) => res.json())
+      .then(setNotesData)
+      .catch(() => {});
+  }, [activeProjectSlug]);
+
   const [panelMode, setPanelMode] = useState<PanelPresentation>("collapsed");
   const [expandedMode, setExpandedMode] = useState<PanelPresentation>("docked");
   const [openMenu, setOpenMenu] = useState<string | number | null>(null);
@@ -110,7 +122,7 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
   const [commentOpenId, setCommentOpenId] = useState<string | number | null>(null);
   const [panelSection, setPanelSection] = useState<SectionKey | null>(null);
   const [panelTab, setPanelTab] = useState<PanelTab>("blocks");
-  const [newNoteDraft, setNewNoteDraft] = useState("@Future of Local AI ");
+  const [newNoteDraft, setNewNoteDraft] = useState("");
   const [newInboxDraft, setNewInboxDraft] = useState("");
   const [docMode, setDocMode] = useState<DocMode>("edit");
   const [replyDraft, setReplyDraft] = useState("");
@@ -130,8 +142,17 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     else setExpandedItem(null);
   };
 
-  const toggleNoteResolved = (id: number) => {
-    setNotesData((prev) => prev.map((n) => (n.id === id ? { ...n, resolved: !n.resolved } : n)));
+  const toggleNoteResolved = (id: string) => {
+    if (!activeProjectSlug) return;
+    const note = notesData.find((n) => n.id === id);
+    if (!note) return;
+    const resolved = !note.resolved;
+    setNotesData((prev) => prev.map((n) => (n.id === id ? { ...n, resolved } : n)));
+    fetch(`/api/projects/${activeProjectSlug}/notes/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resolved }),
+    }).catch(() => {});
   };
   const toggleInboxResolved = (id: string) => {
     const item = inboxItems.find((i) => i.id === id);
@@ -144,8 +165,14 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ resolved }),
     }).catch(() => {});
   };
-  const updateNoteBody = (id: number, body: string) => {
+  const updateNoteBody = (id: string, body: string) => {
+    if (!activeProjectSlug) return;
     setNotesData((prev) => prev.map((n) => (n.id === id ? { ...n, body } : n)));
+    fetch(`/api/projects/${activeProjectSlug}/notes/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body }),
+    }).catch(() => {});
   };
   const updateInboxBody = (id: string, body: string) => {
     setInboxItems((prev) => prev.map((i) => (i.id === id ? { ...i, body } : i)));
@@ -189,17 +216,21 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
 
   const addItem = () => {
     const raw = newNoteDraft.trim();
-    if (!raw) return;
+    if (!raw || !activeProjectSlug) return;
     const sectionMatch = raw.match(/#(opening|body|conclusion)\b/i);
     const bucket = (sectionMatch ? (sectionMatch[1].toLowerCase() as SectionKey) : panelSection) ?? null;
     const projectMatch = raw.match(/@([^\s#][^#]*)/);
-    let project = activeProject;
-    if (projectMatch) {
-      project = projectMatch[1].trim();
-      setActiveProject(project);
-    }
-    setNotesData((prev) => [...prev, { id: Date.now(), bucket, body: raw, time: "just now", resolved: false }]);
+    const project = projectMatch ? projectMatch[1].trim() : activeProject;
+    if (projectMatch) setActiveProject(project);
     setNewNoteDraft(panelSection ? "#" + panelSection + " @" + project + " " : "@" + project + " ");
+    fetch(`/api/projects/${activeProjectSlug}/notes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: raw, bucket }),
+    })
+      .then((res) => res.json())
+      .then((note: Note) => setNotesData((prev) => [...prev, note]))
+      .catch(() => {});
   };
 
   // For capturing a note straight from a block's expanded view — filed
@@ -207,8 +238,15 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
   // notes-panel composer draft.
   const addNoteToSection = (sec: SectionKey, text: string) => {
     const raw = text.trim();
-    if (!raw) return;
-    setNotesData((prev) => [...prev, { id: Date.now(), bucket: sec, body: raw, time: "just now", resolved: false }]);
+    if (!raw || !activeProjectSlug) return;
+    fetch(`/api/projects/${activeProjectSlug}/notes`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: raw, bucket: sec }),
+    })
+      .then((res) => res.json())
+      .then((note: Note) => setNotesData((prev) => [...prev, note]))
+      .catch(() => {});
   };
 
   const addInboxItem = () => {
@@ -243,6 +281,9 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     commentsData,
     inboxItems,
     activeProject,
+    setActiveProject,
+    activeProjectSlug,
+    setActiveProjectSlug,
     panelMode,
     expandedMode,
     openMenu,

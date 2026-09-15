@@ -21,7 +21,7 @@ export const attachmentMeta: Record<AttachmentKind, string> = {
 };
 
 export interface Note {
-  id: number;
+  id: string;
   bucket: SectionKey | null;
   body: string;
   time: string;
