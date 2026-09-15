@@ -1,9 +1,8 @@
 "use client";
 
-import { createContext, useContext, useState, type ReactNode } from "react";
+import { createContext, useContext, useRef, useState, type ReactNode } from "react";
 import { useCreateBlockNote } from "@blocknote/react";
-import { initialDocument } from "@/lib/data";
-import { draftSchema, type DraftBlock, type DraftEditor } from "./schema";
+import { draftSchema, type DraftBlock, type DraftEditor, type DraftPartialBlock } from "./schema";
 
 /**
  * The single BlockNote editor instance for the whole draft — one document,
@@ -39,12 +38,34 @@ function seedSectionsOpen(document: DraftBlock[]) {
   }
 }
 
-export function DraftEditorProvider({ children }: { children: ReactNode }) {
+export function DraftEditorProvider({
+  children,
+  projectSlug,
+  initialDocument,
+}: {
+  children: ReactNode;
+  projectSlug: string;
+  initialDocument: DraftPartialBlock[];
+}) {
   const editor = useCreateBlockNote({ schema: draftSchema, initialContent: initialDocument }, []);
   seedSectionsOpen(editor.document);
   const [doc, setDoc] = useState<DraftBlock[]>(editor.document);
 
-  const syncDocument = () => setDoc(editor.document);
+  // Debounced so a fast typist doesn't fire a write per keystroke — the
+  // timer resets on every change and only the trailing edit actually saves.
+  const saveTimer = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const syncDocument = () => {
+    const next = editor.document;
+    setDoc(next);
+    if (saveTimer.current) clearTimeout(saveTimer.current);
+    saveTimer.current = setTimeout(() => {
+      fetch(`/api/projects/${projectSlug}/draft`, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(next),
+      }).catch(() => {});
+    }, 800);
+  };
 
   return (
     <DraftEditorContext.Provider value={{ editor, document: doc, syncDocument }}>{children}</DraftEditorContext.Provider>

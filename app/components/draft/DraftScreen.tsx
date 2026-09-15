@@ -11,6 +11,7 @@ import { PanelShell } from "@/app/components/panel/PanelShell";
 import { DraftEditor } from "@/app/components/draft/DraftEditor";
 import { NoteExpanded } from "@/app/components/draft/NoteExpanded";
 import type { Project } from "@/app/lib/writing-os/types";
+import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 
 // All three create/touch a BlockNote editor, which touches `window` — load
 // client-only.
@@ -21,12 +22,18 @@ const DraftEditorProvider = dynamic(
   { ssr: false }
 );
 
-export function DraftScreen({ project }: { project: Project }) {
+export function DraftScreen({
+  project,
+  initialDocument,
+}: {
+  project: Project;
+  initialDocument: DraftPartialBlock[];
+}) {
   // The single draft-wide BlockNote editor (and everything downstream that
   // reads/writes it — the main document, the side panel's block list, the
   // expanded-block panel, the preview) lives behind this one provider.
   return (
-    <DraftEditorProvider>
+    <DraftEditorProvider projectSlug={project.slug} initialDocument={initialDocument}>
       <DraftScreenInner project={project} />
     </DraftEditorProvider>
   );
