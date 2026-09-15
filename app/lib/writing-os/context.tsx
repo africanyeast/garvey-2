@@ -3,13 +3,13 @@
 import {
   createContext,
   useContext,
+  useEffect,
   useState,
   type MouseEvent,
   type ReactNode,
 } from "react";
 import {
   initialComments,
-  initialInboxItems,
   initialNotes,
 } from "@/lib/data";
 import type {
@@ -61,9 +61,9 @@ interface WritingOSState {
   openExpanded: (kind: ExpandedItem["kind"], key: string | number, backTo?: ExpandedItem | null) => void;
   closeExpanded: () => void;
   toggleNoteResolved: (id: number) => void;
-  toggleInboxResolved: (id: number) => void;
+  toggleInboxResolved: (id: string) => void;
   updateNoteBody: (id: number, body: string) => void;
-  updateInboxBody: (id: number, body: string) => void;
+  updateInboxBody: (id: string, body: string) => void;
   openSectionPanel: (sec: SectionKey) => void;
   closeSectionPanel: () => void;
   setPanelMode: (m: PanelPresentation) => void;
@@ -93,8 +93,15 @@ const WritingOSContext = createContext<WritingOSState | null>(null);
 export function WritingOSProvider({ children }: { children: ReactNode }) {
   const [notesData, setNotesData] = useState<Note[]>(initialNotes);
   const [commentsData, setCommentsData] = useState<Record<string, Comment[]>>(initialComments);
-  const [inboxItems, setInboxItems] = useState<InboxItem[]>(initialInboxItems);
+  const [inboxItems, setInboxItems] = useState<InboxItem[]>([]);
   const [activeProject, setActiveProject] = useState("Future of Local AI");
+
+  useEffect(() => {
+    fetch("/api/inbox")
+      .then((res) => res.json())
+      .then(setInboxItems)
+      .catch(() => {});
+  }, []);
 
   const [panelMode, setPanelMode] = useState<PanelPresentation>("collapsed");
   const [expandedMode, setExpandedMode] = useState<PanelPresentation>("docked");
@@ -126,14 +133,27 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
   const toggleNoteResolved = (id: number) => {
     setNotesData((prev) => prev.map((n) => (n.id === id ? { ...n, resolved: !n.resolved } : n)));
   };
-  const toggleInboxResolved = (id: number) => {
-    setInboxItems((prev) => prev.map((i) => (i.id === id ? { ...i, resolved: !i.resolved } : i)));
+  const toggleInboxResolved = (id: string) => {
+    const item = inboxItems.find((i) => i.id === id);
+    if (!item) return;
+    const resolved = !item.resolved;
+    setInboxItems((prev) => prev.map((i) => (i.id === id ? { ...i, resolved } : i)));
+    fetch(`/api/inbox/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resolved }),
+    }).catch(() => {});
   };
   const updateNoteBody = (id: number, body: string) => {
     setNotesData((prev) => prev.map((n) => (n.id === id ? { ...n, body } : n)));
   };
-  const updateInboxBody = (id: number, body: string) => {
+  const updateInboxBody = (id: string, body: string) => {
     setInboxItems((prev) => prev.map((i) => (i.id === id ? { ...i, body } : i)));
+    fetch(`/api/inbox/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body }),
+    }).catch(() => {});
   };
 
   const openSectionPanel = (sec: SectionKey) => {
@@ -197,8 +217,15 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     const sectionMatch = raw.match(/#(opening|body|conclusion)\b/i);
     const projectMatch = raw.match(/@([^\s#][^#]*)/);
     const tag = sectionMatch ? "#" + sectionMatch[1].toLowerCase() : projectMatch ? "@" + projectMatch[1].trim() : null;
-    setInboxItems((prev) => [...prev, { id: Date.now(), body: raw, time: "just now", tag, resolved: false }]);
     setNewInboxDraft("");
+    fetch("/api/inbox", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body: raw, tag }),
+    })
+      .then((res) => res.json())
+      .then((item: InboxItem) => setInboxItems((prev) => [...prev, item]))
+      .catch(() => {});
   };
 
   const enrichNote = (n: Note): EnrichedNote => ({

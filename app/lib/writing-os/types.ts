@@ -41,7 +41,7 @@ export interface Comment {
 }
 
 export interface InboxItem {
-  id: number;
+  id: string;
   body: string;
   time: string;
   tag: string | null;
@@ -55,6 +55,22 @@ export interface ExpandedItem {
   kind: ExpandedKind;
   key: string | number;
   backTo: ExpandedItem | null;
+}
+
+export interface TitleCandidate {
+  text: string;
+  current: boolean;
+}
+
+export interface Project {
+  slug: string;
+  title: string;
+  problem: string;
+  agenda: string;
+  arguments: string[];
+  goal: string;
+  titleCandidates: TitleCandidate[];
+  status: string;
 }
 
 export type Screen = "inbox" | "draft" | "style";

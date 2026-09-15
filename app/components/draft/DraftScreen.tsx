@@ -10,6 +10,7 @@ import { SidePanel } from "@/app/components/panel/SidePanel";
 import { PanelShell } from "@/app/components/panel/PanelShell";
 import { DraftEditor } from "@/app/components/draft/DraftEditor";
 import { NoteExpanded } from "@/app/components/draft/NoteExpanded";
+import type { Project } from "@/app/lib/writing-os/types";
 
 // All three create/touch a BlockNote editor, which touches `window` — load
 // client-only.
@@ -20,24 +21,20 @@ const DraftEditorProvider = dynamic(
   { ssr: false }
 );
 
-export function DraftScreen(props: { title?: string; subtitle?: string }) {
+export function DraftScreen({ project }: { project: Project }) {
   // The single draft-wide BlockNote editor (and everything downstream that
   // reads/writes it — the main document, the side panel's block list, the
   // expanded-block panel, the preview) lives behind this one provider.
   return (
     <DraftEditorProvider>
-      <DraftScreenInner {...props} />
+      <DraftScreenInner project={project} />
     </DraftEditorProvider>
   );
 }
 
-function DraftScreenInner({
-  title = "The Future of Local AI",
-  subtitle = "A forward-looking exploration of how local AI tools can reshape the way we write, think, and build.",
-}: {
-  title?: string;
-  subtitle?: string;
-}) {
+function DraftScreenInner({ project }: { project: Project }) {
+  const title = project.title;
+  const subtitle = project.agenda;
   const { docMode, setDocMode, expandedItem, panelMode } = useWritingOS();
   // Aliased from the global `document` it'd otherwise shadow.
   const { document: draftDoc } = useDraftEditor();
@@ -55,7 +52,7 @@ function DraftScreenInner({
       <div className="flex-1 min-w-[0] overflow-y-auto overscroll-contain bg-[var(--color-neutral-0)]">
         <div
           className={`my-[0] mx-[auto] pt-[36px] px-[40px] pb-[100px] transition-[max-width] duration-200 ${
-            panelOpen ? "max-w-[820px]" : "max-w-[1100px]"
+            panelOpen ? "max-w-[820px]" : "max-w-[900px]"
           }`}
         >
           <DraftEditor
@@ -82,7 +79,7 @@ function DraftScreenInner({
        * close action, sharing the same shell as every expanded panel. */}
       {briefOpen && (
         <PanelShell mode="fullscreen" onClose={() => setBriefOpen(false)}>
-          <ProjectBrief />
+          <ProjectBrief project={project} />
         </PanelShell>
       )}
 

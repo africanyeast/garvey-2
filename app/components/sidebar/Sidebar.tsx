@@ -1,18 +1,40 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { usePathname } from "next/navigation";
-import { projectList } from "@/lib/data";
+import { useRouter, usePathname } from "next/navigation";
 import { FileText, Inbox, Plus, Settings, Feather } from "lucide-react";
+import type { Project } from "@/app/lib/writing-os/types";
 
 export function Sidebar() {
   const pathname = usePathname();
+  const router = useRouter();
+  const [projects, setProjects] = useState<Project[]>([]);
+
+  useEffect(() => {
+    fetch("/api/projects")
+      .then((res) => res.json())
+      .then(setProjects)
+      .catch(() => {});
+  }, [pathname]);
+
   const isInbox = pathname === "/inbox" || pathname === "/";
   const isStyle = pathname === "/style";
   const activeSlug =
     !isInbox && !isStyle ? pathname?.split("/").filter(Boolean)[0] : null;
 
-  const [primary, ...rest] = projectList;
+  const createProject = async () => {
+    const title = window.prompt("Project title")?.trim();
+    if (!title) return;
+    const res = await fetch("/api/projects", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ title }),
+    });
+    if (!res.ok) return;
+    const project: Project = await res.json();
+    router.push(`/${project.slug}`);
+  };
 
   return (
     <div className="w-[252px] shrink-0 bg-neutral-0 border-r border-[var(--border-default)] flex flex-col py-[20px] px-[14px] gap-[22px] overflow-y-auto overscroll-contain">
@@ -35,27 +57,26 @@ export function Sidebar() {
           Projects
         </div>
 
-        <Link
-          href={`/${primary.slug}`}
-          className={`flex items-center gap-[8px] py-[9px] pr-[8px] pl-[10px] rounded-sm cursor-pointer ${activeSlug === primary.slug ? "border border-[var(--border-default)]" : "bg-transparent"}`}
-        >
-          <FileText size={15} className="shrink-0 text-[var(--text-primary)]" />
-          <span className={`text-xs font-semibold text-[var(--text-primary)] flex-1 overflow-hidden text-ellipsis whitespace-nowrap`}>
-            {primary.title}
-          </span>
-        </Link>
-
-        {rest.map((project) => (
-          <div key={project.slug} className="flex items-center gap-[8px] py-[8px] px-[10px] opacity-[.55]">
-            <FileText size={15} />
-            <span className={`truncate text-xs font-semibold text-[var(--text-primary)]`}>{project.title}</span>
-          </div>
+        {projects.map((project) => (
+          <Link
+            key={project.slug}
+            href={`/${project.slug}`}
+            className={`flex items-center gap-[8px] py-[9px] pr-[8px] pl-[10px] rounded-sm cursor-pointer ${activeSlug === project.slug ? "border border-[var(--border-default)]" : "bg-transparent"}`}
+          >
+            <FileText size={15} className="shrink-0 text-[var(--text-primary)]" />
+            <span className={`text-xs font-semibold text-[var(--text-primary)] flex-1 overflow-hidden text-ellipsis whitespace-nowrap`}>
+              {project.title}
+            </span>
+          </Link>
         ))}
 
-        <div className="flex items-center gap-[8px] py-[9px] px-[10px] mt-[4px] cursor-pointer text-[var(--text-muted)]">
+        <button
+          onClick={createProject}
+          className="flex items-center gap-[8px] py-[9px] px-[10px] mt-[4px] cursor-pointer text-[var(--text-muted)] bg-transparent border-none text-left"
+        >
           <Plus size={15} strokeWidth={1.8} />
           <span className={"text-xs font-semibold"}>New Project</span>
-        </div>
+        </button>
       </div>
 
       <div className="flex-1" />

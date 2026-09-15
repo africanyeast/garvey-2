@@ -43,6 +43,10 @@ next-env.d.ts
 # artifacts
 /Artifacts
 
+# writing os vault (user content, not app code)
+/vault
+/.os
+
 # markdown docs (keep README)
 *.md
 !README.md
