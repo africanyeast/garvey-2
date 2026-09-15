@@ -1,7 +1,75 @@
-import { avoidWords, registerTags, toneTags, transitions } from "@/lib/data";
-import { X } from "lucide-react";
+"use client";
 
-export function StylePanel() {
+import { useState, type FocusEvent, type KeyboardEvent } from "react";
+import type { StyleProfile } from "@/app/lib/writing-os/types";
+
+function patchStyle(patch: Partial<StyleProfile>) {
+  fetch("/api/style", {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  }).catch(() => {});
+}
+
+function TagField({
+  label,
+  values,
+  onChange,
+}: {
+  label: string;
+  values: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [draft, setDraft] = useState("");
+
+  const add = () => {
+    const text = draft.trim();
+    if (!text || values.includes(text)) return;
+    onChange([...values, text]);
+    setDraft("");
+  };
+  const remove = (text: string) => onChange(values.filter((v) => v !== text));
+
+  return (
+    <div>
+      <div className={`text-xs font-medium text-[var(--text-primary)] mb-[8px]`}>{label}</div>
+      <div className="flex flex-wrap gap-[6px] mb-[6px]">
+        {values.map((v) => (
+          <span
+            key={v}
+            className={`wos-row text-xs font-medium inline-flex items-center gap-[6px] text-[var(--text-primary)] bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-full py-[5px] px-[10px]`}
+          >
+            {v}
+            <span onClick={() => remove(v)} className="wos-reveal cursor-pointer text-[var(--text-muted)]">
+              ×
+            </span>
+          </span>
+        ))}
+      </div>
+      <input
+        value={draft}
+        onChange={(e) => setDraft(e.target.value)}
+        onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
+          if (e.key === "Enter") {
+            e.preventDefault();
+            add();
+          }
+        }}
+        placeholder={`Add ${label.toLowerCase()}...`}
+        className="text-xs font-medium w-full bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-md py-[7px] px-[10px] outline-none text-[var(--text-primary)]"
+      />
+    </div>
+  );
+}
+
+export function StylePanel({ style }: { style: StyleProfile }) {
+  const [tone, setTone] = useState(style.tone);
+  const [avoidWords, setAvoidWords] = useState(style.avoid_words);
+  const [transitions, setTransitions] = useState(style.preferred_transitions);
+  const [register, setRegister] = useState(style.register);
+  const [sentenceLength, setSentenceLength] = useState(style.sentence_length);
+  const [structuralHabits, setStructuralHabits] = useState(style.structural_habits);
+
   return (
     <div className="max-w-[820px] my-[0] mx-[auto] pt-[36px] px-[48px] pb-[90px]">
       <div className="flex items-center justify-between mb-[8px]">
@@ -22,31 +90,9 @@ export function StylePanel() {
         </p>
 
         <div className="flex flex-col gap-[12px]">
-          <div className="wos-row bg-[var(--surface-raised)] border border-[var(--border-strong)] rounded-md py-[18px] px-[20px]">
-            <div className="flex justify-between mb-[10px]">
-              <span className={`text-xs font-medium text-[var(--text-muted)]`}>Sample 1 · 340 words</span>
-              <button className="wos-reveal bg-transparent border-none text-[var(--text-muted)] cursor-pointer p-[0]">
-                <X size={14} strokeWidth={1.8} />
-              </button>
-            </div>
-            <p className={`font-serif text-sm font-normal text-[var(--text-primary)] m-[0]`}>
-              The mistake most tools make is treating structure as an afterthought — something you impose once the thinking is already done. But structure is the thinking. If the shape isn&apos;t right, no amount of polish on the sentences will save it.
-            </p>
+          <div className={`text-xs font-medium text-[var(--text-muted)] py-[8px]`}>
+            No samples yet — writing-sample capture isn&apos;t wired up in this pass.
           </div>
-          <div className="wos-row bg-[var(--surface-raised)] border border-[var(--border-strong)] rounded-md py-[18px] px-[20px]">
-            <div className="flex justify-between mb-[10px]">
-              <span className={`text-xs font-medium text-[var(--text-muted)]`}>Sample 2 · 210 words</span>
-              <button className="wos-reveal bg-transparent border-none text-[var(--text-muted)] cursor-pointer p-[0]">
-                <X size={14} strokeWidth={1.8} />
-              </button>
-            </div>
-            <p className={`font-serif text-sm font-normal text-[var(--text-primary)] m-[0]`}>
-              I keep coming back to the same test: could someone else have written this sentence? If yes, cut it. The whole point of a personal style is that it couldn&apos;t have come from anyone else.
-            </p>
-          </div>
-          <button className={`text-xs font-medium self-start text-[var(--text-secondary)] bg-transparent border border-dashed border-[var(--border-strong)] rounded-md py-[12px] px-[20px] cursor-pointer`}>
-            + Add another sample
-          </button>
         </div>
       </div>
 
@@ -59,62 +105,62 @@ export function StylePanel() {
         </p>
 
         <div className="grid grid-cols-2 gap-[22px]">
-          <div>
-            <div className={`text-xs font-medium text-[var(--text-primary)] mb-[8px]`}>Tone</div>
-            <div className="flex flex-wrap gap-[6px]">
-              {toneTags.map((t) => (
-                <span key={t} className={`wos-row text-xs font-medium inline-flex items-center gap-[6px] text-[var(--text-primary)] bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-full py-[5px] px-[10px]`}>
-                  {t}
-                  <span className="wos-reveal cursor-pointer text-[var(--text-muted)]">×</span>
-                </span>
-              ))}
-            </div>
-          </div>
+          <TagField
+            label="Tone"
+            values={tone}
+            onChange={(next) => {
+              setTone(next);
+              patchStyle({ tone: next });
+            }}
+          />
           <div>
             <div className={`text-xs font-medium text-[var(--text-primary)] mb-[8px]`}>Sentence Length</div>
-            <div className={`text-sm font-normal text-[var(--text-secondary)] bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-md py-[9px] px-[12px]`}>
-              Medium (12–20 words)
-            </div>
+            <input
+              value={sentenceLength}
+              onChange={(e) => setSentenceLength(e.target.value)}
+              onBlur={() => patchStyle({ sentence_length: sentenceLength })}
+              className={`text-sm font-normal text-[var(--text-secondary)] bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-md py-[9px] px-[12px] w-full outline-none`}
+            />
           </div>
-          <div>
-            <div className={`text-xs font-medium text-[var(--text-primary)] mb-[8px]`}>Words to Avoid</div>
-            <div className="flex flex-wrap gap-[6px]">
-              {avoidWords.map((w) => (
-                <span key={w} className={`wos-row text-xs font-medium inline-flex items-center gap-[6px] text-[var(--text-primary)] bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-full py-[5px] px-[10px]`}>
-                  {w}
-                  <span className="wos-reveal cursor-pointer text-[var(--text-muted)]">×</span>
-                </span>
-              ))}
-            </div>
-          </div>
-          <div>
-            <div className={`text-xs font-medium text-[var(--text-primary)] mb-[8px]`}>Preferred Transitions</div>
-            <div className="flex flex-wrap gap-[6px]">
-              {transitions.map((tr) => (
-                <span key={tr} className={`wos-row text-xs font-medium inline-flex items-center gap-[6px] text-[var(--text-primary)] bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-full py-[5px] px-[10px]`}>
-                  {tr}
-                  <span className="wos-reveal cursor-pointer text-[var(--text-muted)]">×</span>
-                </span>
-              ))}
-            </div>
-          </div>
+          <TagField
+            label="Words to Avoid"
+            values={avoidWords}
+            onChange={(next) => {
+              setAvoidWords(next);
+              patchStyle({ avoid_words: next });
+            }}
+          />
+          <TagField
+            label="Preferred Transitions"
+            values={transitions}
+            onChange={(next) => {
+              setTransitions(next);
+              patchStyle({ preferred_transitions: next });
+            }}
+          />
           <div>
             <div className={`text-xs font-medium text-[var(--text-primary)] mb-[8px]`}>Structural Habits</div>
-            <div className={`text-sm font-normal text-[var(--text-secondary)] bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-md py-[9px] px-[12px] leading-[1.5]`}>
-              Short paragraphs. Clear section headings. Lists for complex ideas. End with a takeaway.
+            <div
+              contentEditable
+              suppressContentEditableWarning
+              onBlur={(e: FocusEvent<HTMLDivElement>) => {
+                const text = e.currentTarget.textContent ?? "";
+                setStructuralHabits(text);
+                patchStyle({ structural_habits: text });
+              }}
+              className={`text-sm font-normal text-[var(--text-secondary)] bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-md py-[9px] px-[12px] leading-[1.5] outline-none`}
+            >
+              {structuralHabits}
             </div>
           </div>
-          <div>
-            <div className={`text-xs font-medium text-[var(--text-primary)] mb-[8px]`}>Register</div>
-            <div className="flex flex-wrap gap-[6px]">
-              {registerTags.map((r) => (
-                <span key={r} className={`wos-row text-xs font-medium inline-flex items-center gap-[6px] text-[var(--text-primary)] bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-full py-[5px] px-[10px]`}>
-                  {r}
-                  <span className="wos-reveal cursor-pointer text-[var(--text-muted)]">×</span>
-                </span>
-              ))}
-            </div>
-          </div>
+          <TagField
+            label="Register"
+            values={register}
+            onChange={(next) => {
+              setRegister(next);
+              patchStyle({ register: next });
+            }}
+          />
         </div>
       </div>
     </div>

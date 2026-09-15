@@ -5,10 +5,10 @@ import { INBOX_DIR, VAULT_DIR, OS_DIR, STYLES_DIR, OS_CONFIG_PATH, DEFAULT_STYLE
 
 const DEFAULT_STYLE_FRONTMATTER = {
   tone: [] as string[],
-  sentence_length: "medium",
+  sentence_length: "Medium (12–20 words)",
   avoid_words: [] as string[],
   preferred_transitions: [] as string[],
-  structural_habits: [] as string[],
+  structural_habits: "",
   register: [] as string[],
 };
 

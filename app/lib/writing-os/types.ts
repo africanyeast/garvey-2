@@ -73,6 +73,15 @@ export interface Project {
   status: string;
 }
 
+export interface StyleProfile {
+  tone: string[];
+  sentence_length: string;
+  avoid_words: string[];
+  preferred_transitions: string[];
+  structural_habits: string;
+  register: string[];
+}
+
 export type Screen = "inbox" | "draft" | "style";
 export type DocMode = "edit" | "preview";
 export type PanelTab = "blocks" | "notes";
