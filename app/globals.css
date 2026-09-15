@@ -1,26 +1,356 @@
 @import "tailwindcss";
 
+/* Point Tailwind's font-sans / font-serif utilities at the fonts loaded
+   via next/font (layout.tsx). Named differently from the next/font
+   variables themselves to avoid a self-referential custom property. */
+@theme {
+  --font-sans: var(--font-sans-source);
+  --font-serif: var(--font-serif-source);
+
+  /* Neutrals */
+  --color-neutral-0: #ffffff;
+  --color-neutral-25: #fdfbf8;
+  --color-neutral-50: #faf6f0;
+  --color-neutral-75: #f5efe6;
+  --color-neutral-100: #efe9e1;
+  --color-neutral-200: #e8e1d6;
+  --color-neutral-300: #d8cfc1;
+  --color-neutral-400: #b3a996;
+  --color-neutral-500: #8a8478;
+  --color-neutral-600: #6b6660;
+  --color-neutral-800: #2a2521;
+  --color-neutral-900: #1a1714;
+  --color-neutral-950: #14110e;
+
+  /* Brand */
+  --color-brand-50: #fceee7;
+  --color-brand-100: #f8dbcb;
+  --color-brand-200: #f0b393;
+  --color-brand-300: #e28c60;
+  --color-brand-400: #cc5e2c;
+  --color-brand-500: #be400d;
+  --color-brand-600: #a8380b;
+  --color-brand-700: #8a2e09;
+  --color-brand-800: #5c1f07;
+
+  --color-oxblood-500: #6b2318;
+  --color-oxblood-600: #4e1a11;
+  --color-olive-500: #3f4a2e;
+  --color-forest-500: #2b4a34;
+
+  --radius-xs: 6px;
+  --radius-sm: 8px;
+  --radius-md: 12px;
+  --radius-lg: 16px;
+  --radius-xl: 20px;
+
+  --shadow-sm: 0 1px 2px rgba(20, 17, 14, 0.06);
+  --shadow-md: 0 8px 24px rgba(20, 17, 14, 0.1);
+  --shadow-lg: 0 16px 40px rgba(20, 17, 14, 0.16);
+}
+
+/* ---- Ominira Design System tokens (Writing OS) ---- */
 :root {
-  --background: #ffffff;
-  --foreground: #171717;
+  /* Semantic aliases */
+  --surface-app: var(--color-neutral-50);
+  --surface-raised: var(--color-neutral-0);
+  --surface-sunken: var(--color-neutral-75);
+  --surface-inverse: var(--color-neutral-900);
+  --surface-overlay: rgba(20, 17, 14, 0.45);
+
+  --border-default: var(--color-neutral-200);
+  --border-strong: var(--color-neutral-300);
+  --border-inverse: rgba(255, 255, 255, 0.16);
+
+  --text-primary: var(--color-neutral-950);
+  --text-secondary: var(--color-neutral-600);
+  --text-muted: var(--color-neutral-500);
+  --text-inverse: var(--color-neutral-25);
+  --text-inverse-muted: rgba(253, 251, 248, 0.68);
+  --text-brand: var(--color-brand-500);
+  --text-link: var(--color-brand-500);
+  --text-link-hover: var(--color-brand-600);
+
+  --fill-primary: var(--color-brand-500);
+  --fill-primary-hover: var(--color-brand-600);
+  --fill-primary-press: var(--color-brand-700);
+  --fill-primary-subtle: var(--color-brand-50);
+  --fill-primary-subtle-border: var(--color-brand-500);
+
+  --fill-highlight: #f6e4ce;
+  --fill-highlight-border: var(--color-brand-300);
+
+  --progress-track: var(--color-neutral-100);
+  --progress-fill: var(--color-brand-500);
+
+  --focus-ring: var(--color-brand-400);
+
+  /* Typography now lives directly in markup as Tailwind utility classes
+     (text-xs/font-medium/etc, font-sans/font-serif) instead of these
+     custom tokens — see app/components/writing-os/WritingOS.tsx. */
+
+  /* Spacing / radii / shadows */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+  --space-12: 48px;
+  --space-16: 64px;
+
+  --shadow-none: none;
+
+  --border-width: 1px;
+  --border-width-thick: 1.5px;
+
+  --background: var(--surface-app);
+  --foreground: var(--text-primary);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
+* {
+  box-sizing: border-box;
 }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
-  }
+html,
+body {
+  height: 100%;
+  overflow: hidden;
 }
 
 body {
-  background: var(--background);
+  margin: 0;
+  background: var(--surface-app);
   color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+a {
+  color: var(--text-link);
+}
+a:hover {
+  color: var(--text-link-hover);
+}
+
+textarea,
+input {
+  font-family: inherit;
+}
+
+/* Writing OS interaction helpers */
+.wos-row .wos-reveal {
+  opacity: 0;
+  transition: opacity 130ms ease-out;
+}
+.wos-row:hover .wos-reveal {
+  opacity: 1;
+}
+[data-empty-text]:empty:before {
+  content: attr(data-empty-text);
+  color: var(--text-muted);
+}
+.wos-dragging {
+  opacity: 0.4;
+}
+/* A section's own label (the `section` custom block, `writing-os/blocks/
+   section.ts`) stays almost invisible until you go looking for it — the
+   organization is there for whoever wants it, without competing with the
+   writing itself. Small/bold/muted rather than BlockNote's default
+   heading-sized type, since a section boundary here is organizational
+   scaffolding, not a headline. */
+.wos-section-label {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-muted);
+  opacity: 0.32;
+  transition: opacity 130ms ease-out;
+}
+.bn-block-outer:hover .wos-section-label {
+  opacity: 0.75;
+}
+/* BlockNote's own toggle chevron defaults to a 18px icon sized for a
+   heading-sized toggle — shrink it and mute its color to match the
+   section label's own small/quiet treatment instead. */
+.bn-block-content[data-content-type="section"] .bn-toggle-button {
+  padding: 2px;
+  color: var(--text-muted);
+}
+.bn-block-content[data-content-type="section"] .bn-toggle-button > svg {
+  width: 12px;
+  height: 12px;
+}
+
+/* BlockNote editor — inherit the app's own type/color instead of its
+   built-in defaults, and drop its own inline gutter padding since our page
+   layout already provides margins. */
+.bn-default-styles {
+  font-family: var(--font-serif);
+  color: var(--text-primary);
+}
+.bn-editor {
+  padding-inline: 0 !important;
+  /* Blocks blend into the page, same as every other surface here — not a
+     card. ariakit's theme defaults `.bn-editor` to a white, rounded panel
+     (`--bn-colors-editor-background`/`--bn-border-radius-large`); override
+     directly rather than remapping those variables, since floating UI
+     (menus/toolbars/popovers) is meant to look like a raised white panel
+     here, same as the app's own `--surface-raised` popovers — only the
+     editor's own content background should go transparent. */
+  background-color: transparent !important;
+  border-radius: 0 !important;
+}
+/* The main document editor reserves a fixed right-hand gutter so its
+   hovered-block Expand/Comments overlay (DraftDocument) never sits on top
+   of wrapped text — the same idea as BlockExpanded's own `pr-[28px]` on its
+   single block, just applied editor-wide instead of block-wide so the
+   overlay's horizontal position can be a constant instead of a per-block
+   measurement. */
+.wos-doc-editor .bn-editor {
+  padding-inline: 0 40px !important;
+}
+/* BlockNote's default 3px top/bottom block padding reads as one continuous
+   paragraph rather than a run of separate blocks — double it to match the
+   section row's own 6px top/bottom padding, so a new block visibly starts
+   a new line instead of looking like a soft-wrap of the previous one. */
+.bn-block-content {
+  padding-block: 6px;
+}
+/* BlockNote's own side menu (drag handle + "+") is a fixed 30px-tall
+   horizontal strip by default (`.bn-side-menu{height:30px;display:flex}`,
+   no flex-direction — built for exactly two icons side by side). The
+   original design stacks those two vertically in a narrow left column
+   instead — match that here rather than fighting the library's default
+   sizing assumptions block by block. BlockNote positions this menu flush
+   with the top of the hovered block, so it also needs to track the
+   `.bn-block-content` top padding above (doubled from BlockNote's own 3px
+   default to this app's 6px) — without a matching margin here, the drag
+   icon sits above where the block's own text actually starts. BlockNote
+   also centers its own 24px icon inside the button; this app's smaller
+   13px icon needs its own top offset on top of the padding match, so the
+   number here is measured against the rendered icon/text position rather
+   than derived from the padding diff alone. */
+.bn-side-menu {
+  flex-direction: column;
+  height: auto;
+  gap: 1px;
+  margin-top: 8px;
+}
+/* Its buttons (ariakit already resets these to fit-content/no padding via
+   `.bn-side-menu .bn-ak-button`) render our own 11px lucide icons
+   (DraftSideMenu, in BlockNoteDocument) — this just adds the same 1px
+   padding, muted color, and hover fill as the section row's own "+"/drag
+   icons, so the two are pixel-for-pixel the same button. */
+.bn-side-menu .bn-ak-button {
+  padding: 3px;
+  background: transparent;
+  box-shadow: none;
+  color: var(--text-muted);
+  border-radius: var(--radius-xs, 4px);
+  cursor: pointer;
+}
+.bn-side-menu .bn-ak-button:hover {
+  background: rgba(0, 0, 0, 0.05);
+}
+/* Whole-block-commented highlight (an unresolved, non-anchored comment) —
+   toggled imperatively via classList in DraftDocument, never touching the
+   block's editable content. */
+.wos-block-highlight {
+  background: var(--fill-highlight);
+  border-radius: var(--radius-xs);
+}
+/* Dragging a block (via the side menu's drag handle) clones it straight
+   into <body> for use as the native drag image (blocknote's own
+   `dragging.ts`), outside our `max-w-[820px]` document column. Once
+   detached, its block content's own `width:100%` resolves against the
+   viewport instead of that column, so the (otherwise near-invisible,
+   opacity:.001) preview stretches full-bleed under the cursor — including
+   over the side panel. Size it to its own content instead. */
+.bn-drag-preview {
+  width: fit-content;
+  max-width: 820px;
+}
+/* The selection formatting toolbar (CommentFormattingToolbar, in
+   BlockNoteDocument) renders its own vertical list of rows rather than
+   BlockNote's default horizontal icon strip — switch the floating panel
+   itself (`.bn-ak-toolbar`'s own default is a horizontal, scrolling pill)
+   to match: a fixed-width column, styled like the app's own dropdown
+   menus/popovers instead of the library's generic white panel. */
+.bn-formatting-toolbar {
+  flex-direction: column;
+  align-items: stretch;
+  width: 180px;
+  padding: 4px;
+  gap: 0;
+  overflow: visible;
+  background-color: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+/* The "/" slash menu (DraftSlashMenu, in BlockNoteDocument) still renders
+   through BlockNote/ariakit's stock SuggestionMenu — unlike the formatting
+   toolbar above, it was never given app CSS, so it shows up as the
+   library's own white panel with a blue keyboard-selection color and a
+   title+subtext line per item. Bring its panel and rows in line with the
+   formatting toolbar's own look, and drop both the subtext line and the
+   keyboard-shortcut badge: with an icon and a clear title per row already,
+   the subtext ("A collapsible group of blocks", etc.) is redundant weight
+   for a menu you're moving through fast with the keyboard, and shortcuts
+   aren't something this app expects anyone to memorize — the full list
+   lives one place, behind the document header's "Shortcuts" entry. */
+.bn-suggestion-menu {
+  width: 220px;
+  padding: 4px;
+  gap: 0;
+  background-color: var(--surface-raised);
+  border: 1px solid var(--border-default);
+  border-radius: var(--radius-sm, 8px);
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+}
+.bn-suggestion-menu-label {
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: var(--text-muted);
+  padding: 6px 10px 2px;
+}
+.bn-suggestion-menu-item {
+  padding: 7px 10px;
+  border-radius: 4px;
+  gap: 8px;
+  color: var(--text-primary);
+}
+.bn-suggestion-menu-item:hover,
+.bn-suggestion-menu-item[aria-selected="true"] {
+  background-color: rgba(0, 0, 0, 0.05);
+  color: var(--text-primary);
+}
+.bn-ak-suggestion-menu-item-section[data-position="right"] {
+  display: none;
+}
+.bn-ak-suggestion-menu-item-section svg {
+  width: 13px;
+  height: 13px;
+}
+.bn-ak-suggestion-menu-item-title {
+  font-size: 12px;
+  font-weight: 500;
+}
+.bn-ak-suggestion-menu-item-subtitle {
+  display: none;
+}
+/* BlockNote's own empty-block placeholder (`Placeholder` extension) defaults
+   to italic and inherits the block's own (serif, body-sized) font — this
+   app's placeholder reads as an editing hint rather than actual writing, so
+   flatten the italic and drop the size a step below the text it's standing
+   in for. */
+.bn-block-content:has(.ProseMirror-trailingBreak:only-child):after {
+  font-style: normal;
+  font-size: 16px;
 }
