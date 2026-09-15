@@ -13,7 +13,7 @@ export function CommentsBody({
   onClose,
 }: {
   comments: Comment[];
-  onToggleResolved: (idx: number) => void;
+  onToggleResolved: (id: string) => void;
   replyDraft: string;
   onReplyChange: (v: string) => void;
   onReplySubmit: () => void;
@@ -36,10 +36,10 @@ export function CommentsBody({
       {comments.length === 0 && (
         <div className={`text-xs font-medium text-[var(--text-muted)] mb-[10px]`}>No comments yet.</div>
       )}
-      {comments.map((c, idx) => (
-        <div key={idx} className={`flex items-start gap-[8px] mb-[10px] ${c.resolved ? "opacity-50" : "opacity-100"}`}>
+      {comments.map((c) => (
+        <div key={c.id} className={`flex items-start gap-[8px] mb-[10px] ${c.resolved ? "opacity-50" : "opacity-100"}`}>
           <button
-            onClick={() => onToggleResolved(idx)}
+            onClick={() => onToggleResolved(c.id)}
             title={c.resolved ? "Mark unresolved" : "Resolve"}
             className={`bg-transparent border border-[var(--border-strong)] rounded-full w-[16px] h-[16px] shrink-0 mt-[2px] cursor-pointer flex items-center justify-center p-0 ${c.resolved ? "text-[var(--text-inverse)]" : "text-transparent"}`}
           >

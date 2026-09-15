@@ -34,6 +34,14 @@ export function draftFilePath(slug: string) {
   return path.join(projectDir(slug), "draft.md");
 }
 
+export function commentsDir(slug: string) {
+  return path.join(projectDir(slug), "comments");
+}
+
+export function commentFilePath(slug: string, id: string) {
+  return path.join(commentsDir(slug), `${id}.md`);
+}
+
 export function inboxFilePath(id: string) {
   return path.join(INBOX_DIR, `${id}.md`);
 }

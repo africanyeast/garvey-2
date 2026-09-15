@@ -2,7 +2,7 @@ import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import matter from "gray-matter";
 import { ensureVault } from "./bootstrap";
-import { VAULT_DIR, projectDir, projectFilePath, notesDir } from "./paths";
+import { VAULT_DIR, projectDir, projectFilePath, notesDir, commentsDir } from "./paths";
 import { slugify } from "./slug";
 import type { Project, TitleCandidate } from "@/app/lib/writing-os/types";
 
@@ -96,6 +96,7 @@ export async function createProject(input: {
 
   await mkdir(projectDir(slug), { recursive: true });
   await mkdir(notesDir(slug), { recursive: true });
+  await mkdir(commentsDir(slug), { recursive: true });
   const file = matter.stringify("", toFrontmatter(project));
   await writeFile(projectFilePath(slug), file, "utf-8");
 

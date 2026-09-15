@@ -31,6 +31,10 @@ export interface Note {
 }
 
 export interface Comment {
+  id: string;
+  /** The block this comment is anchored to — always present; comments are
+   * always scoped to one block in the draft document. */
+  blockId: string;
   text: string;
   time: string;
   resolved: boolean;

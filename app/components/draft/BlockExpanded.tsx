@@ -105,7 +105,7 @@ export function BlockExpanded({ item }: { item: ExpandedItem }) {
             <div className="absolute top-[26px] right-[0] z-[10] bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-md shadow-md p-[14px] w-[270px]">
               <CommentsBody
                 comments={comments}
-                onToggleResolved={(idx) => toggleCommentResolved(b.id, idx)}
+                onToggleResolved={(id) => toggleCommentResolved(b.id, id)}
                 replyDraft={replyDraft}
                 onReplyChange={setReplyDraft}
                 onReplySubmit={() => addReply(b.id)}

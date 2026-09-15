@@ -144,7 +144,7 @@ export function DraftDocument() {
         >
           <CommentsBody
             comments={commentsData[openBlock.id] || []}
-            onToggleResolved={(idx) => toggleCommentResolved(openBlock.id, idx)}
+            onToggleResolved={(id) => toggleCommentResolved(openBlock.id, id)}
             replyDraft={replyDraft}
             onReplyChange={setReplyDraft}
             onReplySubmit={() => {

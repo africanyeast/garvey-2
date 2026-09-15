@@ -8,7 +8,6 @@ import {
   type MouseEvent,
   type ReactNode,
 } from "react";
-import { initialComments } from "@/lib/data";
 import type {
   Comment,
   DocMode,
@@ -69,7 +68,7 @@ interface WritingOSState {
   setPanelMode: (m: PanelPresentation) => void;
   setExpandedMode: (m: PanelPresentation) => void;
   setPanelTab: (t: PanelTab) => void;
-  toggleCommentResolved: (blockId: string, idx: number) => void;
+  toggleCommentResolved: (blockId: string, id: string) => void;
   setReplyDraft: (v: string) => void;
   addReply: (blockId: string, anchor?: string) => void;
   pendingAnchor: string | null;
@@ -92,7 +91,7 @@ const WritingOSContext = createContext<WritingOSState | null>(null);
 
 export function WritingOSProvider({ children }: { children: ReactNode }) {
   const [notesData, setNotesData] = useState<Note[]>([]);
-  const [commentsData, setCommentsData] = useState<Record<string, Comment[]>>(initialComments);
+  const [commentsData, setCommentsData] = useState<Record<string, Comment[]>>({});
   const [inboxItems, setInboxItems] = useState<InboxItem[]>([]);
   const [activeProject, setActiveProject] = useState("");
   const [activeProjectSlug, setActiveProjectSlug] = useState<string | null>(null);
@@ -112,6 +111,21 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     fetch(`/api/projects/${activeProjectSlug}/notes`)
       .then((res) => res.json())
       .then(setNotesData)
+      .catch(() => {});
+  }, [activeProjectSlug]);
+
+  useEffect(() => {
+    if (!activeProjectSlug) {
+      setCommentsData({});
+      return;
+    }
+    fetch(`/api/projects/${activeProjectSlug}/comments`)
+      .then((res) => res.json())
+      .then((comments: Comment[]) => {
+        const grouped: Record<string, Comment[]> = {};
+        for (const c of comments) (grouped[c.blockId] ??= []).push(c);
+        setCommentsData(grouped);
+      })
       .catch(() => {});
   }, [activeProjectSlug]);
 
@@ -194,24 +208,37 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     setNewNoteDraft("@" + activeProject + " ");
   };
 
-  const toggleCommentResolved = (blockId: string, idx: number) => {
-    setCommentsData((prev) => {
-      const list = prev[blockId];
-      if (!list || !list[idx]) return prev;
-      const copy = [...list];
-      copy[idx] = { ...copy[idx], resolved: !copy[idx].resolved };
-      return { ...prev, [blockId]: copy };
-    });
+  const toggleCommentResolved = (blockId: string, id: string) => {
+    if (!activeProjectSlug) return;
+    const list = commentsData[blockId];
+    const comment = list?.find((c) => c.id === id);
+    if (!comment) return;
+    const resolved = !comment.resolved;
+    setCommentsData((prev) => ({
+      ...prev,
+      [blockId]: (prev[blockId] || []).map((c) => (c.id === id ? { ...c, resolved } : c)),
+    }));
+    fetch(`/api/projects/${activeProjectSlug}/comments/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ resolved }),
+    }).catch(() => {});
   };
 
   const addReply = (blockId: string, anchor?: string) => {
     const raw = replyDraft.trim();
-    if (!raw) return;
-    setCommentsData((prev) => ({
-      ...prev,
-      [blockId]: [...(prev[blockId] || []), { text: raw, time: "just now", resolved: false, anchor }],
-    }));
+    if (!raw || !activeProjectSlug) return;
     setReplyDraft("");
+    fetch(`/api/projects/${activeProjectSlug}/comments`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ blockId, text: raw, anchor }),
+    })
+      .then((res) => res.json())
+      .then((comment: Comment) => {
+        setCommentsData((prev) => ({ ...prev, [blockId]: [...(prev[blockId] || []), comment] }));
+      })
+      .catch(() => {});
   };
 
   const addItem = () => {
