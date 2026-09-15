@@ -4,12 +4,12 @@ import matter from "gray-matter";
 import { INBOX_DIR, VAULT_DIR, OS_DIR, STYLES_DIR, OS_CONFIG_PATH, DEFAULT_STYLE_PATH } from "./paths";
 
 const DEFAULT_STYLE_FRONTMATTER = {
-  tone: [] as string[],
+  tone: ["thoughtful", "clear", "encouraging"],
   sentence_length: "Medium (12–20 words)",
-  avoid_words: [] as string[],
-  preferred_transitions: [] as string[],
-  structural_habits: "",
-  register: [] as string[],
+  avoid_words: ["actually", "just", "really", "very", "basically"],
+  preferred_transitions: ["however", "in addition", "for example", "as a result"],
+  structural_habits: "Short paragraphs. Clear section headings. Lists for complex ideas. End with a takeaway.",
+  register: ["conversational", "professional", "accessible"],
 };
 
 const DEFAULT_CONFIG_YAML = `active_style: default\nplugins: []\n`;
