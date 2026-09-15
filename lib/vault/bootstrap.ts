@@ -4,6 +4,10 @@ import matter from "gray-matter";
 import { INBOX_DIR, VAULT_DIR, OS_DIR, STYLES_DIR, OS_CONFIG_PATH, DEFAULT_STYLE_PATH } from "./paths";
 
 const DEFAULT_STYLE_FRONTMATTER = {
+  writing_samples: [
+    "The mistake most tools make is treating structure as an afterthought — something you impose once the thinking is already done. But structure is the thinking. If the shape isn't right, no amount of polish on the sentences will save it.",
+    "I keep coming back to the same test: could someone else have written this sentence? If yes, cut it. The whole point of a personal style is that it couldn't have come from anyone else.",
+  ],
   tone: ["thoughtful", "clear", "encouraging"],
   sentence_length: "Medium (12–20 words)",
   avoid_words: ["actually", "just", "really", "very", "basically"],

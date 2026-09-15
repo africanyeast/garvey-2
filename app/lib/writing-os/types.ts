@@ -87,6 +87,9 @@ export interface TrashedProject {
 }
 
 export interface StyleProfile {
+  /** The primary signal per V1_SPEC.md's own framing — full passages of the
+   * user's own writing, weighted more than the tag fields below. */
+  writing_samples: string[];
   tone: string[];
   sentence_length: string;
   avoid_words: string[];

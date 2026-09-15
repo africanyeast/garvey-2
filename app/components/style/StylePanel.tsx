@@ -1,6 +1,7 @@
 "use client";
 
 import { useState, type FocusEvent, type KeyboardEvent } from "react";
+import { X } from "lucide-react";
 import type { StyleProfile } from "@/app/lib/writing-os/types";
 
 function patchStyle(patch: Partial<StyleProfile>) {
@@ -9,6 +10,63 @@ function patchStyle(patch: Partial<StyleProfile>) {
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   }).catch(() => {});
+}
+
+function wordCount(text: string) {
+  return text.trim().split(/\s+/).filter(Boolean).length;
+}
+
+function WritingSamples({
+  samples,
+  onChange,
+}: {
+  samples: string[];
+  onChange: (next: string[]) => void;
+}) {
+  const [draft, setDraft] = useState("");
+
+  const add = () => {
+    const text = draft.trim();
+    if (!text) return;
+    onChange([...samples, text]);
+    setDraft("");
+  };
+  const remove = (idx: number) => onChange(samples.filter((_, i) => i !== idx));
+
+  return (
+    <div className="flex flex-col gap-[12px]">
+      {samples.map((s, idx) => (
+        <div key={idx} className="wos-row bg-[var(--surface-raised)] border border-[var(--border-strong)] rounded-md py-[18px] px-[20px]">
+          <div className="flex justify-between mb-[10px]">
+            <span className={`text-xs font-medium text-[var(--text-muted)]`}>Sample {idx + 1} · {wordCount(s)} words</span>
+            <button
+              onClick={() => remove(idx)}
+              className="wos-reveal bg-transparent border-none text-[var(--text-muted)] cursor-pointer p-[0]"
+            >
+              <X size={14} strokeWidth={1.8} />
+            </button>
+          </div>
+          <p className={`font-serif text-sm font-normal text-[var(--text-primary)] m-[0] whitespace-pre-wrap`}>{s}</p>
+        </div>
+      ))}
+
+      <div className="bg-[var(--surface-raised)] border border-dashed border-[var(--border-strong)] rounded-md py-[14px] px-[16px]">
+        <textarea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          placeholder="Paste a passage of your own writing..."
+          rows={3}
+          className="font-serif text-sm font-normal w-full border-none outline-none bg-transparent text-[var(--text-primary)] resize-none"
+        />
+        <button
+          onClick={add}
+          className={`text-xs font-medium mt-[8px] text-[var(--text-secondary)] bg-transparent border border-[var(--border-strong)] rounded-md py-[8px] px-[16px] cursor-pointer`}
+        >
+          + Add another sample
+        </button>
+      </div>
+    </div>
+  );
 }
 
 function TagField({
@@ -63,6 +121,7 @@ function TagField({
 }
 
 export function StylePanel({ style }: { style: StyleProfile }) {
+  const [writingSamples, setWritingSamples] = useState(style.writing_samples);
   const [tone, setTone] = useState(style.tone);
   const [avoidWords, setAvoidWords] = useState(style.avoid_words);
   const [transitions, setTransitions] = useState(style.preferred_transitions);
@@ -89,11 +148,13 @@ export function StylePanel({ style }: { style: StyleProfile }) {
           The main way the AI learns your voice — sentence rhythm, habitual phrasing, structural tics. This matters more than the tags below.
         </p>
 
-        <div className="flex flex-col gap-[12px]">
-          <div className={`text-xs font-medium text-[var(--text-muted)] py-[8px]`}>
-            No samples yet — writing-sample capture isn&apos;t wired up in this pass.
-          </div>
-        </div>
+        <WritingSamples
+          samples={writingSamples}
+          onChange={(next) => {
+            setWritingSamples(next);
+            patchStyle({ writing_samples: next });
+          }}
+        />
       </div>
 
       <div className="bg-[var(--surface-sunken)] rounded-lg py-[22px] px-[24px]">
