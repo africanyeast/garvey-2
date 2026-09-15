@@ -14,8 +14,14 @@ export const STYLES_DIR = path.join(OS_DIR, "styles");
 export const OS_CONFIG_PATH = path.join(OS_DIR, "config.yaml");
 export const DEFAULT_STYLE_PATH = path.join(STYLES_DIR, "default.md");
 
+export const TRASH_DIR = path.join(VAULT_DIR, "trash");
+
 export function projectDir(slug: string) {
   return path.join(VAULT_DIR, `project-${slug}`);
+}
+
+export function trashedProjectDir(dirName: string) {
+  return path.join(TRASH_DIR, dirName);
 }
 
 export function projectFilePath(slug: string) {

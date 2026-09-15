@@ -77,6 +77,15 @@ export interface Project {
   status: string;
 }
 
+export interface TrashedProject {
+  /** Trash folder name — an opaque display id, not a live route (no
+   * restore/permanent-delete yet, so nothing links to it). */
+  dirName: string;
+  slug: string;
+  title: string;
+  trashedAt: string;
+}
+
 export interface StyleProfile {
   tone: string[];
   sentence_length: string;

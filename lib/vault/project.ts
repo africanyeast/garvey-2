@@ -1,10 +1,11 @@
-import { readdir, readFile, writeFile, mkdir } from "node:fs/promises";
+import { readdir, readFile, writeFile, mkdir, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
+import path from "node:path";
 import matter from "gray-matter";
 import { ensureVault } from "./bootstrap";
-import { VAULT_DIR, projectDir, projectFilePath, notesDir, commentsDir } from "./paths";
+import { VAULT_DIR, TRASH_DIR, projectDir, projectFilePath, trashedProjectDir, notesDir, commentsDir } from "./paths";
 import { slugify } from "./slug";
-import type { Project, TitleCandidate } from "@/app/lib/writing-os/types";
+import type { Project, TitleCandidate, TrashedProject } from "@/app/lib/writing-os/types";
 
 interface ProjectFrontmatter {
   title: string;
@@ -101,6 +102,61 @@ export async function createProject(input: {
   await writeFile(projectFilePath(slug), file, "utf-8");
 
   return { slug, ...project };
+}
+
+// Moves the whole project-{slug} directory (project.md, notes/, draft.md,
+// comments/ — everything) under vault/trash/ rather than deleting it, so
+// nothing is destroyed. Restore/permanent-delete aren't built yet; the
+// directory just sits there until they are.
+export async function deleteProject(slug: string): Promise<boolean> {
+  await ensureVault();
+  if (!existsSync(projectDir(slug))) return false;
+
+  await mkdir(TRASH_DIR, { recursive: true });
+  let dirName = `project-${slug}`;
+  let n = 2;
+  while (existsSync(trashedProjectDir(dirName))) {
+    dirName = `project-${slug}-${n}`;
+    n += 1;
+  }
+  const dest = trashedProjectDir(dirName);
+  await rename(projectDir(slug), dest);
+
+  const filePath = path.join(dest, "project.md");
+  const raw = await readFile(filePath, "utf-8");
+  const { data, content } = matter(raw);
+  const file = matter.stringify(content, { ...data, trashed_at: new Date().toISOString() });
+  await writeFile(filePath, file, "utf-8");
+
+  return true;
+}
+
+export async function listTrashedProjects(): Promise<TrashedProject[]> {
+  await ensureVault();
+  if (!existsSync(TRASH_DIR)) return [];
+  const entries = await readdir(TRASH_DIR, { withFileTypes: true });
+  const dirNames = entries.filter((e) => e.isDirectory() && e.name.startsWith("project-")).map((e) => e.name);
+
+  const items = await Promise.all(
+    dirNames.map(async (dirName): Promise<TrashedProject | null> => {
+      try {
+        const raw = await readFile(path.join(trashedProjectDir(dirName), "project.md"), "utf-8");
+        const { data } = matter(raw);
+        const fm = data as ProjectFrontmatter & { trashed_at?: string };
+        return {
+          dirName,
+          slug: dirName.replace(/^project-/, ""),
+          title: fm.title ?? dirName,
+          trashedAt: fm.trashed_at ?? "",
+        };
+      } catch {
+        return null;
+      }
+    })
+  );
+  return items
+    .filter((x): x is TrashedProject => x !== null)
+    .sort((a, b) => b.trashedAt.localeCompare(a.trashedAt));
 }
 
 export async function updateProject(
