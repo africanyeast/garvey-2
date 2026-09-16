@@ -14,7 +14,22 @@ import {
   useExtensionState,
 } from "@blocknote/react";
 import { BlockNoteView } from "@blocknote/ariakit";
-import { Bold, ChevronsUpDown, GripVertical, Italic, Link, MessageCircle, Strikethrough, Underline } from "lucide-react";
+import {
+  Bold,
+  ChevronsUpDown,
+  GripVertical,
+  Heading1,
+  Heading2,
+  Heading3,
+  Italic,
+  Link,
+  MessageCircle,
+  Palette,
+  Quote,
+  Strikethrough,
+  Text,
+  Underline,
+} from "lucide-react";
 import { useState } from "react";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { MenuRow } from "@/app/components/shared/MenuRow";
@@ -145,13 +160,132 @@ function LinkMenuItem() {
             }
           }}
           placeholder="Paste a link..."
-          className="text-xs font-medium w-full border-none outline-none bg-transparent text-[var(--text-primary)]"
+          className="font-sans text-xs font-medium w-full border-none outline-none bg-transparent text-[var(--text-primary)]"
         />
       </form>
     );
   }
 
   return <MenuRow icon={Link} label="Link" onClick={() => setEditingUrl(editor.getSelectedLinkUrl() ?? "")} />;
+}
+
+/**
+ * Text color, as a row of swatches in place of BlockNote's own popover —
+ * matching how "Link" above swaps its row for an inline input instead of a
+ * separate floating panel. Uses BlockNote's own built-in `textColor` style
+ * keys/values (see `defaultStyleSpecs` and the matching `[data-text-color]`
+ * CSS BlockNote ships), so no new color system is introduced here.
+ */
+const TEXT_COLORS = [
+  { key: "default", swatch: "var(--text-primary)" },
+  { key: "gray", swatch: "#9b9a97" },
+  { key: "brown", swatch: "#64473a" },
+  { key: "red", swatch: "#e03e3e" },
+  { key: "orange", swatch: "#d9730d" },
+  { key: "yellow", swatch: "#dfab01" },
+  { key: "green", swatch: "#4d6461" },
+  { key: "blue", swatch: "#0b6e99" },
+  { key: "purple", swatch: "#6940a5" },
+  { key: "pink", swatch: "#ad1a72" },
+] as const;
+
+function ColorMenuItem() {
+  const editor = useBlockNoteEditor(draftSchema);
+  const [open, setOpen] = useState(false);
+  const activeColor = useEditorState({
+    editor,
+    selector: ({ editor }) => editor.getActiveStyles().textColor ?? "default",
+  });
+
+  if (open) {
+    return (
+      <div className="flex items-center flex-wrap gap-[6px] py-[7px] px-[10px]">
+        {TEXT_COLORS.map((color) => (
+          <button
+            key={color.key}
+            title={color.key}
+            onClick={() => {
+              editor.focus();
+              editor.addStyles({ textColor: color.key });
+              setOpen(false);
+            }}
+            className="w-[16px] h-[16px] rounded-full border cursor-pointer p-0"
+            style={{
+              backgroundColor: color.swatch,
+              borderColor: activeColor === color.key ? "var(--text-primary)" : "var(--border-default)",
+            }}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  return <MenuRow icon={Palette} label="Color" active={activeColor !== "default"} onClick={() => setOpen(true)} />;
+}
+
+/**
+ * Typography — the selected block's own type/level, as a "Turn into"-style
+ * expanding list (same inline-expand pattern as Link/Color above) rather
+ * than BlockNote's default separate block-type dropdown. Covers the block
+ * types this app's schema actually has a distinct rendering for (paragraph,
+ * the three heading levels, quote) — lists/sections have their own
+ * dedicated entry points (slash menu, side menu) and aren't "typography" in
+ * this sense.
+ */
+const TYPOGRAPHY_OPTIONS = [
+  { key: "paragraph", label: "Text", icon: Text },
+  { key: "heading1", label: "Heading 1", icon: Heading1 },
+  { key: "heading2", label: "Heading 2", icon: Heading2 },
+  { key: "heading3", label: "Heading 3", icon: Heading3 },
+  { key: "quote", label: "Quote", icon: Quote },
+] as const;
+
+type TypographyKey = (typeof TYPOGRAPHY_OPTIONS)[number]["key"];
+
+function typographyKeyOf(block: { type: string; props?: Record<string, unknown> }): TypographyKey {
+  if (block.type === "heading") {
+    const level = block.props?.level;
+    if (level === 1) return "heading1";
+    if (level === 2) return "heading2";
+    return "heading3";
+  }
+  if (block.type === "quote") return "quote";
+  return "paragraph";
+}
+
+function TypographyMenuItem() {
+  const editor = useBlockNoteEditor(draftSchema);
+  const [open, setOpen] = useState(false);
+  const activeKey = useEditorState({
+    editor,
+    selector: ({ editor }) => typographyKeyOf(editor.getTextCursorPosition().block),
+  });
+
+  if (open) {
+    return (
+      <div className="flex flex-col">
+        {TYPOGRAPHY_OPTIONS.map((opt) => (
+          <MenuRow
+            key={opt.key}
+            icon={opt.icon}
+            label={opt.label}
+            active={activeKey === opt.key}
+            onClick={() => {
+              const block = editor.getTextCursorPosition().block;
+              if (opt.key === "paragraph") editor.updateBlock(block, { type: "paragraph" });
+              else if (opt.key === "quote") editor.updateBlock(block, { type: "quote" });
+              else editor.updateBlock(block, { type: "heading", props: { level: Number(opt.key.slice(-1)) as 1 | 2 | 3 } });
+              editor.focus();
+              setOpen(false);
+            }}
+          />
+        ))}
+      </div>
+    );
+  }
+
+  const active = TYPOGRAPHY_OPTIONS.find((o) => o.key === activeKey)!;
+  return <MenuRow icon={active.icon} label={active.label} onClick={() => setOpen(true)} />;
 }
 
 /**
@@ -172,10 +306,13 @@ function CommentFormattingToolbar() {
   return (
     <FormattingToolbar>
       <div className="flex flex-col">
+        <TypographyMenuItem />
+        <div className="h-px bg-[var(--border-default)] my-[4px]" />
         {BASIC_STYLES.map((item) => (
           <StyleMenuItem key={item.key} item={item} />
         ))}
         <LinkMenuItem />
+        <ColorMenuItem />
         <div className="h-px bg-[var(--border-default)] my-[4px]" />
         <MenuRow
           icon={MessageCircle}

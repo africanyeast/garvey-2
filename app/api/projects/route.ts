@@ -7,12 +7,9 @@ export async function GET() {
 }
 
 export async function POST(req: NextRequest) {
-  const body = await req.json();
-  if (typeof body.title !== "string" || !body.title.trim()) {
-    return NextResponse.json({ error: "title is required" }, { status: 400 });
-  }
+  const body = await req.json().catch(() => ({}));
   const project = await createProject({
-    title: body.title,
+    title: typeof body.title === "string" ? body.title : undefined,
     problem: body.problem,
     agenda: body.agenda,
     goal: body.goal,

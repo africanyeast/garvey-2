@@ -16,6 +16,28 @@ export const DEFAULT_STYLE_PATH = path.join(STYLES_DIR, "default.md");
 
 export const TRASH_DIR = path.join(VAULT_DIR, "trash");
 
+/** Files attached to a note/inbox item via the composer's file picker —
+ * global (not per-project) since inbox captures aren't scoped to a project. */
+export const UPLOADS_DIR = path.join(VAULT_DIR, "uploads");
+
+export function uploadFilePath(name: string) {
+  return path.join(UPLOADS_DIR, name);
+}
+
+// A trashed note keeps living outside its project folder (so deleting a
+// note never touches `notes/`'s listing), named `<slug>__<id>.md` so one
+// flat directory can hold trashed notes from every project.
+export const TRASH_NOTES_DIR = path.join(TRASH_DIR, "notes");
+export const TRASH_INBOX_DIR = path.join(TRASH_DIR, "inbox");
+
+export function trashedNoteFilePath(slug: string, id: string) {
+  return path.join(TRASH_NOTES_DIR, `${slug}__${id}.md`);
+}
+
+export function trashedInboxFilePath(id: string) {
+  return path.join(TRASH_INBOX_DIR, `${id}.md`);
+}
+
 export function projectDir(slug: string) {
   return path.join(VAULT_DIR, `project-${slug}`);
 }

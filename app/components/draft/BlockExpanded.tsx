@@ -1,17 +1,19 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useState, type KeyboardEvent } from "react";
-import { ArrowUp, MessageCircle } from "lucide-react";
+import { useCallback, useLayoutEffect, useMemo, useState } from "react";
+import { MessageCircle } from "lucide-react";
 import { useCreateBlockNote } from "@blocknote/react";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useDraftEditor } from "@/app/lib/writing-os/editor-context";
 import { nearestSectionId } from "@/app/lib/writing-os/sections";
+import { buildProjectTargets, sectionMentionTargets, blockMentionTargets, type MentionTarget } from "@/app/lib/writing-os/mentions";
 import { CommentsBody } from "@/app/components/shared/CommentsBody";
 import { NoteRow } from "@/app/components/shared/NoteRow";
+import { NoteComposer } from "@/app/components/shared/NoteComposer";
 import { PanelShell } from "@/app/components/panel/PanelShell";
 import { BlockNoteDocument } from "@/app/components/draft/BlockNoteDocument";
 import { draftSchema } from "@/app/lib/writing-os/schema";
-import type { ExpandedItem } from "@/app/lib/writing-os/types";
+import type { Attachment, ExpandedItem } from "@/app/lib/writing-os/types";
 
 export function BlockExpanded({ item }: { item: ExpandedItem }) {
   const {
@@ -22,13 +24,15 @@ export function BlockExpanded({ item }: { item: ExpandedItem }) {
     setReplyDraft,
     addReply,
     toggleCommentResolved,
-    expandedMode,
-    setExpandedMode,
     notesData,
     enrichNote,
     openExpanded,
     toggleNoteResolved,
+    removeNoteTag,
+    deleteNote,
     addNoteToSection,
+    projectsList,
+    activeProjectSlug,
   } = useWritingOS();
   const { editor: sharedEditor, document: draftDoc, syncDocument } = useDraftEditor();
 
@@ -37,6 +41,17 @@ export function BlockExpanded({ item }: { item: ExpandedItem }) {
   // context state, so toggling it here would pop its comments open too.
   const [commentsOpen, setCommentsOpen] = useState(false);
   const [noteDraft, setNoteDraft] = useState("");
+  const [noteLinks, setNoteLinks] = useState<MentionTarget[]>([]);
+  const [noteAttachments, setNoteAttachments] = useState<Attachment[]>([]);
+
+  const mentionTargets: MentionTarget[] = useMemo(() => {
+    if (!activeProjectSlug) return buildProjectTargets(projectsList);
+    return [
+      ...buildProjectTargets(projectsList),
+      ...sectionMentionTargets(draftDoc, activeProjectSlug),
+      ...blockMentionTargets(draftDoc, activeProjectSlug),
+    ];
+  }, [projectsList, draftDoc, activeProjectSlug]);
 
   // Block ids are always strings (`ExpandedItem.key` is `string | number`
   // only because notes/inbox items key by numeric id too).
@@ -77,18 +92,16 @@ export function BlockExpanded({ item }: { item: ExpandedItem }) {
 
   const submitNote = () => {
     if (!sectionId) return;
-    addNoteToSection(sectionId, noteDraft);
+    addNoteToSection(sectionId, noteDraft, draftDoc, noteLinks, noteAttachments);
     setNoteDraft("");
+    setNoteLinks([]);
+    setNoteAttachments([]);
   };
 
+  // Always fullscreen — no docked/right-panel state for a block anymore,
+  // so no minimize control either, just close.
   return (
-    <PanelShell
-      mode={expandedMode}
-      onFullscreen={() => setExpandedMode("fullscreen")}
-      onRestore={() => setExpandedMode("docked")}
-      onClose={closeExpanded}
-      closeTitle={closeTitle}
-    >
+    <PanelShell mode="fullscreen" onClose={closeExpanded} closeTitle={closeTitle}>
       <div className="max-w-[680px] my-[0] mx-[auto] pt-[28px] px-[28px] pb-[80px]">
         <div className="relative">
           <button
@@ -121,7 +134,7 @@ export function BlockExpanded({ item }: { item: ExpandedItem }) {
         </div>
 
         <div className="mt-[32px] pt-[20px] border-t border-t-[var(--border-default)]">
-          <div className="text-xs font-bold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-[8px]">Notes</div>
+          <div className="font-sans text-xs font-bold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-[8px]">Notes</div>
           {sectionNotes.length > 0 ? (
             <div className="flex flex-col divide-y divide-[var(--border-default)] mb-[10px]">
               {sectionNotes.map((n) => (
@@ -131,32 +144,28 @@ export function BlockExpanded({ item }: { item: ExpandedItem }) {
                   tag={n.tag}
                   time={n.time}
                   resolved={n.resolved}
-                  attachment={n.attachment}
+                  attachments={n.attachments}
                   onOpen={() => openExpanded("note", n.id, item)}
                   onToggleResolved={() => toggleNoteResolved(n.id)}
+                  onRemoveTag={() => removeNoteTag(n.id)}
+                  onDelete={() => deleteNote(n.id)}
                 />
               ))}
             </div>
           ) : (
             <div className="text-xs font-medium text-[var(--text-muted)] mb-[10px]">No notes filed here yet.</div>
           )}
-          <div className="flex items-center gap-[8px] bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-md pt-[8px] pr-[8px] pb-[8px] pl-[12px]">
-            <input
-              value={noteDraft}
-              onChange={(e) => setNoteDraft(e.target.value)}
-              onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  submitNote();
-                }
-              }}
-              placeholder="Add a note..."
-              className="text-[13px] font-normal flex-1 min-w-0 border-none outline-none bg-transparent text-[var(--text-primary)]"
-            />
-            <button onClick={submitNote} title="Add" className="bg-transparent border-none text-[var(--text-muted)] cursor-pointer p-[2px] flex shrink-0">
-              <ArrowUp size={15} strokeWidth={2} />
-            </button>
-          </div>
+          <NoteComposer
+            value={noteDraft}
+            onChange={setNoteDraft}
+            links={noteLinks}
+            onLinksChange={setNoteLinks}
+            attachments={noteAttachments}
+            onAttachmentsChange={setNoteAttachments}
+            onSubmit={submitNote}
+            placeholder="Add a note... @ a project, # a section or block"
+            mentionTargets={mentionTargets}
+          />
         </div>
       </div>
     </PanelShell>

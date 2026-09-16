@@ -1,10 +1,14 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createNote, listNotes } from "@/lib/vault/notes";
+import { createNote, listNotesForProjectView } from "@/lib/vault/notes";
+import { listInboxItemsForProject } from "@/lib/vault/inbox";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
-  const notes = await listNotes(slug);
-  return NextResponse.json(notes);
+  // A project's Notes tab: its own notes, notes cross-listed from other
+  // projects, and raw Inbox captures "@"-tagged with this project — all
+  // three ways a note can end up filed here.
+  const [notes, inboxNotes] = await Promise.all([listNotesForProjectView(slug), listInboxItemsForProject(slug)]);
+  return NextResponse.json([...notes, ...inboxNotes].sort((a, b) => a.id.localeCompare(b.id)));
 }
 
 export async function POST(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
@@ -16,7 +20,8 @@ export async function POST(req: NextRequest, { params }: { params: Promise<{ slu
   const note = await createNote(slug, {
     body: body.body,
     bucket: body.bucket ?? null,
-    attachment: body.attachment,
+    attachments: body.attachments,
+    links: body.links,
   });
   return NextResponse.json(note, { status: 201 });
 }

@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import dynamic from "next/dynamic";
+import { useRouter } from "next/navigation";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useDraftEditor } from "@/app/lib/writing-os/editor-context";
 import { ProjectBrief } from "@/app/components/brief/ProjectBrief";
@@ -10,8 +11,21 @@ import { SidePanel } from "@/app/components/panel/SidePanel";
 import { PanelShell } from "@/app/components/panel/PanelShell";
 import { DraftEditor } from "@/app/components/draft/DraftEditor";
 import { NoteExpanded } from "@/app/components/draft/NoteExpanded";
+import { PdfViewerPanel } from "@/app/components/shared/PdfViewerPanel";
 import type { Project } from "@/app/lib/writing-os/types";
+import { projectDisplayTitle } from "@/app/lib/writing-os/types";
 import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
+
+function patchProject(slug: string, patch: Partial<Omit<Project, "slug">>): Promise<string | undefined> {
+  return fetch(`/api/projects/${slug}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  })
+    .then((res) => res.json())
+    .then((p: Project) => p.updatedAt)
+    .catch(() => undefined);
+}
 
 // All three create/touch a BlockNote editor, which touches `window` — load
 // client-only.
@@ -25,34 +39,115 @@ const DraftEditorProvider = dynamic(
 export function DraftScreen({
   project,
   initialDocument,
+  openBriefByDefault = false,
+  openSectionId,
+  openBlockId,
 }: {
   project: Project;
   initialDocument: DraftPartialBlock[];
+  openBriefByDefault?: boolean;
+  /** Landed on from clicking a "#" tag chip elsewhere (`?section=`/`?block=`
+   * on the URL) — opens straight to that section/block, once, then the
+   * param is stripped, same treatment as `openBriefByDefault`/`?new=1`. */
+  openSectionId?: string;
+  openBlockId?: string;
 }) {
   // The single draft-wide BlockNote editor (and everything downstream that
   // reads/writes it — the main document, the side panel's block list, the
   // expanded-block panel, the preview) lives behind this one provider.
   return (
     <DraftEditorProvider projectSlug={project.slug} initialDocument={initialDocument}>
-      <DraftScreenInner project={project} />
+      {/* `key` forces a remount on project switch so title/subtitle state
+       * (and the "open brief by default" state) always starts fresh for the
+       * new project, instead of needing an effect to resync it. */}
+      <DraftScreenInner
+        key={project.slug}
+        project={project}
+        openBriefByDefault={openBriefByDefault}
+        openSectionId={openSectionId}
+        openBlockId={openBlockId}
+      />
     </DraftEditorProvider>
   );
 }
 
-function DraftScreenInner({ project }: { project: Project }) {
-  const title = project.title;
-  const subtitle = project.agenda;
-  const { docMode, setDocMode, expandedItem, panelMode, setActiveProject, setActiveProjectSlug } = useWritingOS();
+function DraftScreenInner({
+  project,
+  openBriefByDefault,
+  openSectionId,
+  openBlockId,
+}: {
+  project: Project;
+  openBriefByDefault: boolean;
+  openSectionId?: string;
+  openBlockId?: string;
+}) {
+  const [title, setTitle] = useState(project.title);
+  const [subtitle, setSubtitle] = useState(project.subtitle);
+  const [updatedAt, setUpdatedAt] = useState(project.updatedAt);
+  const {
+    docMode,
+    setDocMode,
+    expandedItem,
+    panelMode,
+    pdfViewer,
+    setActiveProject,
+    setActiveProjectSlug,
+    patchProjectInList,
+    openSectionPanel,
+    openExpanded,
+  } = useWritingOS();
   // Aliased from the global `document` it'd otherwise shadow.
-  const { document: draftDoc } = useDraftEditor();
-  const [briefOpen, setBriefOpen] = useState(false);
+  const { document: draftDoc, savedAt } = useDraftEditor();
+  const router = useRouter();
+  // A brand-new project (created from the sidebar) opens straight into the
+  // brief, Notion-style, until the user closes it.
+  const [briefOpen, setBriefOpen] = useState(openBriefByDefault);
+
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
 
   useEffect(() => {
-    setActiveProject(project.title);
+    if (openBriefByDefault) {
+      router.replace(`/${project.slug}`);
+    }
+    // Only ever meant to strip the `?new=1` marker once, right after landing
+    // on a freshly created project — not on every re-render.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    if (openSectionId) openSectionPanel(openSectionId);
+    else if (openBlockId) openExpanded("block", openBlockId);
+    if (openSectionId || openBlockId) router.replace(`/${project.slug}`);
+    // Same one-shot treatment as `?new=1` above: only meant to fire once,
+    // right after landing from a tag chip's `?section=`/`?block=` link.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  useEffect(() => {
+    setActiveProject(projectDisplayTitle(project));
     setActiveProjectSlug(project.slug);
     return () => setActiveProjectSlug(null);
-  }, [project.slug, project.title, setActiveProject, setActiveProjectSlug]);
+  }, [project, setActiveProject, setActiveProjectSlug]);
+
+  // Adjusting state from a prop change during render (not in an effect) —
+  // recommended pattern for "sync local state to an external value that
+  // just changed" instead of an extra render pass via useEffect.
+  const [prevSavedAt, setPrevSavedAt] = useState(savedAt);
+  if (savedAt !== prevSavedAt) {
+    setPrevSavedAt(savedAt);
+    if (savedAt) setUpdatedAt(savedAt);
+  }
+
+  const saveTitle = (text: string) => {
+    setTitle(text);
+    patchProjectInList(project.slug, { title: text });
+    patchProject(project.slug, { title: text }).then((updatedAt) => updatedAt && setUpdatedAt(updatedAt));
+  };
+  const saveSubtitle = (text: string) => {
+    setSubtitle(text);
+    patchProject(project.slug, { subtitle: text }).then((updatedAt) => updatedAt && setUpdatedAt(updatedAt));
+  };
 
   // The main document always stays visible — an expanded block/note takes
   // over the right dock (in place of the notes panel) rather than replacing
@@ -71,13 +166,21 @@ function DraftScreenInner({ project }: { project: Project }) {
           <DraftEditor
             title={title}
             subtitle={subtitle}
+            updatedAt={updatedAt}
+            onTitleChange={saveTitle}
+            onSubtitleChange={saveSubtitle}
             onOpenBrief={() => setBriefOpen(true)}
             onOpenShortcuts={() => setShortcutsOpen(true)}
           />
         </div>
       </div>
 
-      {draftFull ? (
+      {/* A PDF takes over the right-hand slot — same as an expanded block/
+       * note or the notes panel — so opening one from inside an expanded
+       * note still leaves that note right where it was once it's closed. */}
+      {pdfViewer ? (
+        <PdfViewerPanel />
+      ) : draftFull ? (
         draftFull.kind === "block" ? (
           <BlockExpanded item={draftFull} />
         ) : (

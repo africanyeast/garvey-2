@@ -1,8 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
-import { createInboxItem, listInboxItems } from "@/lib/vault/inbox";
+import { createInboxItem, listGlobalFeed } from "@/lib/vault/inbox";
 
 export async function GET() {
-  const items = await listInboxItems();
+  const items = await listGlobalFeed();
   return NextResponse.json(items);
 }
 
@@ -13,8 +13,8 @@ export async function POST(req: NextRequest) {
   }
   const item = await createInboxItem({
     body: body.body,
-    tag: body.tag ?? null,
-    attachment: body.attachment,
+    attachments: body.attachments,
+    links: body.links,
   });
   return NextResponse.json(item, { status: 201 });
 }

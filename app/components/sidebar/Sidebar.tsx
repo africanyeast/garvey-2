@@ -1,23 +1,58 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useRef, useState, type MouseEvent } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { FileText, Inbox, Plus, Trash2, Feather } from "lucide-react";
+import { EllipsisVertical, FileText, Inbox, Plus, Trash2, Feather, GripVertical } from "lucide-react";
+import {
+  DndContext,
+  closestCenter,
+  PointerSensor,
+  useSensor,
+  useSensors,
+  type DragEndEvent,
+} from "@dnd-kit/core";
+import {
+  SortableContext,
+  verticalListSortingStrategy,
+  useSortable,
+  arrayMove,
+} from "@dnd-kit/sortable";
+import { CSS } from "@dnd-kit/utilities";
 import type { Project } from "@/app/lib/writing-os/types";
+import { projectDisplayTitle } from "@/app/lib/writing-os/types";
+import { useWritingOS } from "@/app/lib/writing-os/context";
 import { RowIconButton } from "@/app/components/shared/RowIconButton";
+import { DropdownMenu } from "@/app/components/shared/DropdownMenu";
+import { MenuRow } from "@/app/components/shared/MenuRow";
+import { ConfirmDialog } from "@/app/components/shared/ConfirmDialog";
 
 export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
-  const [projects, setProjects] = useState<Project[]>([]);
+  const {
+    projectsList: projects,
+    addProjectToList,
+    removeProjectFromList,
+    reorderProjectsInList,
+  } = useWritingOS();
+  const [menuOpenSlug, setMenuOpenSlug] = useState<string | null>(null);
+  const [confirmProject, setConfirmProject] = useState<Project | null>(null);
+  const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
+  // A drag that actually moved the item ends in a native "click" on the
+  // anchor right after pointerup — swallow that one click so dragging a
+  // project doesn't also navigate to it.
+  const justDraggedSlug = useRef<string | null>(null);
 
-  useEffect(() => {
-    fetch("/api/projects")
-      .then((res) => res.json())
-      .then(setProjects)
-      .catch(() => {});
-  }, [pathname]);
+  const handleDragEnd = (e: DragEndEvent) => {
+    const { active, over } = e;
+    if (!over || active.id === over.id) return;
+    const oldIndex = projects.findIndex((p) => p.slug === active.id);
+    const newIndex = projects.findIndex((p) => p.slug === over.id);
+    if (oldIndex === -1 || newIndex === -1) return;
+    justDraggedSlug.current = active.id as string;
+    reorderProjectsInList(arrayMove(projects, oldIndex, newIndex).map((p) => p.slug));
+  };
 
   const isInbox = pathname === "/inbox" || pathname === "/";
   const isStyle = pathname === "/style";
@@ -26,28 +61,28 @@ export function Sidebar() {
     !isInbox && !isStyle && !isTrash ? pathname?.split("/").filter(Boolean)[0] : null;
 
   const createProject = async () => {
-    const title = window.prompt("Project title")?.trim();
-    if (!title) return;
     const res = await fetch("/api/projects", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ title }),
+      body: JSON.stringify({}),
     });
     if (!res.ok) return;
     const project: Project = await res.json();
-    router.push(`/${project.slug}`);
+    addProjectToList(project);
+    // `?new=1` tells DraftScreen to open the brief by default, Notion-style.
+    router.push(`/${project.slug}?new=1`);
   };
 
   const deleteProject = async (project: Project) => {
-    if (!window.confirm(`Move "${project.title}" to trash?`)) return;
     const res = await fetch(`/api/projects/${project.slug}`, { method: "DELETE" });
     if (!res.ok) return;
-    setProjects((prev) => prev.filter((p) => p.slug !== project.slug));
+    removeProjectFromList(project.slug);
     if (activeSlug === project.slug) router.push("/inbox");
   };
 
   return (
-    <div className="w-[252px] shrink-0 bg-neutral-0 border-r border-[var(--border-default)] flex flex-col py-[20px] px-[14px] gap-[22px] overflow-y-auto overscroll-contain">
+    <div className="w-[252px] shrink-0 bg-neutral-0 border-r border-[var(--border-default)] flex flex-col py-[20px] px-[14px] gap-[22px] overflow-y-auto overscroll-contain relative">
+      {menuOpenSlug && <div className="fixed inset-0 z-[9]" onClick={() => setMenuOpenSlug(null)} />}
       <div className="flex items-center gap-[8px] px-[6px]">
         <span className={`text-xs font-bold uppercase tracking-[0.08em] text-[var(--text-muted)]`}>
           Garvey
@@ -67,27 +102,29 @@ export function Sidebar() {
           Projects
         </div>
 
-        {projects.map((project) => (
-          <Link
-            key={project.slug}
-            href={`/${project.slug}`}
-            className={`wos-row flex items-center gap-[8px] py-[9px] pr-[8px] pl-[10px] rounded-sm cursor-pointer ${activeSlug === project.slug ? "border border-[var(--border-default)]" : "bg-transparent"}`}
-          >
-            <FileText size={15} className="shrink-0 text-[var(--text-primary)]" />
-            <span className={`text-xs font-semibold text-[var(--text-primary)] flex-1 overflow-hidden text-ellipsis whitespace-nowrap`}>
-              {project.title}
-            </span>
-            <RowIconButton
-              icon={<Trash2 size={13} strokeWidth={1.8} />}
-              label="Move to trash"
-              onClick={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                deleteProject(project);
-              }}
-            />
-          </Link>
-        ))}
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={projects.map((p) => p.slug)} strategy={verticalListSortingStrategy}>
+            {projects.map((project) => (
+              <SortableProjectRow
+                key={project.slug}
+                project={project}
+                active={activeSlug === project.slug}
+                menuOpen={menuOpenSlug === project.slug}
+                onToggleMenu={() => setMenuOpenSlug(menuOpenSlug === project.slug ? null : project.slug)}
+                onDelete={() => {
+                  setMenuOpenSlug(null);
+                  setConfirmProject(project);
+                }}
+                onClickCapture={(e) => {
+                  if (justDraggedSlug.current === project.slug) {
+                    e.preventDefault();
+                    justDraggedSlug.current = null;
+                  }
+                }}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
 
         <button
           onClick={createProject}
@@ -116,6 +153,84 @@ export function Sidebar() {
           <span className={`text-[12px] font-semibold text-[var(--text-primary)]`}>Trash</span>
         </Link>
       </div>
+
+      {confirmProject && (
+        <ConfirmDialog
+          title="Move to trash?"
+          message={`"${projectDisplayTitle(confirmProject)}" will be moved to trash. You can restore it later.`}
+          confirmLabel="Move to trash"
+          onConfirm={() => {
+            deleteProject(confirmProject);
+            setConfirmProject(null);
+          }}
+          onCancel={() => setConfirmProject(null)}
+        />
+      )}
     </div>
+  );
+}
+
+function SortableProjectRow({
+  project,
+  active,
+  menuOpen,
+  onToggleMenu,
+  onDelete,
+  onClickCapture,
+}: {
+  project: Project;
+  active: boolean;
+  menuOpen: boolean;
+  onToggleMenu: () => void;
+  onDelete: () => void;
+  onClickCapture: (e: MouseEvent) => void;
+}) {
+  const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
+    id: project.slug,
+  });
+
+  return (
+    <Link
+      ref={setNodeRef}
+      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }}
+      href={`/${project.slug}`}
+      onClickCapture={onClickCapture}
+      className={`wos-row group relative flex items-center gap-[6px] py-[9px] pr-[8px] pl-[6px] rounded-sm cursor-pointer ${active ? "border border-[var(--border-default)]" : "bg-transparent"}`}
+    >
+      <span
+        {...attributes}
+        {...listeners}
+        className={`shrink-0 cursor-grab text-[var(--text-muted)] touch-none ${isDragging ? "" : "opacity-0 group-hover:opacity-100"}`}
+        onClick={(e) => e.preventDefault()}
+      >
+        <GripVertical size={13} strokeWidth={1.8} />
+      </span>
+      <FileText size={15} className="shrink-0 text-[var(--text-primary)]" />
+      <span className="text-xs font-semibold flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--text-primary)]">
+        {projectDisplayTitle(project)}
+      </span>
+      <RowIconButton
+        icon={<EllipsisVertical size={13} strokeWidth={1.8} />}
+        label="Project options"
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onToggleMenu();
+        }}
+      />
+      {menuOpen && (
+        <DropdownMenu className="right-[4px]">
+          <MenuRow
+            icon={Trash2}
+            label="Delete"
+            onClick={(e) => {
+              e.preventDefault();
+              e.stopPropagation();
+              onDelete();
+            }}
+          />
+        </DropdownMenu>
+      )}
+    </Link>
   );
 }

@@ -1,8 +1,10 @@
 "use client";
 
-import { useState, type FocusEvent, type KeyboardEvent } from "react";
-import { GripVertical, Plus, X } from "lucide-react";
+import { useState, type DragEvent, type FocusEvent } from "react";
+import { GripVertical, X } from "lucide-react";
 import type { Project, TitleCandidate } from "@/app/lib/writing-os/types";
+import { FieldLabel, EditableField, TextField, AddButton } from "@/app/components/shared/FormFields";
+import { useWritingOS } from "@/app/lib/writing-os/context";
 
 function patchProject(slug: string, patch: Partial<Omit<Project, "slug">>) {
   fetch(`/api/projects/${slug}`, {
@@ -12,23 +14,100 @@ function patchProject(slug: string, patch: Partial<Omit<Project, "slug">>) {
   }).catch(() => {});
 }
 
+/** Title/subtitle candidates: a draggable, reorderable list where whichever
+ * candidate sits at the top is "current" — the one actually used on the
+ * draft page. Dragging to the top is how the user picks among AI-suggested
+ * options (and their own), rather than a separate "make current" toggle. */
+function CandidateList({
+  label,
+  hint,
+  placeholder,
+  items,
+  onChange,
+}: {
+  label: string;
+  hint: string;
+  placeholder: string;
+  items: TitleCandidate[];
+  onChange: (next: TitleCandidate[]) => void;
+}) {
+  const [newText, setNewText] = useState("");
+  const [dragIndex, setDragIndex] = useState<number | null>(null);
+
+  const withCurrentAtTop = (list: TitleCandidate[]): TitleCandidate[] =>
+    list.map((c, i) => ({ ...c, current: i === 0 }));
+
+  const add = () => {
+    const text = newText.trim();
+    if (!text) return;
+    onChange(withCurrentAtTop([{ text, current: false }, ...items]));
+    setNewText("");
+  };
+  const remove = (text: string) => {
+    onChange(withCurrentAtTop(items.filter((c) => c.text !== text)));
+  };
+  const drop = (targetIndex: number) => {
+    if (dragIndex === null || dragIndex === targetIndex) return;
+    const next = [...items];
+    const [moved] = next.splice(dragIndex, 1);
+    next.splice(targetIndex, 0, moved);
+    onChange(withCurrentAtTop(next));
+    setDragIndex(null);
+  };
+
+  return (
+    <div className="mb-[36px]">
+      <FieldLabel label={label} hint={hint} />
+      <div className="flex flex-col gap-[8px]">
+        {items.map((c, i) => (
+          <div
+            key={c.text}
+            draggable
+            onDragStart={() => setDragIndex(i)}
+            onDragOver={(e: DragEvent) => e.preventDefault()}
+            onDrop={() => drop(i)}
+            className="wos-row flex items-center gap-[10px] bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-md py-[13px] px-[14px]"
+          >
+            <GripVertical size={14} className="cursor-grab shrink-0" />
+            <span className="text-sm font-normal text-[var(--text-primary)] flex-1">{c.text}</span>
+            {c.current && (
+              <span className="text-xs font-semibold text-[var(--text-secondary)] bg-neutral-100 rounded-full py-[3px] px-[10px] shrink-0">
+                Current
+              </span>
+            )}
+            <button
+              onClick={() => remove(c.text)}
+              className="wos-reveal bg-transparent border-none text-[var(--text-muted)] cursor-pointer p-[4px] shrink-0"
+            >
+              <X size={14} strokeWidth={1.8} />
+            </button>
+          </div>
+        ))}
+        <div className="flex items-center gap-[8px]">
+          <TextField value={newText} onChange={setNewText} onEnter={add} placeholder={placeholder} />
+          <AddButton onClick={add}>Add</AddButton>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export function ProjectBrief({ project }: { project: Project }) {
+  const { patchProjectInList, setActiveProject } = useWritingOS();
   const [problem, setProblem] = useState(project.problem);
   const [agenda, setAgenda] = useState(project.agenda);
   const [goal, setGoal] = useState(project.goal);
+  const [writingType, setWritingType] = useState(project.writingType);
   const [argumentsList, setArgumentsList] = useState(project.arguments);
   const [titleCandidates, setTitleCandidates] = useState(project.titleCandidates);
+  const [subtitleCandidates, setSubtitleCandidates] = useState(project.subtitleCandidates);
   const [newArgument, setNewArgument] = useState("");
-  const [newTitle, setNewTitle] = useState("");
 
-  const onFieldBlur =
-    (field: "problem" | "agenda" | "goal") => (e: FocusEvent<HTMLDivElement>) => {
-      const text = e.currentTarget.textContent ?? "";
-      if (field === "problem") setProblem(text);
-      if (field === "agenda") setAgenda(text);
-      if (field === "goal") setGoal(text);
-      patchProject(project.slug, { [field]: text });
-    };
+  const onWritingTypeBlur = (e: FocusEvent<HTMLInputElement>) => {
+    const text = e.currentTarget.value.trim();
+    setWritingType(text);
+    patchProject(project.slug, { writingType: text });
+  };
 
   const addArgument = () => {
     const text = newArgument.trim();
@@ -44,71 +123,77 @@ export function ProjectBrief({ project }: { project: Project }) {
     patchProject(project.slug, { arguments: next });
   };
 
-  const addTitleCandidate = () => {
-    const text = newTitle.trim();
-    if (!text) return;
-    const next = [...titleCandidates, { text, current: titleCandidates.length === 0 }];
+  const onTitleCandidatesChange = (next: TitleCandidate[]) => {
     setTitleCandidates(next);
-    setNewTitle("");
-    patchProject(project.slug, { titleCandidates: next });
+    const title = next[0]?.text ?? "";
+    patchProject(project.slug, { titleCandidates: next, title });
+    patchProjectInList(project.slug, { title, titleCandidates: next });
+    setActiveProject(title);
   };
-  const removeTitleCandidate = (text: string) => {
-    const next = titleCandidates.filter((t) => t.text !== text);
-    setTitleCandidates(next);
-    patchProject(project.slug, { titleCandidates: next });
-  };
-  const makeCurrent = (text: string) => {
-    const next = titleCandidates.map((t) => ({ ...t, current: t.text === text }));
-    setTitleCandidates(next);
-    patchProject(project.slug, { titleCandidates: next });
+  const onSubtitleCandidatesChange = (next: TitleCandidate[]) => {
+    setSubtitleCandidates(next);
+    patchProject(project.slug, { subtitleCandidates: next, subtitle: next[0]?.text ?? "" });
   };
 
   return (
     <div className="max-w-[900px] w-full mx-auto py-[32px] px-[28px]">
-      <h1 className={`font-serif text-3xl font-semibold text-[var(--text-primary)] mt-[0] mx-[0] mb-[6px]`}>Project Brief</h1>
-      <p className={`text-sm font-normal text-[var(--text-secondary)] mt-[0] mx-[0] mb-[40px]`}>
+      <h1 className="font-sans text-3xl font-semibold leading-tight text-[var(--text-primary)] mt-[0] mx-[0] mb-[6px]">Project Brief</h1>
+      <p className="text-subtitle mt-[0] mx-[0] mb-[40px]">
         Define the intent, structure, and direction for your writing project.
       </p>
 
       <div className="grid grid-cols-2 gap-[28px] mb-[36px]">
+        <CandidateList
+          label="Title"
+          hint="Draft a few options — drag one to the top to make it the title."
+          placeholder="New title candidate..."
+          items={titleCandidates}
+          onChange={onTitleCandidatesChange}
+        />
+        <CandidateList
+          label="Subtitle"
+          hint="Draft a few options — drag one to the top to make it the subtitle."
+          placeholder="New subtitle candidate..."
+          items={subtitleCandidates}
+          onChange={onSubtitleCandidatesChange}
+        />
+      </div>
+
+      <div className="mb-[36px]">
+        <FieldLabel label="Writing type" hint="What kind of writing is this? Essay, script, article, blog post, tweet reply..." />
+        <TextField defaultValue={writingType} onBlur={onWritingTypeBlur} placeholder="e.g. Essay" />
+      </div>
+
+      <div className="grid grid-cols-2 gap-[28px] mb-[36px]">
         <div>
-          <div className={`text-sm font-bold text-[var(--text-primary)] mb-[3px]`}>Problem</div>
-          <div className={`text-xs font-medium text-[var(--text-muted)] mb-[10px]`}>
-            What problem are you trying to solve? What&apos;s the context?
-          </div>
-          <div
-            contentEditable
-            suppressContentEditableWarning
-            onBlur={onFieldBlur("problem")}
-            className="bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-md py-[16px] px-[18px] min-h-[110px] font-serif text-sm font-normal text-[var(--text-primary)] outline-none"
-          >
-            {problem}
-          </div>
+          <FieldLabel label="Problem" hint="What problem are you trying to solve? What's the context?" />
+          <EditableField
+            value={problem}
+            onBlur={(text) => {
+              setProblem(text);
+              patchProject(project.slug, { problem: text });
+            }}
+          />
         </div>
         <div>
-          <div className={`text-sm font-bold text-[var(--text-primary)] mb-[3px]`}>Agenda</div>
-          <div className={`text-xs font-medium text-[var(--text-muted)] mb-[10px]`}>
-            What do you need to cover? What are you looking to achieve?
-          </div>
-          <div
-            contentEditable
-            suppressContentEditableWarning
-            onBlur={onFieldBlur("agenda")}
-            className="bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-md py-[16px] px-[18px] min-h-[110px] font-serif text-sm font-normal text-[var(--text-primary)] outline-none"
-          >
-            {agenda}
-          </div>
+          <FieldLabel label="Agenda" hint="What do you need to cover? What are you looking to achieve?" />
+          <EditableField
+            value={agenda}
+            onBlur={(text) => {
+              setAgenda(text);
+              patchProject(project.slug, { agenda: text });
+            }}
+          />
         </div>
       </div>
 
       <div className="mb-[36px]">
-        <div className={`text-sm font-bold text-[var(--text-primary)] mb-[3px]`}>Arguments</div>
-        <div className={`text-xs font-medium text-[var(--text-muted)] mb-[14px]`}>Key points you want to make. Reorder as needed.</div>
+        <FieldLabel label="Arguments" hint="Key points you want to make. Reorder as needed." />
         <div className="flex flex-col gap-[8px]">
           {argumentsList.map((arg) => (
             <div key={arg} className="wos-row flex items-center gap-[10px] bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-md py-[13px] px-[14px]">
               <GripVertical size={14} className="cursor-grab shrink-0" />
-              <span className={`text-[12px] font-semibold text-[var(--text-primary)] flex-1`}>{arg}</span>
+              <span className="text-sm font-normal text-[var(--text-primary)] flex-1">{arg}</span>
               <button
                 onClick={() => removeArgument(arg)}
                 className="wos-reveal bg-transparent border-none text-[var(--text-muted)] cursor-pointer p-[4px]"
@@ -118,90 +203,21 @@ export function ProjectBrief({ project }: { project: Project }) {
             </div>
           ))}
           <div className="flex items-center gap-[8px]">
-            <input
-              value={newArgument}
-              onChange={(e) => setNewArgument(e.target.value)}
-              onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addArgument();
-                }
-              }}
-              placeholder="New argument..."
-              className="text-[12px] font-semibold flex-1 bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-md py-[9px] px-[14px] outline-none text-[var(--text-primary)]"
-            />
-            <button
-              onClick={addArgument}
-              className={`text-xs font-semibold self-start mt-[2px] text-[var(--text-secondary)] bg-transparent border border-[var(--border-default)] rounded-md py-[9px] px-[16px] cursor-pointer inline-flex items-center gap-[4px]`}
-            >
-              <Plus size={12} strokeWidth={1.8} /> Add argument
-            </button>
+            <TextField value={newArgument} onChange={setNewArgument} onEnter={addArgument} placeholder="New argument..." />
+            <AddButton onClick={addArgument}>Add argument</AddButton>
           </div>
         </div>
       </div>
 
       <div className="mb-[36px]">
-        <div className={`text-sm font-bold text-[var(--text-primary)] mb-[3px]`}>Goal</div>
-        <div className={`text-xs font-medium text-[var(--text-muted)] mb-[10px]`}>What do you want to achieve with this writing?</div>
-        <div
-          contentEditable
-          suppressContentEditableWarning
-          onBlur={onFieldBlur("goal")}
-          className="bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-md py-[16px] px-[18px] font-serif text-sm font-normal text-[var(--text-primary)] outline-none"
-        >
-          {goal}
-        </div>
-      </div>
-
-      <div>
-        <div className={`text-sm font-bold text-[var(--text-primary)] mb-[3px]`}>Title Candidates</div>
-        <div className={`text-xs font-medium text-[var(--text-muted)] mb-[14px]`}>Draft a few options. One is marked current.</div>
-        <div className="flex flex-col gap-[8px]">
-          {titleCandidates.map((tc) => (
-            <div key={tc.text} className="wos-row flex items-center gap-[10px] bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-md py-[13px] px-[14px]">
-              <GripVertical size={14} className="cursor-grab shrink-0" />
-              <span className={`text-[12px] font-semibold text-[var(--text-primary)] flex-1`}>{tc.text}</span>
-              {tc.current ? (
-                <span className={`text-xs font-semibold text-[var(--text-secondary)] bg-neutral-100 rounded-full py-[3px] px-[10px] shrink-0`}>
-                  Current title
-                </span>
-              ) : (
-                <button
-                  onClick={() => makeCurrent(tc.text)}
-                  className="wos-reveal text-xs font-semibold text-[var(--text-muted)] bg-transparent border-none cursor-pointer shrink-0"
-                >
-                  Make current
-                </button>
-              )}
-              <button
-                onClick={() => removeTitleCandidate(tc.text)}
-                className="wos-reveal bg-transparent border-none text-[var(--text-muted)] cursor-pointer p-[4px] shrink-0"
-              >
-                <X size={14} strokeWidth={1.8} />
-              </button>
-            </div>
-          ))}
-          <div className="flex items-center gap-[8px]">
-            <input
-              value={newTitle}
-              onChange={(e) => setNewTitle(e.target.value)}
-              onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
-                if (e.key === "Enter") {
-                  e.preventDefault();
-                  addTitleCandidate();
-                }
-              }}
-              placeholder="New title candidate..."
-              className="text-[12px] font-semibold flex-1 bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-md py-[9px] px-[14px] outline-none text-[var(--text-primary)]"
-            />
-            <button
-              onClick={addTitleCandidate}
-              className={`text-xs font-semibold self-start mt-[2px] text-[var(--text-secondary)] bg-transparent border border-[var(--border-default)] rounded-md py-[9px] px-[16px] cursor-pointer inline-flex items-center gap-[4px]`}
-            >
-              <Plus size={12} strokeWidth={1.8} /> Add title candidate
-            </button>
-          </div>
-        </div>
+        <FieldLabel label="Goal" hint="What do you want to achieve with this writing?" />
+        <EditableField
+          value={goal}
+          onBlur={(text) => {
+            setGoal(text);
+            patchProject(project.slug, { goal: text });
+          }}
+        />
       </div>
     </div>
   );

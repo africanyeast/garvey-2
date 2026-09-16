@@ -11,8 +11,17 @@ import { SectionBlockRow } from "@/app/components/panel/SectionBlockRow";
  * panel: a Blocks/Notes tab switcher plus the filtered list for that section.
  */
 export function SectionTabs() {
-  const { panelTab, setPanelTab, panelSection, notesData, enrichNote, openExpanded, toggleNoteResolved } =
-    useWritingOS();
+  const {
+    panelTab,
+    setPanelTab,
+    panelSection,
+    notesData,
+    enrichNote,
+    openExpanded,
+    toggleNoteResolved,
+    removeNoteTag,
+    deleteNote,
+  } = useWritingOS();
   const { document: draftDoc } = useDraftEditor();
 
   const panelBlocks = panelSection ? blocksInSection(draftDoc, panelSection) : [];
@@ -57,9 +66,11 @@ export function SectionTabs() {
                   tag={note.tag}
                   time={note.time}
                   resolved={note.resolved}
-                  attachment={note.attachment}
+                  attachments={note.attachments}
                   onOpen={() => openExpanded("note", note.id)}
                   onToggleResolved={() => toggleNoteResolved(note.id)}
+                  onRemoveTag={() => removeNoteTag(note.id)}
+                  onDelete={() => deleteNote(note.id)}
                 />
               ))}
             </div>

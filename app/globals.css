@@ -1,8 +1,15 @@
 @import "tailwindcss";
 
-/* Point Tailwind's font-sans / font-serif utilities at the fonts loaded
-   via next/font (layout.tsx). Named differently from the next/font
-   variables themselves to avoid a self-referential custom property. */
+/* Point Tailwind's font-sans / font-serif utilities at the app's two type
+   stacks — the same pairing Telegra.ph itself uses: the OS's native UI font
+   for chrome/titles/labels, Georgia for reading. Both are system fonts
+   (nothing to fetch via next/font), defined as their own variables and
+   named differently from font-sans/font-serif to avoid a self-referential
+   custom property. */
+:root {
+  --font-sans-source: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+  --font-serif-source: Georgia, "Times New Roman", Times, serif;
+}
 @theme {
   --font-sans: var(--font-sans-source);
   --font-serif: var(--font-serif-source);
@@ -52,7 +59,7 @@
 /* ---- Ominira Design System tokens (Writing OS) ---- */
 :root {
   /* Semantic aliases */
-  --surface-app: var(--color-neutral-50);
+  --surface-app: var(--color-neutral-0);
   --surface-raised: var(--color-neutral-0);
   --surface-sunken: var(--color-neutral-75);
   --surface-inverse: var(--color-neutral-900);
@@ -108,6 +115,15 @@
 
   --background: var(--surface-app);
   --foreground: var(--text-primary);
+}
+
+/* Shared subtitle/subheading style — small sans-serif copy that sits
+   under a page or section heading (Draft, Style, Brief, Trash, Shortcuts). */
+@utility text-subtitle {
+  font-family: var(--font-sans);
+  font-size: 0.875rem;
+  font-weight: 400;
+  color: var(--text-secondary);
 }
 
 * {
@@ -188,10 +204,14 @@ input {
 
 /* BlockNote editor — inherit the app's own type/color instead of its
    built-in defaults, and drop its own inline gutter padding since our page
-   layout already provides margins. */
+   layout already provides margins. Size/line-height match the Telegraph
+   reference: ~18px serif body with generous (1.6) leading for long-form
+   reading, rather than BlockNote's own 16px/1.5 UI-density defaults. */
 .bn-default-styles {
   font-family: var(--font-serif);
   color: var(--text-primary);
+  font-size: 18px;
+  line-height: 1.6;
 }
 .bn-editor {
   padding-inline: 0 !important;
@@ -219,7 +239,15 @@ input {
    section row's own 6px top/bottom padding, so a new block visibly starts
    a new line instead of looking like a soft-wrap of the previous one. */
 .bn-block-content {
-  padding-block: 6px;
+  padding-block: 10px;
+}
+/* A heading needs more air above it than a plain paragraph break — it's
+   starting a new unit of the document, not just the next line — so give it
+   extra breathing room on top of the block padding above (BlockNote's own
+   18px default reads cramped against this app's now-larger body text/line
+   spacing). */
+[data-content-type="heading"] {
+  padding-top: 32px !important;
 }
 /* BlockNote's own side menu (drag handle + "+") is a fixed 30px-tall
    horizontal strip by default (`.bn-side-menu{height:30px;display:flex}`,
@@ -238,8 +266,8 @@ input {
 .bn-side-menu {
   flex-direction: column;
   height: auto;
-  gap: 1px;
-  margin-top: 8px;
+  gap: 2px;
+  margin-top: 12px;
 }
 /* Its buttons (ariakit already resets these to fit-content/no padding via
    `.bn-side-menu .bn-ak-button`) render our own 11px lucide icons
@@ -353,4 +381,32 @@ input {
 .bn-block-content:has(.ProseMirror-trailingBreak:only-child):after {
   font-style: normal;
   font-size: 16px;
+}
+
+/* Telegraph-style blockquote: italic serif (inherited from `.bn-default-
+   styles`), a left rule instead of quotation marks. Text stays the app's
+   default body color (BlockNote's own hardcoded gray read as a different,
+   unrelated color from the rest of the document) — only the rule is muted. */
+[data-content-type="quote"] blockquote {
+  font-style: italic;
+  color: inherit;
+  border-left: 2px solid var(--border-strong);
+  margin: 0;
+  padding-left: 1em;
+}
+
+/* Telegraph underlines an inline link rather than recoloring it — same
+   weight/color as the surrounding text, only the underline marks it.
+   Scoped to editor content only; the app's own UI chrome links (`a` in
+   globals.css above) keep their brand color. */
+.bn-default-styles a {
+  color: inherit;
+  text-decoration: underline;
+}
+
+/* Plain contentEditable placeholder (title/subtitle) — shows attr(data-placeholder)
+   only while the element is genuinely empty. */
+[contenteditable][data-placeholder]:empty:before {
+  content: attr(data-placeholder);
+  color: var(--text-muted);
 }

@@ -3,7 +3,8 @@ import { createSectionBlockSpec } from "./blocks/section";
 
 /**
  * The block types available in the draft editor: paragraphs, headings, the
- * three list types, and `section` — the app's own custom block (see
+ * three list types, `quote` (the Telegraph-style italic serif blockquote —
+ * styled in globals.css), and `section` — the app's own custom block (see
  * `blocks/section.ts`) used for the document's top-level, collapsible
  * grouping. Deliberately excludes tables/images/files/audio/video/code
  * blocks for this pass — a stated scope boundary, not an oversight; widen
@@ -17,6 +18,7 @@ export const draftSchema = BlockNoteSchema.create({
     bulletListItem: defaultBlockSpecs.bulletListItem,
     numberedListItem: defaultBlockSpecs.numberedListItem,
     checkListItem: defaultBlockSpecs.checkListItem,
+    quote: defaultBlockSpecs.quote,
     section: createSectionBlockSpec(),
   },
 });

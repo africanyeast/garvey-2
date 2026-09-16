@@ -19,8 +19,10 @@ export function DraftPreview({ title, subtitle, document }: { title: string; sub
 
   return (
     <div className="max-w-[60%] w-full mx-auto py-[32px] px-[28px]">
-      <h1 className="font-serif text-3xl font-semibold text-[var(--text-primary)] mt-[0] mx-[0] mb-[10px]">{title}</h1>
-      <p className="font-serif text-sm text-[var(--text-secondary)] mt-[0] mx-[0] mb-[34px]">{subtitle}</p>
+      <h1 className="font-sans text-3xl font-semibold leading-tight text-[var(--text-primary)] mt-[0] mx-[0] mb-[10px]">
+        {title || "Untitled"}
+      </h1>
+      <p className="text-subtitle mt-[0] mx-[0] mb-[34px]">{subtitle || "Add a subtitle"}</p>
       <BlockNoteDocument editor={editor} editable={false} slashMenu={false} linkToolbar={false} />
     </div>
   );

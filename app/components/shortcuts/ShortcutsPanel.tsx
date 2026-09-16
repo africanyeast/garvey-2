@@ -33,8 +33,8 @@ const SHORTCUT_GROUPS = [
 export function ShortcutsPanel() {
   return (
     <div className="max-w-[900px] w-full mx-auto py-[32px] px-[28px]">
-      <h1 className="font-serif text-3xl font-semibold text-[var(--text-primary)] mt-[0] mx-[0] mb-[6px]">Shortcuts</h1>
-      <p className="text-sm font-normal text-[var(--text-secondary)] mt-[0] mx-[0] mb-[40px]">
+      <h1 className="font-sans text-3xl font-semibold leading-tight text-[var(--text-primary)] mt-[0] mx-[0] mb-[6px]">Shortcuts</h1>
+      <p className="text-subtitle mt-[0] mx-[0] mb-[40px]">
         Every keyboard shortcut available while writing.
       </p>
 

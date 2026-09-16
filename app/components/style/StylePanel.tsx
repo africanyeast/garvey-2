@@ -1,8 +1,9 @@
 "use client";
 
-import { useState, type FocusEvent, type KeyboardEvent } from "react";
+import { useState } from "react";
 import { X } from "lucide-react";
 import type { StyleProfile } from "@/app/lib/writing-os/types";
+import { FieldLabel, EditableField, TextField, AddButton } from "@/app/components/shared/FormFields";
 
 function patchStyle(patch: Partial<StyleProfile>) {
   fetch("/api/style", {
@@ -36,9 +37,9 @@ function WritingSamples({
   return (
     <div className="flex flex-col gap-[12px]">
       {samples.map((s, idx) => (
-        <div key={idx} className="wos-row bg-[var(--surface-raised)] border border-[var(--border-strong)] rounded-md py-[18px] px-[20px]">
+        <div key={idx} className="wos-row bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-md py-[18px] px-[20px]">
           <div className="flex justify-between mb-[10px]">
-            <span className={`text-xs font-medium text-[var(--text-muted)]`}>Sample {idx + 1} · {wordCount(s)} words</span>
+            <span className="text-xs font-medium text-[var(--text-muted)]">Sample {idx + 1} · {wordCount(s)} words</span>
             <button
               onClick={() => remove(idx)}
               className="wos-reveal bg-transparent border-none text-[var(--text-muted)] cursor-pointer p-[0]"
@@ -46,24 +47,19 @@ function WritingSamples({
               <X size={14} strokeWidth={1.8} />
             </button>
           </div>
-          <p className={`font-serif text-sm font-normal text-[var(--text-primary)] m-[0] whitespace-pre-wrap`}>{s}</p>
+          <p className="font-serif text-sm font-normal text-[var(--text-primary)] m-[0] whitespace-pre-wrap">{s}</p>
         </div>
       ))}
 
-      <div className="bg-[var(--surface-raised)] border border-dashed border-[var(--border-strong)] rounded-md py-[14px] px-[16px]">
+      <div className="bg-[var(--surface-raised)] border border-dashed border-[var(--border-default)] rounded-md py-[14px] px-[16px]">
         <textarea
           value={draft}
           onChange={(e) => setDraft(e.target.value)}
           placeholder="Paste a passage of your own writing..."
           rows={3}
-          className="font-serif text-sm font-normal w-full border-none outline-none bg-transparent text-[var(--text-primary)] resize-none"
+          className="font-sans text-sm font-normal w-full border-none outline-none bg-transparent text-[var(--text-primary)] resize-none"
         />
-        <button
-          onClick={add}
-          className={`text-xs font-medium mt-[8px] text-[var(--text-secondary)] bg-transparent border border-[var(--border-strong)] rounded-md py-[8px] px-[16px] cursor-pointer`}
-        >
-          + Add another sample
-        </button>
+        <AddButton onClick={add}>Add another sample</AddButton>
       </div>
     </div>
   );
@@ -71,10 +67,12 @@ function WritingSamples({
 
 function TagField({
   label,
+  hint,
   values,
   onChange,
 }: {
   label: string;
+  hint?: string;
   values: string[];
   onChange: (next: string[]) => void;
 }) {
@@ -90,12 +88,12 @@ function TagField({
 
   return (
     <div>
-      <div className={`text-xs font-medium text-[var(--text-primary)] mb-[8px]`}>{label}</div>
-      <div className="flex flex-wrap gap-[6px] mb-[6px]">
+      <FieldLabel label={label} hint={hint} />
+      <div className="flex flex-wrap gap-[6px] mb-[8px]">
         {values.map((v) => (
           <span
             key={v}
-            className={`wos-row text-xs font-medium inline-flex items-center gap-[6px] text-[var(--text-primary)] bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-full py-[5px] px-[10px]`}
+            className="wos-row text-xs font-medium inline-flex items-center gap-[6px] text-[var(--text-primary)] bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-full py-[5px] px-[10px]"
           >
             {v}
             <span onClick={() => remove(v)} className="wos-reveal cursor-pointer text-[var(--text-muted)]">
@@ -104,18 +102,7 @@ function TagField({
           </span>
         ))}
       </div>
-      <input
-        value={draft}
-        onChange={(e) => setDraft(e.target.value)}
-        onKeyDown={(e: KeyboardEvent<HTMLInputElement>) => {
-          if (e.key === "Enter") {
-            e.preventDefault();
-            add();
-          }
-        }}
-        placeholder={`Add ${label.toLowerCase()}...`}
-        className="text-xs font-medium w-full bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-md py-[7px] px-[10px] outline-none text-[var(--text-primary)]"
-      />
+      <TextField value={draft} onChange={setDraft} onEnter={add} placeholder={`Add ${label.toLowerCase()}...`} />
     </div>
   );
 }
@@ -130,24 +117,20 @@ export function StylePanel({ style }: { style: StyleProfile }) {
   const [structuralHabits, setStructuralHabits] = useState(style.structural_habits);
 
   return (
-    <div className="max-w-[820px] my-[0] mx-[auto] pt-[36px] px-[48px] pb-[90px]">
-      <div className="flex items-center justify-between mb-[8px]">
-        <h1 className={`font-serif text-2xl font-semibold text-[var(--text-primary)] m-[0]`}>Style</h1>
-        <span className={`text-xs font-medium text-[var(--text-muted)] bg-neutral-100 rounded-full py-[4px] px-[12px]`}>
+    <div className="max-w-[900px] w-full mx-auto py-[32px] px-[28px]">
+      <div className="flex items-center justify-between mb-[6px]">
+        <h1 className="font-sans text-3xl font-semibold leading-tight text-[var(--text-primary)] m-[0]">Style</h1>
+        {/* <span className="text-xs font-medium text-[var(--text-muted)] bg-neutral-100 rounded-full py-[4px] px-[12px]">
           Single active profile
-        </span>
+        </span> */}
       </div>
-      <p className={`text-sm font-normal text-[var(--text-secondary)] mt-[0] mx-[0] mb-[40px]`}>Defines how AI suggestions reflect your voice.</p>
+      <p className="text-subtitle mt-[0] mx-[0] mb-[40px]">Defines how AI suggestions reflect your voice.</p>
 
-      <div className="mb-[44px]">
-        <div className="flex items-baseline gap-[10px] mb-[4px]">
-          <span className={`text-xs font-bold uppercase tracking-[0.08em] text-[var(--text-brand)]`}>Primary</span>
-          <span className={`text-base font-bold text-[var(--text-primary)]`}>Writing Samples</span>
-        </div>
-        <p className={`text-sm font-normal text-[var(--text-secondary)] mt-[0] mx-[0] mb-[18px] max-w-[520px]`}>
-          The main way the AI learns your voice — sentence rhythm, habitual phrasing, structural tics. This matters more than the tags below.
-        </p>
-
+      <div className="mb-[36px]">
+        <FieldLabel
+          label="Writing Samples"
+          hint="The main way the AI learns your voice — sentence rhythm, habitual phrasing, structural tics. This matters more than the tags below."
+        />
         <WritingSamples
           samples={writingSamples}
           onChange={(next) => {
@@ -157,72 +140,61 @@ export function StylePanel({ style }: { style: StyleProfile }) {
         />
       </div>
 
-      <div className="bg-[var(--surface-sunken)] rounded-lg py-[22px] px-[24px]">
-        <span className={`text-xs font-bold uppercase tracking-[0.08em] text-[var(--text-muted)]`}>
-          Secondary — Override Tags
-        </span>
-        <p className={`text-xs font-medium text-[var(--text-muted)] mt-[6px] mx-[0] mb-[20px] max-w-[480px]`}>
-          Hard constraints the samples above might not reliably convey.
-        </p>
-
-        <div className="grid grid-cols-2 gap-[22px]">
-          <TagField
-            label="Tone"
-            values={tone}
-            onChange={(next) => {
-              setTone(next);
-              patchStyle({ tone: next });
-            }}
-          />
-          <div>
-            <div className={`text-xs font-medium text-[var(--text-primary)] mb-[8px]`}>Sentence Length</div>
-            <input
-              value={sentenceLength}
-              onChange={(e) => setSentenceLength(e.target.value)}
-              onBlur={() => patchStyle({ sentence_length: sentenceLength })}
-              className={`text-sm font-normal text-[var(--text-secondary)] bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-md py-[9px] px-[12px] w-full outline-none`}
-            />
-          </div>
-          <TagField
-            label="Words to Avoid"
-            values={avoidWords}
-            onChange={(next) => {
-              setAvoidWords(next);
-              patchStyle({ avoid_words: next });
-            }}
-          />
-          <TagField
-            label="Preferred Transitions"
-            values={transitions}
-            onChange={(next) => {
-              setTransitions(next);
-              patchStyle({ preferred_transitions: next });
-            }}
-          />
-          <div>
-            <div className={`text-xs font-medium text-[var(--text-primary)] mb-[8px]`}>Structural Habits</div>
-            <div
-              contentEditable
-              suppressContentEditableWarning
-              onBlur={(e: FocusEvent<HTMLDivElement>) => {
-                const text = e.currentTarget.textContent ?? "";
-                setStructuralHabits(text);
-                patchStyle({ structural_habits: text });
-              }}
-              className={`text-sm font-normal text-[var(--text-secondary)] bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-md py-[9px] px-[12px] leading-[1.5] outline-none`}
-            >
-              {structuralHabits}
-            </div>
-          </div>
-          <TagField
-            label="Register"
-            values={register}
-            onChange={(next) => {
-              setRegister(next);
-              patchStyle({ register: next });
+      <div className="grid grid-cols-2 gap-[28px] mb-[36px]">
+        <TagField
+          label="Tone"
+          values={tone}
+          onChange={(next) => {
+            setTone(next);
+            patchStyle({ tone: next });
+          }}
+        />
+        <div>
+          <FieldLabel label="Sentence Length" />
+          <TextField
+            defaultValue={sentenceLength}
+            onBlur={(e) => {
+              const text = e.currentTarget.value;
+              setSentenceLength(text);
+              patchStyle({ sentence_length: text });
             }}
           />
         </div>
+        <TagField
+          label="Words to Avoid"
+          values={avoidWords}
+          onChange={(next) => {
+            setAvoidWords(next);
+            patchStyle({ avoid_words: next });
+          }}
+        />
+        <TagField
+          label="Preferred Transitions"
+          values={transitions}
+          onChange={(next) => {
+            setTransitions(next);
+            patchStyle({ preferred_transitions: next });
+          }}
+        />
+        <div>
+          <FieldLabel label="Structural Habits" />
+          <EditableField
+            value={structuralHabits}
+            minHeight={0}
+            onBlur={(text) => {
+              setStructuralHabits(text);
+              patchStyle({ structural_habits: text });
+            }}
+          />
+        </div>
+        <TagField
+          label="Register"
+          values={register}
+          onChange={(next) => {
+            setRegister(next);
+            patchStyle({ register: next });
+          }}
+        />
       </div>
     </div>
   );

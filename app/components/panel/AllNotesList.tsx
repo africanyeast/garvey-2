@@ -5,7 +5,7 @@ import { NoteRow } from "@/app/components/shared/NoteRow";
 
 /** The default "Notes & Research" view: every note for this project, newest first. */
 export function AllNotesList() {
-  const { notesDesc, openExpanded, toggleNoteResolved } = useWritingOS();
+  const { notesDesc, openExpanded, toggleNoteResolved, removeNoteTag, deleteNote } = useWritingOS();
 
   if (notesDesc.length === 0) {
     return (
@@ -24,9 +24,11 @@ export function AllNotesList() {
           tag={note.tag}
           time={note.time}
           resolved={note.resolved}
-          attachment={note.attachment}
+          attachments={note.attachments}
           onOpen={() => openExpanded("note", note.id)}
           onToggleResolved={() => toggleNoteResolved(note.id)}
+          onRemoveTag={() => removeNoteTag(note.id)}
+          onDelete={() => deleteNote(note.id)}
         />
       ))}
     </div>

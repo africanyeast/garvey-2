@@ -3,9 +3,10 @@
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { InboxItemExpanded } from "@/app/components/inbox/InboxItemExpanded";
 import { InboxList } from "@/app/components/inbox/InboxList";
+import { PdfViewerPanel } from "@/app/components/shared/PdfViewerPanel";
 
 export function InboxScreen() {
-  const { expandedItem } = useWritingOS();
+  const { expandedItem, pdfViewer } = useWritingOS();
   const inboxFull = expandedItem?.kind === "inbox" ? expandedItem : null;
 
   return (
@@ -13,7 +14,10 @@ export function InboxScreen() {
       <div className="flex-1 min-w-[0] h-[100%] bg-[var(--color-neutral-0)]">
         <InboxList />
       </div>
-      {inboxFull && <InboxItemExpanded id={inboxFull.key} />}
+      {/* A PDF takes over the right-hand slot — same as an expanded item —
+       * so opening one from inside an expanded inbox item still leaves that
+       * item right where it was once the PDF is closed. */}
+      {pdfViewer ? <PdfViewerPanel /> : inboxFull && <InboxItemExpanded id={inboxFull.key} />}
     </div>
   );
 }

@@ -19,6 +19,9 @@ interface DraftEditorState {
   editor: DraftEditor;
   document: DraftBlock[];
   syncDocument: () => void;
+  /** ISO timestamp of the last successful autosave, so the draft screen can
+   * show a live "Edited ... ago" instead of a static label. */
+  savedAt: string | null;
 }
 
 const DraftEditorContext = createContext<DraftEditorState | null>(null);
@@ -50,6 +53,7 @@ export function DraftEditorProvider({
   const editor = useCreateBlockNote({ schema: draftSchema, initialContent: initialDocument }, []);
   seedSectionsOpen(editor.document);
   const [doc, setDoc] = useState<DraftBlock[]>(editor.document);
+  const [savedAt, setSavedAt] = useState<string | null>(null);
 
   // Debounced so a fast typist doesn't fire a write per keystroke — the
   // timer resets on every change and only the trailing edit actually saves.
@@ -63,12 +67,17 @@ export function DraftEditorProvider({
         method: "PUT",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify(next),
-      }).catch(() => {});
+      })
+        .then((res) => res.json())
+        .then((body: { updatedAt?: string }) => body.updatedAt && setSavedAt(body.updatedAt))
+        .catch(() => {});
     }, 800);
   };
 
   return (
-    <DraftEditorContext.Provider value={{ editor, document: doc, syncDocument }}>{children}</DraftEditorContext.Provider>
+    <DraftEditorContext.Provider value={{ editor, document: doc, syncDocument, savedAt }}>
+      {children}
+    </DraftEditorContext.Provider>
   );
 }
 

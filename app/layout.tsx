@@ -1,5 +1,4 @@
 import type { Metadata } from "next";
-import { Source_Serif_4, Manrope } from "next/font/google";
 // BlockNote's own base styles (block/menu/toolbar/popover chrome). These
 // packages are only ever reached through a `next/dynamic(..., { ssr: false
 // })` import (BlockNote touches `window` at construction time), and their
@@ -11,18 +10,11 @@ import "@blocknote/react/style.css";
 import "@blocknote/ariakit/style.css";
 import "./globals.css";
 
-const sourceSerif4 = Source_Serif_4({
-  variable: "--font-serif-source",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700"],
-  style: ["normal", "italic"],
-});
-
-const manrope = Manrope({
-  variable: "--font-sans-source",
-  subsets: ["latin"],
-  weight: ["400", "500", "600", "700", "800"],
-});
+// The two font stacks (--font-sans-source/--font-serif-source) are defined
+// directly in globals.css rather than loaded via next/font/google — they're
+// the same system-font stacks Telegra.ph itself uses (native OS UI font for
+// chrome, Georgia for reading), not custom webfonts, so there's nothing to
+// fetch or subset.
 
 export const metadata: Metadata = {
   title: "Garvey",
@@ -31,7 +23,7 @@ export const metadata: Metadata = {
 
 export default function RootLayout({ children }: LayoutProps<"/">) {
   return (
-    <html lang="en" className={`${sourceSerif4.variable} ${manrope.variable}`}>
+    <html lang="en">
       <body>{children}</body>
     </html>
   );

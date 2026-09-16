@@ -26,7 +26,7 @@ export function CommentsBody({
   return (
     <>
       <div className="flex items-center justify-between mb-[10px]">
-        <span className="text-[10px] font-bold uppercase tracking-[0.08em] text-[var(--text-muted)]">Comments</span>
+        <span className="font-sans text-xs font-bold uppercase tracking-[0.08em] text-[var(--text-muted)]">Comments</span>
         {onClose && (
           <button onClick={onClose} title="Close" className="bg-transparent border-none text-[var(--text-muted)] cursor-pointer p-[2px] flex">
             <X size={13} strokeWidth={1.8} />
@@ -64,7 +64,7 @@ export function CommentsBody({
             }
           }}
           placeholder="Reply..."
-          className={`text-[12px] font-normal flex-1 min-w-0 border-none outline-none bg-transparent text-[var(--text-primary)]`}
+          className={`font-sans text-[12px] font-normal flex-1 min-w-0 border-none outline-none bg-transparent text-[var(--text-primary)]`}
         />
         <button
           onClick={onReplySubmit}
