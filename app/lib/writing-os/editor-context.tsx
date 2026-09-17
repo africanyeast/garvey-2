@@ -50,7 +50,20 @@ export function DraftEditorProvider({
   projectSlug: string;
   initialDocument: DraftPartialBlock[];
 }) {
-  const editor = useCreateBlockNote({ schema: draftSchema, initialContent: initialDocument }, []);
+  // The native BlockNote CommentsExtension (selection-anchored comments via
+  // ThreadStore) is disabled for now — it's the suspected source of a
+  // browser-freezing crash even after removing its toolbar entry, and the
+  // plan is to replace it with a single block-level comment/thread system
+  // instead of running two comment mechanisms side by side. See the
+  // `comment-freeze` memory; `VaultThreadStore`/`lib/vault/threads.ts` stay
+  // in place for that future rebuild but are unused for now.
+  const editor = useCreateBlockNote(
+    {
+      schema: draftSchema,
+      initialContent: initialDocument,
+    },
+    [],
+  );
   seedSectionsOpen(editor.document);
   const [doc, setDoc] = useState<DraftBlock[]>(editor.document);
   const [savedAt, setSavedAt] = useState<string | null>(null);

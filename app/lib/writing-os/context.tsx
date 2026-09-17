@@ -4,23 +4,26 @@ import {
   createContext,
   useContext,
   useEffect,
+  useRef,
   useState,
   type MouseEvent,
   type ReactNode,
 } from "react";
 import type {
   Attachment,
+  AttachmentTranscription,
+  BlockVariant,
   Comment,
   DocMode,
   ExpandedItem,
   InboxItem,
   Note,
-  PanelTab,
+  NoteLinks,
   Project,
   SectionKey,
 } from "./types";
-import type { DraftBlock } from "./schema";
-import { type MentionTarget, resolveNoteLinks, resolvePrimaryTag, sectionMentionTargets } from "./mentions";
+import type { DraftBlock, DraftPartialBlock } from "./schema";
+import { type MentionTarget, type ProjectLookup, type ResolvedTag, resolveNoteLinks, resolveTags, sectionMentionTargets } from "./mentions";
 
 export const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -37,22 +40,51 @@ export interface PdfViewerState {
 }
 
 export type EnrichedNote = Note & {
-  tag: { text: string; href: string } | null;
+  tags: ResolvedTag[];
 };
 
 export type EnrichedInboxItem = InboxItem & {
-  tag: { text: string; href: string } | null;
+  tags: ResolvedTag[];
 };
 
 interface WritingOSState {
   // data
   notesData: Note[];
   commentsData: Record<string, Comment[]>;
+  /** Comments on raw Inbox captures — same `Comment` shape as `commentsData`,
+   * just backed by the global `/api/inbox/comments` store instead of a
+   * project's, since an inbox item may not be tagged to any project. Keyed
+   * by `targetId` the same way. */
+  inboxCommentsData: Record<string, Comment[]>;
+  resolveInboxComment: (targetId: string, id: string) => void;
+  addInboxReply: (targetId: string) => void;
+  /** A block's alt versions, keyed by the *live* block id they're an
+   * alternate of (`BlockVariant.blockId`) — same grouping shape as
+   * `commentsData`. Never entered into the shared draft document; see
+   * `BlockExpanded`. */
+  variantsData: Record<string, BlockVariant[]>;
+  addVariant: (blockId: string, content: DraftPartialBlock) => void;
+  updateVariantContent: (variant: BlockVariant, content: DraftPartialBlock) => void;
+  deleteVariant: (variant: BlockVariant) => void;
+  reorderVariants: (blockId: string, orderedIds: string[]) => void;
+  /** Swaps every comment filed under `idA` with every comment filed under
+   * `idB` — the comment-half of promoting an alt to primary (its content
+   * and the primary's trade places), so a comment stays attached to the
+   * text it's about rather than a fixed slot. A true swap (not two
+   * sequential moves): both buckets exchange keys at once, so comments
+   * already at the destination are never merged with the ones moving in.
+   * Resolves once every PATCH has landed. */
+  swapCommentBlocks: (idA: string, idB: string) => Promise<void>;
   inboxItems: InboxItem[];
   activeProject: string;
   setActiveProject: (title: string) => void;
   activeProjectSlug: string | null;
   setActiveProjectSlug: (slug: string | null) => void;
+  /** The active project's stable id — what a "@"/"#" tag created while
+   * viewing this project actually stores (see `MentionRef`/`NoteLinks`),
+   * never `activeProjectSlug`, so the tag survives a later rename. */
+  activeProjectId: string | null;
+  setActiveProjectId: (id: string | null) => void;
   /** Every project, for the composer's "@" mention picker and the sidebar —
    * independent of `activeProject`, which is just whichever one is
    * currently open. Single source of truth so creating/renaming/deleting/
@@ -69,9 +101,12 @@ interface WritingOSState {
   panelMode: PanelPresentation;
   openMenu: string | number | null;
   expandedItem: ExpandedItem | null;
-  commentOpenId: string | number | null;
-  panelSection: SectionKey | null;
-  panelTab: PanelTab;
+  /** A block/section id to scroll into view in the main draft document, set
+   * once by a "#section" tag's click-through and cleared right after the
+   * scroll happens — unlike `expandedItem`, this never opens any panel, it
+   * just brings the target into view inline where it already lives. */
+  scrollToBlockId: string | null;
+  setScrollToBlockId: (id: string | null) => void;
   newNoteDraft: string;
   newInboxDraft: string;
   newNoteLinks: MentionTarget[];
@@ -83,7 +118,11 @@ interface WritingOSState {
   newInboxAttachments: Attachment[];
   setNewInboxAttachments: (a: Attachment[]) => void;
   docMode: DocMode;
-  replyDraft: string;
+  /** Keyed by block id — several comment boxes (a commented block's box is
+   * always shown; see `resolveComment`'s doc comment) can be on screen at
+   * once, so a single shared draft string would leak one box's typing into
+   * every other box's input. */
+  replyDrafts: Record<string, string>;
   pdfViewer: PdfViewerState | null;
   openPdf: (attachment: Attachment) => void;
   closePdf: () => void;
@@ -100,19 +139,19 @@ interface WritingOSState {
   deleteInboxItem: (id: string) => void;
   updateNoteBody: (id: string, body: string) => void;
   updateInboxBody: (id: string, body: string) => void;
-  removeNoteTag: (id: string) => void;
-  removeInboxTag: (id: string) => void;
+  /** Persists (or clears, passing `null`) an OCR result onto one attachment
+   * of a note/inbox item — durable, unlike the old review-dialog flow, so
+   * reopening the item later still shows the transcript. */
+  setNoteAttachmentTranscription: (id: string, attachmentUrl: string, transcription: AttachmentTranscription | null) => void;
+  setInboxAttachmentTranscription: (id: string, attachmentUrl: string, transcription: AttachmentTranscription | null) => void;
+  removeNoteTag: (id: string, kind: ResolvedTag["kind"], tagId: string) => void;
+  removeInboxTag: (id: string, kind: ResolvedTag["kind"], tagId: string) => void;
   addNoteTag: (id: string, target: MentionTarget) => void;
   addInboxTag: (id: string, target: MentionTarget) => void;
-  openSectionPanel: (sec: SectionKey) => void;
-  closeSectionPanel: () => void;
   setPanelMode: (m: PanelPresentation) => void;
-  setPanelTab: (t: PanelTab) => void;
-  toggleCommentResolved: (blockId: string, id: string) => void;
-  setReplyDraft: (v: string) => void;
-  addReply: (blockId: string, anchor?: string) => void;
-  pendingAnchor: string | null;
-  setPendingAnchor: (v: string | null) => void;
+  resolveComment: (targetId: string, id: string) => void;
+  setReplyDraft: (targetId: string, v: string) => void;
+  addReply: (targetId: string) => void;
   setNewNoteDraft: (v: string) => void;
   addItem: (draftDoc: DraftBlock[]) => void;
   addNoteToSection: (
@@ -127,7 +166,6 @@ interface WritingOSState {
   addRestoredNote: (n: Note) => void;
   addRestoredInboxItem: (i: InboxItem) => void;
   setDocMode: (m: DocMode) => void;
-  setCommentOpenId: (id: string | number | null) => void;
 
   // derived
   enrichNote: (n: Note) => EnrichedNote;
@@ -141,10 +179,20 @@ const WritingOSContext = createContext<WritingOSState | null>(null);
 export function WritingOSProvider({ children }: { children: ReactNode }) {
   const [notesData, setNotesData] = useState<Note[]>([]);
   const [commentsData, setCommentsData] = useState<Record<string, Comment[]>>({});
+  const [inboxCommentsData, setInboxCommentsData] = useState<Record<string, Comment[]>>({});
+  const [variantsData, setVariantsData] = useState<Record<string, BlockVariant[]>>({});
   const [inboxItems, setInboxItems] = useState<InboxItem[]>([]);
   const [activeProject, setActiveProject] = useState("");
   const [activeProjectSlug, setActiveProjectSlug] = useState<string | null>(null);
+  const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
   const [projectsList, setProjectsList] = useState<Project[]>([]);
+  // One debounce timer per variant id — a fast typist firing an unbounced
+  // PATCH per keystroke against the same JSON file is exactly what produced
+  // the interleaved-write corruption that silently dropped alt versions on
+  // reload (see [[block-variant-data-loss]] memory); same trailing-edit-only
+  // pattern `DraftEditorProvider.syncDocument` already uses for the shared
+  // draft doc.
+  const variantSaveTimers = useRef<Map<string, ReturnType<typeof setTimeout>>>(new Map());
 
   const refreshProjects = () => {
     fetch("/api/projects")
@@ -152,7 +200,10 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
       .then(setProjectsList)
       .catch(() => {});
   };
-  const addProjectToList = (p: Project) => setProjectsList((prev) => [...prev, p]);
+  // Prepended, not appended — matches `/api/projects`' newest-first sort so a
+  // just-created/duplicated/restored project shows up at the top without
+  // waiting on a full `refreshProjects()` refetch.
+  const addProjectToList = (p: Project) => setProjectsList((prev) => [p, ...prev]);
   const removeProjectFromList = (slug: string) =>
     setProjectsList((prev) => prev.filter((p) => p.slug !== slug));
   const patchProjectInList = (slug: string, patch: Partial<Project>) =>
@@ -175,6 +226,14 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     fetch("/api/inbox")
       .then((res) => res.json())
       .then(setInboxItems)
+      .catch(() => {});
+    fetch("/api/inbox/comments")
+      .then((res) => res.json())
+      .then((comments: Comment[]) => {
+        const grouped: Record<string, Comment[]> = {};
+        for (const c of comments) (grouped[c.targetId] ??= []).push(c);
+        setInboxCommentsData(grouped);
+      })
       .catch(() => {});
     refreshProjects();
   }, []);
@@ -199,8 +258,24 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
       .then((res) => res.json())
       .then((comments: Comment[]) => {
         const grouped: Record<string, Comment[]> = {};
-        for (const c of comments) (grouped[c.blockId] ??= []).push(c);
+        for (const c of comments) (grouped[c.targetId] ??= []).push(c);
         setCommentsData(grouped);
+      })
+      .catch(() => {});
+  }, [activeProjectSlug]);
+
+  useEffect(() => {
+    if (!activeProjectSlug) {
+      setVariantsData({});
+      return;
+    }
+    fetch(`/api/projects/${activeProjectSlug}/variants`)
+      .then((res) => res.json())
+      .then((variants: BlockVariant[]) => {
+        const grouped: Record<string, BlockVariant[]> = {};
+        for (const v of variants) (grouped[v.blockId] ??= []).push(v);
+        for (const list of Object.values(grouped)) list.sort((a, b) => a.order - b.order);
+        setVariantsData(grouped);
       })
       .catch(() => {});
   }, [activeProjectSlug]);
@@ -208,9 +283,7 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
   const [panelMode, setPanelMode] = useState<PanelPresentation>("collapsed");
   const [openMenu, setOpenMenu] = useState<string | number | null>(null);
   const [expandedItem, setExpandedItem] = useState<ExpandedItem | null>(null);
-  const [commentOpenId, setCommentOpenId] = useState<string | number | null>(null);
-  const [panelSection, setPanelSection] = useState<SectionKey | null>(null);
-  const [panelTab, setPanelTab] = useState<PanelTab>("blocks");
+  const [scrollToBlockId, setScrollToBlockId] = useState<string | null>(null);
   const [newNoteDraft, setNewNoteDraft] = useState("");
   const [newInboxDraft, setNewInboxDraft] = useState("");
   const [newNoteLinks, setNewNoteLinks] = useState<MentionTarget[]>([]);
@@ -218,8 +291,8 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
   const [newInboxLinks, setNewInboxLinks] = useState<MentionTarget[]>([]);
   const [newInboxAttachments, setNewInboxAttachments] = useState<Attachment[]>([]);
   const [docMode, setDocMode] = useState<DocMode>("edit");
-  const [replyDraft, setReplyDraft] = useState("");
-  const [pendingAnchor, setPendingAnchor] = useState<string | null>(null);
+  const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
+  const setReplyDraft = (blockId: string, v: string) => setReplyDrafts((prev) => ({ ...prev, [blockId]: v }));
   const [pdfViewer, setPdfViewer] = useState<PdfViewerState | null>(null);
 
   const openPdf = (attachment: Attachment) => setPdfViewer({ attachment });
@@ -309,43 +382,91 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ body }),
     }).catch(() => {});
   };
-  // A note's displayed tag is derived entirely from `links` (see
-  // `enrichNote`/`resolvePrimaryTag`) — removing it clears both `links` and
-  // `bucket` (a "#" section tag sets both together, see `addItem`).
-  const emptyLinks = { projectSlugs: [], refs: [] };
-  const removeNoteTag = (id: string) => {
+  const setNoteAttachmentTranscription = (id: string, attachmentUrl: string, transcription: AttachmentTranscription | null) => {
     if (!activeProjectSlug) return;
     const note = notesData.find((n) => n.id === id);
     if (!note) return;
-    setNotesData((prev) => prev.map((n) => (n.id === id ? { ...n, bucket: null, links: emptyLinks } : n)));
+    const attachments = (note.attachments ?? []).map((a) =>
+      a.url === attachmentUrl ? { ...a, transcription: transcription ?? undefined } : a
+    );
+    setNotesData((prev) => prev.map((n) => (n.id === id ? { ...n, attachments } : n)));
     fetch(noteActionUrl(note), {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bucket: null, links: emptyLinks }),
+      body: JSON.stringify({ attachments }),
     }).catch(() => {});
   };
-  const removeInboxTag = (id: string) => {
+  const setInboxAttachmentTranscription = (id: string, attachmentUrl: string, transcription: AttachmentTranscription | null) => {
     const item = inboxItems.find((i) => i.id === id);
     if (!item) return;
-    setInboxItems((prev) => prev.map((i) => (i.id === id ? { ...i, links: emptyLinks } : i)));
+    const attachments = (item.attachments ?? []).map((a) =>
+      a.url === attachmentUrl ? { ...a, transcription: transcription ?? undefined } : a
+    );
+    setInboxItems((prev) => prev.map((i) => (i.id === id ? { ...i, attachments } : i)));
     const url = item.homeSlug ? `/api/projects/${item.homeSlug}/notes/${id}` : `/api/inbox/${id}`;
     fetch(url, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ links: emptyLinks }),
+      body: JSON.stringify({ attachments }),
+    }).catch(() => {});
+  };
+  // A note's displayed tags are derived entirely from `links` (see
+  // `enrichNote`/`resolveTags`) — any number of "@" projects and "#"
+  // section/block refs can coexist, so adding/removing one tag always merges
+  // into (or filters out of) the existing arrays rather than replacing them
+  // wholesale.
+  const emptyLinks: NoteLinks = { projectIds: [], refs: [] };
+  const withoutTag = (links: NoteLinks, kind: "project" | "section" | "block", tagId: string): NoteLinks =>
+    kind === "project"
+      ? { ...links, projectIds: links.projectIds.filter((id) => id !== tagId) }
+      : { ...links, refs: links.refs.filter((r) => r.id !== tagId) };
+  const withTag = (links: NoteLinks, target: MentionTarget): NoteLinks =>
+    target.kind === "project"
+      ? { ...links, projectIds: links.projectIds.includes(target.id) ? links.projectIds : [...links.projectIds, target.id] }
+      : {
+          ...links,
+          refs: [
+            ...links.refs.filter((r) => r.id !== target.id),
+            { kind: target.kind, id: target.id, projectId: target.projectId as string, label: target.label },
+          ],
+        };
+  const removeNoteTag = (id: string, kind: "project" | "section" | "block", tagId: string) => {
+    if (!activeProjectSlug) return;
+    const note = notesData.find((n) => n.id === id);
+    if (!note) return;
+    const links = withoutTag(note.links ?? emptyLinks, kind, tagId);
+    const bucket = kind === "section" && note.bucket === tagId ? null : note.bucket;
+    setNotesData((prev) => prev.map((n) => (n.id === id ? { ...n, bucket, links } : n)));
+    fetch(noteActionUrl(note), {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ bucket, links }),
+    }).catch(() => {});
+  };
+  const removeInboxTag = (id: string, kind: "project" | "section" | "block", tagId: string) => {
+    const item = inboxItems.find((i) => i.id === id);
+    if (!item) return;
+    const links = withoutTag(item.links ?? emptyLinks, kind, tagId);
+    setInboxItems((prev) => prev.map((i) => (i.id === id ? { ...i, links } : i)));
+    const url = item.homeSlug ? `/api/projects/${item.homeSlug}/notes/${id}` : `/api/inbox/${id}`;
+    fetch(url, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ links }),
     }).catch(() => {});
   };
 
   // The expanded note/inbox-item view's `TagPicker` — the same "@"/"#"
   // tagging the composer offers, just for a note that's already been
-  // captured. Only ever called while untagged (see `NoteDetail`), so this
-  // simply sets `links` to the one target picked, rather than merging.
+  // captured. Merges the newly picked target into whatever tags the note
+  // already carries, so tagging both a project and a section (in either
+  // order, or several of either) never drops an earlier one.
   const addNoteTag = (id: string, target: MentionTarget) => {
     if (!activeProjectSlug) return;
     const note = notesData.find((n) => n.id === id);
     if (!note) return;
-    const links = resolveNoteLinks([target]);
-    const bucket = target.kind === "section" && target.projectSlug === activeProjectSlug ? target.id : note.bucket;
+    const links = withTag(note.links ?? emptyLinks, target);
+    const bucket = target.kind === "section" && target.projectId === activeProjectId ? target.id : note.bucket;
     setNotesData((prev) => prev.map((n) => (n.id === id ? { ...n, bucket, links } : n)));
     fetch(noteActionUrl(note), {
       method: "PATCH",
@@ -356,10 +477,10 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
   const addInboxTag = (id: string, target: MentionTarget) => {
     const item = inboxItems.find((i) => i.id === id);
     if (!item) return;
-    const links = resolveNoteLinks([target]);
+    const links = withTag(item.links ?? emptyLinks, target);
     setInboxItems((prev) => prev.map((i) => (i.id === id ? { ...i, links } : i)));
     const url = item.homeSlug ? `/api/projects/${item.homeSlug}/notes/${id}` : `/api/inbox/${id}`;
-    const body = item.homeSlug ? { links, bucket: target.kind === "section" ? target.id : null } : { links };
+    const body = item.homeSlug ? { links, bucket: target.kind === "section" ? target.id : undefined } : { links };
     fetch(url, {
       method: "PATCH",
       headers: { "Content-Type": "application/json" },
@@ -367,48 +488,164 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     }).catch(() => {});
   };
 
-  const openSectionPanel = (sec: SectionKey) => {
-    setPanelSection(sec);
-    setPanelTab("blocks");
-    setPanelMode((m) => (m === "collapsed" ? "docked" : m));
-    setNewNoteDraft("");
-  };
-  const closeSectionPanel = () => {
-    setPanelSection(null);
-    setNewNoteDraft("");
-  };
-
-  const toggleCommentResolved = (blockId: string, id: string) => {
+  // Resolving a comment removes it outright — there's no unresolve/restore
+  // path, so this deletes rather than toggling a `resolved` flag. This is
+  // also the *only* way a comment box ever goes away once it has a comment
+  // in it: a target with any entry in `commentsData` always renders its box
+  // (see `DraftDocument`/`BlockVersionEditor`/`NoteDetail`), with no close
+  // affordance, so resolving down to zero comments is what makes it
+  // disappear. `targetId` works identically whether it's a block, a
+  // section (= a heading block's id), or a note id — see `Comment` in
+  // `types.ts`.
+  const resolveComment = (targetId: string, id: string) => {
     if (!activeProjectSlug) return;
-    const list = commentsData[blockId];
-    const comment = list?.find((c) => c.id === id);
-    if (!comment) return;
-    const resolved = !comment.resolved;
     setCommentsData((prev) => ({
       ...prev,
-      [blockId]: (prev[blockId] || []).map((c) => (c.id === id ? { ...c, resolved } : c)),
+      [targetId]: (prev[targetId] || []).filter((c) => c.id !== id),
     }));
-    fetch(`/api/projects/${activeProjectSlug}/comments/${id}`, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ resolved }),
-    }).catch(() => {});
+    fetch(`/api/projects/${activeProjectSlug}/comments/${id}`, { method: "DELETE" }).catch(() => {});
   };
 
-  const addReply = (blockId: string, anchor?: string) => {
-    const raw = replyDraft.trim();
+  const addReply = (targetId: string) => {
+    const raw = (replyDrafts[targetId] || "").trim();
     if (!raw || !activeProjectSlug) return;
-    setReplyDraft("");
+    setReplyDraft(targetId, "");
     fetch(`/api/projects/${activeProjectSlug}/comments`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ blockId, text: raw, anchor }),
+      body: JSON.stringify({ targetId, text: raw }),
     })
       .then((res) => res.json())
       .then((comment: Comment) => {
-        setCommentsData((prev) => ({ ...prev, [blockId]: [...(prev[blockId] || []), comment] }));
+        setCommentsData((prev) => ({ ...prev, [targetId]: [...(prev[targetId] || []), comment] }));
       })
       .catch(() => {});
+  };
+
+  // Global counterparts of `resolveComment`/`addReply`, for raw Inbox
+  // captures — same optimistic-update/fire-and-forget shape, just against
+  // `/api/inbox/comments` instead of a project's own comments endpoint.
+  const resolveInboxComment = (targetId: string, id: string) => {
+    setInboxCommentsData((prev) => ({
+      ...prev,
+      [targetId]: (prev[targetId] || []).filter((c) => c.id !== id),
+    }));
+    fetch(`/api/inbox/comments/${id}`, { method: "DELETE" }).catch(() => {});
+  };
+
+  const addInboxReply = (targetId: string) => {
+    const raw = (replyDrafts[targetId] || "").trim();
+    if (!raw) return;
+    setReplyDraft(targetId, "");
+    fetch("/api/inbox/comments", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ targetId, text: raw }),
+    })
+      .then((res) => res.json())
+      .then((comment: Comment) => {
+        setInboxCommentsData((prev) => ({ ...prev, [targetId]: [...(prev[targetId] || []), comment] }));
+      })
+      .catch(() => {});
+  };
+
+  const swapCommentBlocks = async (idA: string, idB: string): Promise<void> => {
+    if (!activeProjectSlug) return;
+    const wasA = commentsData[idA] || [];
+    const wasB = commentsData[idB] || [];
+    if (wasA.length === 0 && wasB.length === 0) return;
+    setCommentsData((prev) => ({
+      ...prev,
+      [idA]: wasB.map((c) => ({ ...c, targetId: idA })),
+      [idB]: wasA.map((c) => ({ ...c, targetId: idB })),
+    }));
+    await Promise.all([
+      ...wasA.map((c) =>
+        fetch(`/api/projects/${activeProjectSlug}/comments/${c.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ targetId: idB }),
+        }).catch(() => {})
+      ),
+      ...wasB.map((c) =>
+        fetch(`/api/projects/${activeProjectSlug}/comments/${c.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ targetId: idA }),
+        }).catch(() => {})
+      ),
+    ]);
+  };
+
+  // A block's alt versions — side data, never entered into the shared draft
+  // document (see `BlockVariant` in `types.ts` for why). Mirrors the
+  // comments actions above: optimistic local update, fire-and-forget
+  // persistence.
+  const addVariant = (blockId: string, content: DraftPartialBlock) => {
+    if (!activeProjectSlug) return;
+    const order = (variantsData[blockId]?.length ?? 0);
+    fetch(`/api/projects/${activeProjectSlug}/variants`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ blockId, content, order }),
+    })
+      .then((res) => res.json())
+      .then((variant: BlockVariant) => {
+        setVariantsData((prev) => ({ ...prev, [blockId]: [...(prev[blockId] || []), variant] }));
+      })
+      .catch(() => {});
+  };
+
+  const updateVariantContent = (variant: BlockVariant, content: DraftPartialBlock) => {
+    if (!activeProjectSlug) return;
+    setVariantsData((prev) => ({
+      ...prev,
+      [variant.blockId]: (prev[variant.blockId] || []).map((v) => (v.id === variant.id ? { ...v, content } : v)),
+    }));
+    const timers = variantSaveTimers.current;
+    const existing = timers.get(variant.id);
+    if (existing) clearTimeout(existing);
+    timers.set(
+      variant.id,
+      setTimeout(() => {
+        timers.delete(variant.id);
+        fetch(`/api/projects/${activeProjectSlug}/variants/${variant.id}`, {
+          method: "PATCH",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ content }),
+        }).catch(() => {});
+      }, 800),
+    );
+  };
+
+  const deleteVariant = (variant: BlockVariant) => {
+    if (!activeProjectSlug) return;
+    setVariantsData((prev) => ({
+      ...prev,
+      [variant.blockId]: (prev[variant.blockId] || []).filter((v) => v.id !== variant.id),
+    }));
+    fetch(`/api/projects/${activeProjectSlug}/variants/${variant.id}`, { method: "DELETE" }).catch(() => {});
+  };
+
+  const reorderVariants = (blockId: string, orderedIds: string[]) => {
+    if (!activeProjectSlug) return;
+    setVariantsData((prev) => {
+      const byId = new Map((prev[blockId] || []).map((v) => [v.id, v]));
+      const reordered = orderedIds
+        .map((id, order) => {
+          const v = byId.get(id);
+          return v ? { ...v, order } : null;
+        })
+        .filter((v): v is BlockVariant => !!v);
+      return { ...prev, [blockId]: reordered };
+    });
+    orderedIds.forEach((id, order) => {
+      fetch(`/api/projects/${activeProjectSlug}/variants/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order }),
+      }).catch(() => {});
+    });
   };
 
   // A note composed while a section's own Notes tab is open, with no
@@ -418,14 +655,14 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
   const withImplicitTags = (targets: MentionTarget[], draftDoc: DraftBlock[], sec: SectionKey | null): MentionTarget[] => {
     const next = [...targets];
     if (sec && !next.some((t) => t.kind === "section" || t.kind === "block")) {
-      const section = sectionMentionTargets(draftDoc, activeProjectSlug as string).find((s) => s.id === sec);
+      const section = sectionMentionTargets(draftDoc, activeProjectId as string).find((s) => s.id === sec);
       if (section) next.push(section);
     }
     // A note is always filed under the project you're currently in — if it
     // wasn't explicitly "@"-tagged elsewhere, tag it here too, so the tag
     // always shows and cross-listing stays consistent either way.
     if (!next.some((t) => t.kind === "project")) {
-      next.push({ kind: "project", id: activeProjectSlug as string, label: activeProject });
+      next.push({ kind: "project", id: activeProjectId as string, label: activeProject });
     }
     return next;
   };
@@ -449,11 +686,11 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
   const addItem = (draftDoc: DraftBlock[]) => {
     const raw = newNoteDraft.trim();
     if (!raw || !activeProjectSlug) return;
-    const targets = withImplicitTags(newNoteLinks, draftDoc, panelSection);
-    const bucket = targets.find((t) => t.kind === "section" && t.projectSlug === activeProjectSlug)?.id ?? panelSection ?? null;
+    const targets = withImplicitTags(newNoteLinks, draftDoc, null);
+    const bucket = targets.find((t) => t.kind === "section" && t.projectId === activeProjectId)?.id ?? null;
     const links = resolveNoteLinks(targets);
     const attachments = newNoteAttachments;
-    setNewNoteDraft(panelSection ? "#" + panelSection + " " : "");
+    setNewNoteDraft("");
     setNewNoteLinks([]);
     setNewNoteAttachments([]);
     fetch(`/api/projects/${activeProjectSlug}/notes`, {
@@ -516,9 +753,12 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
   const addRestoredNote = (n: Note) => setNotesData((prev) => [...prev, n]);
   const addRestoredInboxItem = (i: InboxItem) => setInboxItems((prev) => [...prev, i]);
 
-  const projectTitleFor = (slug: string) => projectsList.find((p) => p.slug === slug)?.title;
-  const enrichNote = (n: Note): EnrichedNote => ({ ...n, tag: resolvePrimaryTag(n.links, projectTitleFor) });
-  const enrichInboxItem = (i: InboxItem): EnrichedInboxItem => ({ ...i, tag: resolvePrimaryTag(i.links, projectTitleFor) });
+  const projectFor = (id: string): ProjectLookup | undefined => {
+    const p = projectsList.find((p) => p.id === id);
+    return p ? { slug: p.slug, title: p.title } : undefined;
+  };
+  const enrichNote = (n: Note): EnrichedNote => ({ ...n, tags: resolveTags(n.links, projectFor) });
+  const enrichInboxItem = (i: InboxItem): EnrichedInboxItem => ({ ...i, tags: resolveTags(i.links, projectFor) });
 
   // Newest-first: new notes are appended to notesData, so reverse it for display.
   const notesDesc = [...notesData].reverse().map(enrichNote);
@@ -528,11 +768,22 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
   const value: WritingOSState = {
     notesData,
     commentsData,
+    inboxCommentsData,
+    resolveInboxComment,
+    addInboxReply,
+    variantsData,
+    addVariant,
+    updateVariantContent,
+    deleteVariant,
+    reorderVariants,
+    swapCommentBlocks,
     inboxItems,
     activeProject,
     setActiveProject,
     activeProjectSlug,
     setActiveProjectSlug,
+    activeProjectId,
+    setActiveProjectId,
     projectsList,
     refreshProjects,
     addProjectToList,
@@ -542,9 +793,8 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     panelMode,
     openMenu,
     expandedItem,
-    commentOpenId,
-    panelSection,
-    panelTab,
+    scrollToBlockId,
+    setScrollToBlockId,
     newNoteDraft,
     newInboxDraft,
     newNoteLinks,
@@ -556,7 +806,7 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     newInboxAttachments,
     setNewInboxAttachments,
     docMode,
-    replyDraft,
+    replyDrafts,
     pdfViewer,
     openPdf,
     closePdf,
@@ -571,19 +821,16 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     deleteInboxItem,
     updateNoteBody,
     updateInboxBody,
+    setNoteAttachmentTranscription,
+    setInboxAttachmentTranscription,
     removeNoteTag,
     removeInboxTag,
     addNoteTag,
     addInboxTag,
-    openSectionPanel,
-    closeSectionPanel,
     setPanelMode,
-    setPanelTab,
-    toggleCommentResolved,
+    resolveComment,
     setReplyDraft,
     addReply,
-    pendingAnchor,
-    setPendingAnchor,
     setNewNoteDraft,
     addItem,
     addNoteToSection,
@@ -592,7 +839,6 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     addRestoredNote,
     addRestoredInboxItem,
     setDocMode,
-    setCommentOpenId,
     enrichNote,
     enrichInboxItem,
     notesDesc,

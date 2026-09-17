@@ -15,6 +15,12 @@ export function InboxItemExpanded({ id }: { id: string | number }) {
     addInboxTag,
     deleteInboxItem,
     updateInboxBody,
+    setInboxAttachmentTranscription,
+    inboxCommentsData,
+    replyDrafts,
+    setReplyDraft,
+    addInboxReply,
+    resolveInboxComment,
   } = useWritingOS();
   const mentionTargets = useAllMentionTargets();
   const raw = inboxItems.find((x) => x.id === id);
@@ -28,17 +34,23 @@ export function InboxItemExpanded({ id }: { id: string | number }) {
       <NoteDetail
         id={it.id}
         text={it.body}
-        tag={it.tag}
+        tags={it.tags}
         time={it.time}
         resolved={it.resolved}
         attachments={it.attachments}
         onToggleResolved={() => toggleInboxResolved(it.id)}
         onTextChange={(text) => updateInboxBody(it.id, text)}
-        onRemoveTag={() => removeInboxTag(it.id)}
+        onSetAttachmentTranscription={(url, t) => setInboxAttachmentTranscription(it.id, url, t)}
+        onRemoveTag={(t) => removeInboxTag(it.id, t.kind, t.tagId)}
         onDelete={() => deleteInboxItem(it.id)}
         isFullscreen
         mentionTargets={mentionTargets}
         onAddTag={(target) => addInboxTag(it.id, target)}
+        comments={inboxCommentsData[it.id] || []}
+        replyDraft={replyDrafts[it.id]}
+        onReplyChange={(v) => setReplyDraft(it.id, v)}
+        onReplySubmit={() => addInboxReply(it.id)}
+        onResolveComment={(id) => resolveInboxComment(it.id, id)}
       />
     </PanelShell>
   );

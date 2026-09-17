@@ -3,7 +3,7 @@
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useAllMentionTargets } from "@/app/lib/writing-os/useAllMentionTargets";
 import { NoteRow } from "@/app/components/shared/NoteRow";
-import { NoteComposer } from "@/app/components/shared/NoteComposer";
+import { IntentComposer } from "@/app/components/shared/IntentComposer";
 
 export function InboxList() {
   const {
@@ -19,6 +19,8 @@ export function InboxList() {
     setNewInboxAttachments,
     addInboxItem,
     deleteInboxItem,
+    inboxCommentsData,
+    setInboxAttachmentTranscription,
   } = useWritingOS();
 
   // The Inbox isn't scoped to one project, so "#" here searches sections and
@@ -36,20 +38,22 @@ export function InboxList() {
           <NoteRow
             key={item.id}
             text={item.body}
-            tag={item.tag}
+            tags={item.tags}
             time={item.time}
             resolved={item.resolved}
             attachments={item.attachments}
             onOpen={() => openExpanded("inbox", item.id)}
             onToggleResolved={() => toggleInboxResolved(item.id)}
-            onRemoveTag={() => removeInboxTag(item.id)}
+            onRemoveTag={(t) => removeInboxTag(item.id, t.kind, t.tagId)}
             onDelete={() => deleteInboxItem(item.id)}
+            commentCount={item.homeSlug ? undefined : (inboxCommentsData[item.id] || []).length}
+            onSetTranscription={(url, t) => setInboxAttachmentTranscription(item.id, url, t)}
           />
         ))}
       </div>
 
       <div className="pt-[14px] px-[0] pb-[24px] shrink-0">
-        <NoteComposer
+        <IntentComposer
           value={newInboxDraft}
           onChange={setNewInboxDraft}
           links={newInboxLinks}

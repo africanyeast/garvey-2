@@ -12,6 +12,7 @@ export async function PATCH(
     resolved: patch.resolved,
     bucket: patch.bucket,
     links: patch.links,
+    attachments: patch.attachments,
   });
   if (!note) return NextResponse.json({ error: "not found" }, { status: 404 });
   return NextResponse.json(note);

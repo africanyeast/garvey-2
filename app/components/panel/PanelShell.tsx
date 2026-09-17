@@ -24,6 +24,10 @@ interface PanelShellProps {
    * only "leave this state" action, paired right next to expand/restore. */
   onClose: () => void;
   closeTitle?: string;
+  /** Extra icon button(s) rendered right before expand/restore + close — for
+   * a panel-specific action (e.g. transcription's copy) that belongs in the
+   * header rather than the body. */
+  headerActions?: ReactNode;
   children: ReactNode;
 }
 
@@ -38,7 +42,7 @@ const iconButton = "bg-transparent border-none text-[var(--text-muted)] cursor-p
  * the right — no left-side icon. Most panels skip the label entirely: just
  * the divider and the close (plus expand/restore where applicable).
  */
-export function PanelShell({ title, mode, onFullscreen, onRestore, onClose, closeTitle = "Close", children }: PanelShellProps) {
+export function PanelShell({ title, mode, onFullscreen, onRestore, onClose, closeTitle = "Close", headerActions, children }: PanelShellProps) {
   const isFullscreen = mode === "fullscreen";
 
   return (
@@ -53,6 +57,7 @@ export function PanelShell({ title, mode, onFullscreen, onRestore, onClose, clos
       <div className="flex items-center justify-between gap-[10px] h-[52px] pl-[16px] pr-[10px] border-b border-b-[var(--border-default)] shrink-0">
         {title ? <span className="text-[13px] font-bold text-[var(--text-primary)] truncate">{title}</span> : <span />}
         <div className="flex items-center gap-[2px] shrink-0">
+          {headerActions}
           {isFullscreen
             ? onRestore && (
                 <button onClick={onRestore} title="Restore" className={iconButton}>

@@ -5,7 +5,7 @@ import type { MentionTarget } from "@/app/lib/writing-os/mentions";
 
 /**
  * A standalone "@"/"#" tagger — the same trigger-and-dropdown idea as
- * `NoteComposer`'s mention picker, but for adding a tag to a note that
+ * `IntentComposer`'s mention picker, but for adding a tag to a note that
  * already exists (the expanded note/inbox-item view), independent of
  * editing its body text. Picking a target adds it immediately and clears
  * the input, rather than accumulating into a submittable draft.

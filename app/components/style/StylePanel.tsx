@@ -47,7 +47,7 @@ function WritingSamples({
               <X size={14} strokeWidth={1.8} />
             </button>
           </div>
-          <p className="font-serif text-sm font-normal text-[var(--text-primary)] m-[0] whitespace-pre-wrap">{s}</p>
+          <p className="font-sans text-sm font-normal text-[var(--text-primary)] m-[0] whitespace-pre-wrap">{s}</p>
         </div>
       ))}
 

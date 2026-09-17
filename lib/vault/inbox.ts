@@ -5,37 +5,46 @@ import matter from "gray-matter";
 import { ensureVault } from "./bootstrap";
 import { INBOX_DIR, inboxFilePath, TRASH_INBOX_DIR, trashedInboxFilePath } from "./paths";
 import { formatRelative } from "./time";
-import { listProjectSlugs } from "./project";
-import { listNotes } from "./notes";
+import { listProjectSlugs, projectSlugToIdMap, getProject } from "./project";
+import { listNotes, normalizeLinks } from "./notes";
 import type { Attachment, InboxItem, Note, NoteLinks, TrashedInboxItem } from "@/app/lib/writing-os/types";
 
 interface InboxFrontmatter {
   resolved: boolean;
   created_at: string;
+  updated_at?: string;
   attachments?: Attachment[];
   links?: NoteLinks;
 }
 
-function toItem(id: string, fm: InboxFrontmatter, body: string): InboxItem {
+// Inbox captures are global — not filed under any project — so there's no
+// "home" project to fall back a legacy `blockIds` ref onto (unlike a note's
+// `normalizeLinks`); passing "" as the home slug just means that branch
+// (which never applied to inbox items in practice) resolves to nothing
+// rather than a real project, same as any other unresolvable legacy tag.
+function toItem(id: string, fm: InboxFrontmatter, body: string, slugToId: Map<string, string>): InboxItem {
   return {
     id,
     body: body.trim(),
-    time: formatRelative(fm.created_at),
+    // Falls back to `created_at` for items written before `updated_at`
+    // existed — nothing to migrate, just a one-time default.
+    time: formatRelative(fm.updated_at ?? fm.created_at),
     resolved: fm.resolved ?? false,
     attachments: fm.attachments ?? [],
-    links: fm.links ?? { projectSlugs: [], refs: [] },
+    links: normalizeLinks(fm.links, "", slugToId),
   };
 }
 
 export async function listInboxItems(): Promise<InboxItem[]> {
   await ensureVault();
   const files = (await readdir(INBOX_DIR)).filter((f) => f.endsWith(".md"));
+  const slugToId = await projectSlugToIdMap();
   const items = await Promise.all(
     files.map(async (file) => {
       const id = file.replace(/\.md$/, "");
       const raw = await readFile(inboxFilePath(id), "utf-8");
       const { data, content } = matter(raw);
-      return toItem(id, data as InboxFrontmatter, content);
+      return toItem(id, data as InboxFrontmatter, content, slugToId);
     })
   );
   // Filenames are ULIDs, which sort lexicographically by creation time.
@@ -46,7 +55,7 @@ export async function listInboxItems(): Promise<InboxItem[]> {
  * items plus every project's notes, newest first by creation (ulid ids sort
  * lexicographically), each note carrying `homeSlug` so the UI can act on it
  * at its real location. Display tag/label resolution happens client-side
- * (via `resolvePrimaryTag`, backed by `projectsList`) straight off `links`
+ * (via `resolveTags`, backed by `projectsList`) straight off `links`
  * — nothing precomputed here. */
 export async function listGlobalFeed(): Promise<InboxItem[]> {
   const inboxOnly = await listInboxItems();
@@ -77,8 +86,9 @@ export async function listGlobalFeed(): Promise<InboxItem[]> {
  * project's Notes tab and rendered by the same `NoteRow`/`NoteDetail`. */
 export async function listInboxItemsForProject(slug: string): Promise<Note[]> {
   const items = await listInboxItems();
+  const project = await getProject(slug);
   return items
-    .filter((i) => i.links?.projectSlugs.includes(slug))
+    .filter((i) => !!project && i.links?.projectIds.includes(project.id))
     .map(
       (i): Note => ({
         id: i.id,
@@ -100,20 +110,23 @@ export async function createInboxItem(input: {
 }): Promise<InboxItem> {
   await ensureVault();
   const id = ulid();
+  const now = new Date().toISOString();
+  const slugToId = input.links ? await projectSlugToIdMap() : new Map<string, string>();
   const fm: InboxFrontmatter = {
     resolved: false,
-    created_at: new Date().toISOString(),
+    created_at: now,
+    updated_at: now,
     ...(input.attachments?.length ? { attachments: input.attachments } : {}),
-    ...(input.links ? { links: input.links } : {}),
+    ...(input.links ? { links: normalizeLinks(input.links, "", slugToId) } : {}),
   };
   const file = matter.stringify(input.body, fm);
   await writeFile(inboxFilePath(id), file, "utf-8");
-  return toItem(id, fm, input.body);
+  return toItem(id, fm, input.body, slugToId);
 }
 
 export async function updateInboxItem(
   id: string,
-  patch: { body?: string; resolved?: boolean; links?: NoteLinks }
+  patch: { body?: string; resolved?: boolean; links?: NoteLinks; attachments?: Attachment[] }
 ): Promise<InboxItem | null> {
   await ensureVault();
   const filePath = inboxFilePath(id);
@@ -125,15 +138,20 @@ export async function updateInboxItem(
   }
   const { data, content } = matter(raw);
   const fm = data as InboxFrontmatter;
+  const slugToId = await projectSlugToIdMap();
   const nextFm: InboxFrontmatter = {
     ...fm,
     resolved: patch.resolved ?? fm.resolved,
-    links: patch.links ?? fm.links,
+    attachments: patch.attachments ?? fm.attachments,
+    // Always normalized before it's written back — see `updateNote`'s
+    // identical self-healing comment.
+    links: normalizeLinks(patch.links ?? fm.links, "", slugToId),
+    updated_at: new Date().toISOString(),
   };
   const nextBody = patch.body ?? content;
   const file = matter.stringify(nextBody, nextFm);
   await writeFile(filePath, file, "utf-8");
-  return toItem(id, nextFm, nextBody);
+  return toItem(id, nextFm, nextBody, slugToId);
 }
 
 export async function trashInboxItem(id: string): Promise<boolean> {
@@ -153,13 +171,14 @@ export async function listTrashedInboxItems(): Promise<TrashedInboxItem[]> {
   await ensureVault();
   if (!existsSync(TRASH_INBOX_DIR)) return [];
   const files = (await readdir(TRASH_INBOX_DIR)).filter((f) => f.endsWith(".md"));
+  const slugToId = await projectSlugToIdMap();
   const items = await Promise.all(
     files.map(async (file) => {
       const id = file.replace(/\.md$/, "");
       const raw = await readFile(trashedInboxFilePath(id), "utf-8");
       const { data, content } = matter(raw);
       const fm = data as InboxFrontmatter & { trashed_at?: string };
-      return { ...toItem(id, fm, content), trashedAt: fm.trashed_at ?? "" };
+      return { ...toItem(id, fm, content, slugToId), trashedAt: fm.trashed_at ?? "" };
     })
   );
   return items.sort((a, b) => b.trashedAt.localeCompare(a.trashedAt));
@@ -172,7 +191,9 @@ export async function restoreInboxItem(id: string): Promise<InboxItem | null> {
   const raw = await readFile(src, "utf-8");
   const { data, content } = matter(raw);
   const { trashed_at: _trashedAt, ...fm } = data as InboxFrontmatter & { trashed_at?: string };
-  await writeFile(inboxFilePath(id), matter.stringify(content, fm), "utf-8");
+  const slugToId = await projectSlugToIdMap();
+  const normalizedFm: InboxFrontmatter = { ...(fm as InboxFrontmatter), links: normalizeLinks(fm.links, "", slugToId) };
+  await writeFile(inboxFilePath(id), matter.stringify(content, normalizedFm), "utf-8");
   await unlink(src);
-  return toItem(id, fm as InboxFrontmatter, content);
+  return toItem(id, normalizedFm, content, slugToId);
 }

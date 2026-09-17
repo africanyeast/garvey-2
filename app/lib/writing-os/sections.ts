@@ -1,5 +1,4 @@
 import type { DraftBlock, DraftEditor } from "./schema";
-import { blockPlainText } from "./blockText";
 
 /**
  * Sections aren't a parallel data structure here — a top-level `section`
@@ -7,27 +6,10 @@ import { blockPlainText } from "./blockText";
  * section's blocks (the same nesting BlockNote already uses for a nested
  * list item). Regular `heading` blocks are still available for sub-
  * structure *within* a section, but never count as a section boundary
- * themselves. These helpers are the only place that walks the document to
- * answer "what are the sections" / "which section is this block in", so
- * every consumer (side panel, notes composer, expanded-block panel) agrees
- * by construction instead of by convention.
+ * themselves. This is the only place that walks the document to answer
+ * "which section is this block in", so every consumer (notes composer,
+ * expanded-block panel) agrees by construction instead of by convention.
  */
-export interface SectionInfo {
-  key: string;
-  label: string;
-  blocks: DraftBlock[];
-}
-
-export function deriveSections(document: DraftBlock[]): SectionInfo[] {
-  return document
-    .filter((b) => b.type === "section")
-    .map((b) => ({ key: b.id, label: blockPlainText(b) || "Untitled section", blocks: b.children as DraftBlock[] }));
-}
-
-export function blocksInSection(document: DraftBlock[], sectionId: string): DraftBlock[] {
-  const section = document.find((b) => b.id === sectionId && b.type === "section");
-  return (section?.children as DraftBlock[]) ?? [];
-}
 
 /** Walks the whole tree (not just top-level) since a block may be nested
  * several levels deep under a section (e.g. inside a list). Blocks that

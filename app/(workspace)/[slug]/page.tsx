@@ -21,8 +21,8 @@ export default async function ProjectPage({
       project={project}
       initialDocument={initialDocument}
       openBriefByDefault={isNew === "1"}
-      openSectionId={section}
       openBlockId={block}
+      scrollToSectionId={section}
     />
   );
 }

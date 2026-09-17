@@ -19,3 +19,23 @@ export async function updateStyle(patch: Partial<StyleProfile>): Promise<StylePr
   await writeFile(DEFAULT_STYLE_PATH, file, "utf-8");
   return next;
 }
+
+/** Turns the structured style profile into plain prose for direct use as
+ * prompt text — `getStyle()`'s frontmatter has no raw body to read back
+ * (`updateStyle` always writes an empty one), so this is synthesized, not
+ * extracted. */
+export function styleToRaw(profile: StyleProfile): string {
+  const lines = [
+    `Tone: ${profile.tone.join(", ")}.`,
+    `Sentence length: ${profile.sentence_length}.`,
+    `Avoid these words: ${profile.avoid_words.join(", ")}.`,
+    `Preferred transitions: ${profile.preferred_transitions.join(", ")}.`,
+    `Structural habits: ${profile.structural_habits}`,
+    `Register: ${profile.register.join(", ")}.`,
+  ];
+  if (profile.writing_samples.length > 0) {
+    lines.push("Writing samples in this voice:");
+    for (const sample of profile.writing_samples) lines.push(`- ${sample}`);
+  }
+  return lines.join("\n");
+}

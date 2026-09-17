@@ -1,9 +1,9 @@
 "use client";
 
-import { useRef, useState, type MouseEvent } from "react";
+import { useEffect, useRef, useState, type MouseEvent } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { EllipsisVertical, FileText, Inbox, Plus, Trash2, Feather, GripVertical } from "lucide-react";
+import { EllipsisVertical, FileText, Inbox, Plus, Search, Trash2, Feather, GripVertical } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -26,6 +26,7 @@ import { RowIconButton } from "@/app/components/shared/RowIconButton";
 import { DropdownMenu } from "@/app/components/shared/DropdownMenu";
 import { MenuRow } from "@/app/components/shared/MenuRow";
 import { ConfirmDialog } from "@/app/components/shared/ConfirmDialog";
+import { SearchModal } from "@/app/components/search/SearchModal";
 
 export function Sidebar() {
   const pathname = usePathname();
@@ -38,6 +39,18 @@ export function Sidebar() {
   } = useWritingOS();
   const [menuOpenSlug, setMenuOpenSlug] = useState<string | null>(null);
   const [confirmProject, setConfirmProject] = useState<Project | null>(null);
+  const [searchOpen, setSearchOpen] = useState(false);
+
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+        e.preventDefault();
+        setSearchOpen(true);
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, []);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   // A drag that actually moved the item ends in a native "click" on the
   // anchor right after pointerup — swallow that one click so dragging a
@@ -89,13 +102,23 @@ export function Sidebar() {
         </span>
       </div>
 
-      <Link
-        href="/inbox"
-        className={`flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer ${isInbox ? "border border-[var(--border-default)]" : "bg-transparent"}`}
-      >
-        <Inbox size={17} className="text-[var(--text-primary)]" />
-        <span className={`text-[12px] font-semibold text-[var(--text-primary)] flex-1`}>Inbox</span>
-      </Link>
+      <div className="flex flex-col gap-[2px]">
+        <Link
+          href="/inbox"
+          className={`flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer ${isInbox ? "border border-[var(--border-default)]" : "bg-transparent"}`}
+        >
+          <Inbox size={17} className="text-[var(--text-secondary)]" />
+          <span className={`text-[12px] font-semibold text-[var(--text-secondary)] flex-1`}>Inbox</span>
+        </Link>
+
+        <button
+          onClick={() => setSearchOpen(true)}
+          className="flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer bg-transparent border-none text-left"
+        >
+          <Search size={17} className="text-[var(--text-secondary)]" />
+          <span className="text-[12px] font-semibold text-[var(--text-secondary)] flex-1">Search</span>
+        </button>
+      </div>
 
       <div className="flex flex-col gap-[2px]">
         <div className={`text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] px-[10px] mb-[6px]`}>
@@ -142,15 +165,15 @@ export function Sidebar() {
           href="/style"
           className={`flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer ${isStyle ? "border border-[var(--border-default)]" : "bg-transparent"}`}
         >
-          <Feather size={16} className="text-[var(--text-primary)]" />
-          <span className={`text-[12px] font-semibold text-[var(--text-primary)]`}>Style</span>
+          <Feather size={16} className="text-[var(--text-secondary)]" />
+          <span className={`text-[12px] font-semibold text-[var(--text-secondary)]`}>Style</span>
         </Link>
         <Link
           href="/trash"
           className={`flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer ${isTrash ? "border border-[var(--border-default)]" : "bg-transparent"}`}
         >
-          <Trash2 size={16} className="text-[var(--text-primary)]" />
-          <span className={`text-[12px] font-semibold text-[var(--text-primary)]`}>Trash</span>
+          <Trash2 size={16} className="text-[var(--text-secondary)]" />
+          <span className={`text-[12px] font-semibold text-[var(--text-secondary)]`}>Trash</span>
         </Link>
       </div>
 
@@ -166,6 +189,8 @@ export function Sidebar() {
           onCancel={() => setConfirmProject(null)}
         />
       )}
+
+      {searchOpen && <SearchModal onClose={() => setSearchOpen(false)} />}
     </div>
   );
 }
@@ -205,8 +230,8 @@ function SortableProjectRow({
       >
         <GripVertical size={13} strokeWidth={1.8} />
       </span>
-      <FileText size={15} className="shrink-0 text-[var(--text-primary)]" />
-      <span className="text-xs font-semibold flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--text-primary)]">
+      <FileText size={15} className="shrink-0 text-[var(--text-secondary)]" />
+      <span className="text-xs font-medium flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--text-primary)]">
         {projectDisplayTitle(project)}
       </span>
       <RowIconButton

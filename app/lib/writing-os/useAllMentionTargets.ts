@@ -31,10 +31,12 @@ export function useAllMentionTargets(): MentionTarget[] {
 
   return useMemo(() => {
     const projects = buildProjectTargets(projectsList);
-    const sectionsAndBlocks = Object.entries(docsBySlug).flatMap(([slug, doc]) => [
-      ...sectionMentionTargets(doc, slug),
-      ...blockMentionTargets(doc, slug),
-    ]);
+    const idBySlug = new Map(projectsList.map((p) => [p.slug, p.id]));
+    const sectionsAndBlocks = Object.entries(docsBySlug).flatMap(([slug, doc]) => {
+      const projectId = idBySlug.get(slug);
+      if (!projectId) return [];
+      return [...sectionMentionTargets(doc, projectId), ...blockMentionTargets(doc, projectId)];
+    });
     return [...projects, ...sectionsAndBlocks];
   }, [projectsList, docsBySlug]);
 }

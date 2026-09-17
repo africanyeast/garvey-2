@@ -5,7 +5,17 @@ import { NoteRow } from "@/app/components/shared/NoteRow";
 
 /** The default "Notes & Research" view: every note for this project, newest first. */
 export function AllNotesList() {
-  const { notesDesc, openExpanded, toggleNoteResolved, removeNoteTag, deleteNote } = useWritingOS();
+  const {
+    notesDesc,
+    openExpanded,
+    toggleNoteResolved,
+    removeNoteTag,
+    deleteNote,
+    commentsData,
+    inboxCommentsData,
+    setNoteAttachmentTranscription,
+    setInboxAttachmentTranscription,
+  } = useWritingOS();
 
   if (notesDesc.length === 0) {
     return (
@@ -21,14 +31,22 @@ export function AllNotesList() {
         <NoteRow
           key={note.id}
           text={note.body}
-          tag={note.tag}
+          tags={note.tags}
           time={note.time}
           resolved={note.resolved}
           attachments={note.attachments}
           onOpen={() => openExpanded("note", note.id)}
           onToggleResolved={() => toggleNoteResolved(note.id)}
-          onRemoveTag={() => removeNoteTag(note.id)}
+          onRemoveTag={(t) => removeNoteTag(note.id, t.kind, t.tagId)}
           onDelete={() => deleteNote(note.id)}
+          commentCount={
+            note.fromInbox ? (inboxCommentsData[note.id] || []).length : (commentsData[note.id] || []).length
+          }
+          onSetTranscription={(url, t) =>
+            note.fromInbox
+              ? setInboxAttachmentTranscription(note.id, url, t)
+              : setNoteAttachmentTranscription(note.id, url, t)
+          }
         />
       ))}
     </div>

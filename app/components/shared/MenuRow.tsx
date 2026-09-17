@@ -15,11 +15,13 @@ export function MenuRow({
   label,
   onClick,
   active = false,
+  shortcut,
 }: {
   icon: LucideIcon;
   label: string;
   onClick: (e: MouseEvent) => void;
   active?: boolean;
+  shortcut?: string;
 }) {
   return (
     <button
@@ -30,6 +32,7 @@ export function MenuRow({
     >
       <Icon size={13} strokeWidth={1.8} />
       <span className="flex-1">{label}</span>
+      {shortcut && <span className="text-[var(--text-muted)] font-normal">{shortcut}</span>}
     </button>
   );
 }

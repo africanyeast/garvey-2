@@ -1,12 +1,12 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useLayoutEffect, useRef, useState, useMemo } from "react";
 import { Minimize2, MessageCircle } from "lucide-react";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useDraftEditor } from "@/app/lib/writing-os/editor-context";
-import { CommentsBody } from "@/app/components/shared/CommentsBody";
 import { BlockNoteDocument } from "@/app/components/draft/BlockNoteDocument";
 import { RowIconButton } from "@/app/components/shared/RowIconButton";
+import { useBlockCommentHighlight } from "@/app/lib/writing-os/commentHighlight";
 
 /**
  * The one BlockNote editor for the whole draft — sections and blocks alike
@@ -16,63 +16,90 @@ import { RowIconButton } from "@/app/components/shared/RowIconButton";
  * system instead of the block-level and section-level halves needing their
  * own separate implementations. The custom pieces layered on top are: a
  * top-right Expand/Comments button pair per hovered block (own hover
- * tracking, not BlockNote's — see the note below), the selection→Comment
- * formatting-toolbar button, and the whole-block-commented highlight.
+ * tracking, not BlockNote's — see the note below), a persistent margin
+ * indicator for any block with an active comment, the whole-block-comment
+ * mark, and BlockNote's own native comment-mark UI for a selected phrase
+ * (`BlockNoteDocument`'s `FloatingComposerController`/
+ * `FloatingThreadController` — see `editor-context.tsx`'s `CommentsExtension`
+ * wiring, and the `comment-freeze` memory for why selection comments moved
+ * off this app's own hand-rolled highlighting).
+ *
+ * Comments themselves are never shown inline here — reserving enough width
+ * for a readable comment box squeezed the actual writing surface down to
+ * something cramped on any normal window size (there's no ambient margin to
+ * borrow beside a fixed-width sidebar and an optional dock; see git history
+ * for the two attempts that tried). A block's comments only ever render in
+ * `BlockExpanded`/`BlockVersionEditor`, which has a whole fullscreen panel
+ * to work with — both icons below just take the reader there.
  */
 export function DraftDocument() {
-  const {
-    commentsData,
-    commentOpenId,
-    setCommentOpenId,
-    pendingAnchor,
-    setPendingAnchor,
-    replyDraft,
-    setReplyDraft,
-    addReply,
-    toggleCommentResolved,
-    openExpanded,
-  } = useWritingOS();
+  const { commentsData, openExpanded, scrollToBlockId, setScrollToBlockId } = useWritingOS();
   const { editor, syncDocument } = useDraftEditor();
   const containerRef = useRef<HTMLDivElement>(null);
 
-  // Whole-block-commented highlight — pure classList toggling on each
-  // commented block's own wrapper element, never touching editable content,
-  // so it carries no caret risk. Walking `commentsData`'s own keys (rather
-  // than the document tree) means this doesn't care how deeply a block is
-  // nested under a section.
+  // A "#" section tag's click-through lands here — scroll it into view
+  // inline, right where it already lives in the document, rather than
+  // opening any kind of panel or fullscreen view for it.
   useLayoutEffect(() => {
+    if (!scrollToBlockId) return;
     const root = editor.domElement;
-    if (!root) return;
-    for (const [blockId, comments] of Object.entries(commentsData)) {
-      const el = root.querySelector<HTMLElement>(`[data-id="${blockId}"]`);
-      if (!el) continue;
-      const commented = comments.some((c) => !c.resolved && !c.anchor);
-      el.classList.toggle("wos-block-highlight", commented);
-    }
-  });
+    const el = root?.querySelector<HTMLElement>(`[data-id="${scrollToBlockId}"]`);
+    el?.scrollIntoView({ behavior: "smooth", block: "center" });
+    setScrollToBlockId(null);
+  }, [editor, scrollToBlockId, setScrollToBlockId]);
 
-  // Comment ids are always block ids (strings) here; `commentOpenId` is
-  // `string | number` only because notes/inbox items share the same field.
-  const openBlock = commentOpenId ? editor.getBlock(String(commentOpenId)) : undefined;
+  // Whole-block-comment mark — see `useBlockCommentHighlight`'s own doc
+  // comment for why this no longer covers selection comments too.
+  useBlockCommentHighlight(editor.domElement, commentsData);
 
-  const [popoverPos, setPopoverPos] = useState<{ top: number; left: number } | null>(null);
-  // Positioning the comments popover requires the target block's real,
-  // post-layout DOM rect — there's no way to derive that during render, so
-  // this (like any DOM-measurement-driven position) has to live in an
-  // effect rather than be computed inline.
+  // Every block carrying an active (unresolved) comment — `commentsData`
+  // only ever holds unresolved comments (resolving one deletes it), so
+  // "has an entry here" already means "has an active comment," no extra
+  // filtering needed. Each gets a persistent margin indicator (Notion-style
+  // — visible without hovering) that, like the hover Comments icon below,
+  // just opens the block's expanded view rather than any inline UI.
+  const commentedBlockIds = useMemo(
+    () => Object.keys(commentsData).filter((id) => (commentsData[id]?.length ?? 0) > 0),
+    [commentsData]
+  );
+  const commentedBlockIdsKey = commentedBlockIds.join(",");
+
+  const [commentedTops, setCommentedTops] = useState<Record<string, number>>({});
   useLayoutEffect(() => {
     const root = editor.domElement;
     const container = containerRef.current;
-    const el = openBlock && root ? root.querySelector<HTMLElement>(`[data-id="${openBlock.id}"]`) : null;
-    const next =
-      el && container
-        ? {
-            top: el.getBoundingClientRect().top - container.getBoundingClientRect().top,
-            left: el.getBoundingClientRect().right - container.getBoundingClientRect().left - 270,
-          }
-        : null;
-    setPopoverPos(next);
-  }, [editor, openBlock]);
+    if (!root || !container) return;
+
+    const measure = () => {
+      const containerTop = container.getBoundingClientRect().top;
+      setCommentedTops((prev) => {
+        const next: Record<string, number> = {};
+        let changed = commentedBlockIds.length !== Object.keys(prev).length;
+        for (const id of commentedBlockIds) {
+          const el = root.querySelector<HTMLElement>(`[data-id="${id}"]`);
+          if (!el) continue;
+          const top = el.getBoundingClientRect().top - containerTop;
+          next[id] = top;
+          if (prev[id] !== top) changed = true;
+        }
+        // Bail out on an identical result so this never feeds back into
+        // itself — the ResizeObserver below only fires on genuine layout
+        // change, but returning a stable reference here is what actually
+        // guarantees no render loop (see the `comment-freeze` memory: the
+        // hazard is reacting to your own writes, not reading layout per se;
+        // this indicator is `position: absolute` and doesn't affect the
+        // container's own size, so observing the container is safe as long
+        // as this stays a plain read, never a DOM write).
+        return changed ? next : prev;
+      });
+    };
+
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(container);
+    return () => observer.disconnect();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [editor, commentedBlockIdsKey]);
 
   // Which block the Expand/Comments overlay is anchored to. Deliberately our
   // own hover state rather than BlockNote's SideMenuExtension `show` (which
@@ -117,6 +144,28 @@ export function DraftDocument() {
     >
       <BlockNoteDocument editor={editor} onChange={syncDocument} />
 
+      {/* A block with an active comment gets a persistent margin indicator —
+       * visible without hovering, Notion-style — instead of only the
+       * hover-revealed Comments icon below. Skips whichever block is
+       * currently hovered: that row already renders its own Comments icon
+       * (styled to match, just below) in the same slot. Clicking either one
+       * does the same thing — opens the block's expanded view, the only
+       * place a comment's own text ever renders (see this component's own
+       * doc comment). */}
+      {commentedBlockIds
+        .filter((id) => id !== hoverBlockId && commentedTops[id] !== undefined)
+        .map((id) => (
+          <button
+            key={id}
+            onClick={() => openExpanded("block", id)}
+            title={`${commentsData[id].length} comment${commentsData[id].length > 1 ? "s" : ""}`}
+            className="absolute right-[0] z-[4] bg-transparent border-none cursor-pointer p-[3px] flex text-[var(--fill-highlight-rail)]"
+            style={{ top: commentedTops[id] }}
+          >
+            <MessageCircle size={13} strokeWidth={1.8} fill="var(--fill-highlight-subtle)" />
+          </button>
+        ))}
+
       {hoverBlockId && hoverTop !== null && (
         <div className="absolute right-[0] z-[5] flex items-center gap-[1px]" style={{ top: hoverTop }}>
           <RowIconButton
@@ -126,35 +175,11 @@ export function DraftDocument() {
             onClick={() => openExpanded("block", hoverBlockId)}
           />
           <RowIconButton
-            icon={<MessageCircle size={14} strokeWidth={1.8} />}
+            icon={<MessageCircle size={14} strokeWidth={1.8} fill={commentsData[hoverBlockId]?.length ? "var(--fill-highlight-subtle)" : "none"} />}
             label="Comments"
             reveal={false}
-            onClick={() => {
-              setPendingAnchor(null);
-              setCommentOpenId(commentOpenId === hoverBlockId ? null : hoverBlockId);
-            }}
-          />
-        </div>
-      )}
-
-      {openBlock && popoverPos && (
-        <div
-          className="absolute z-[10] bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-md shadow-md p-[14px] w-[270px]"
-          style={popoverPos}
-        >
-          <CommentsBody
-            comments={commentsData[openBlock.id] || []}
-            onToggleResolved={(id) => toggleCommentResolved(openBlock.id, id)}
-            replyDraft={replyDraft}
-            onReplyChange={setReplyDraft}
-            onReplySubmit={() => {
-              addReply(openBlock.id, pendingAnchor ?? undefined);
-              setPendingAnchor(null);
-            }}
-            onClose={() => {
-              setCommentOpenId(null);
-              setPendingAnchor(null);
-            }}
+            className={commentsData[hoverBlockId]?.length ? "text-[var(--fill-highlight-rail)]" : ""}
+            onClick={() => openExpanded("block", hoverBlockId)}
           />
         </div>
       )}

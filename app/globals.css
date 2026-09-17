@@ -84,8 +84,17 @@
   --fill-primary-subtle: var(--color-brand-50);
   --fill-primary-subtle-border: var(--color-brand-500);
 
-  --fill-highlight: #f6e4ce;
-  --fill-highlight-border: var(--color-brand-300);
+  /* Golden yellow — the anchored (selection) comment highlight's solid
+     fill. Deliberately its own hue, not a brand-orange tint, so it never
+     reads as "part of the brand palette" the way the old peachy-orange
+     accidentally did. */
+  --fill-highlight: #f6e2a8;
+  /* The whole-block-commented rail (see .wos-block-highlight below) — a
+     lighter tint of the same hue plus a stronger border color for the rail
+     itself, so a block-level flag and an inline anchored highlight read as
+     related but distinct marks rather than colliding fills. */
+  --fill-highlight-subtle: #fbf1d9;
+  --fill-highlight-rail: #e0b23c;
 
   --progress-track: var(--color-neutral-100);
   --progress-fill: var(--color-brand-500);
@@ -226,11 +235,14 @@ input {
   border-radius: 0 !important;
 }
 /* The main document editor reserves a fixed right-hand gutter so its
-   hovered-block Expand/Comments overlay (DraftDocument) never sits on top
-   of wrapped text — the same idea as BlockExpanded's own `pr-[28px]` on its
-   single block, just applied editor-wide instead of block-wide so the
-   overlay's horizontal position can be a constant instead of a per-block
-   measurement. */
+   hovered-block Expand/Comments overlay and persistent per-block comment
+   indicator (both in DraftDocument) never sit on top of wrapped text — the
+   same idea as BlockExpanded's own `pr-[28px]` on its single block, just
+   applied editor-wide instead of block-wide so their horizontal position
+   can be a constant instead of a per-block measurement. Comments
+   themselves never render inline here (see DraftDocument's own doc
+   comment for why), so this only ever needs to fit these two small icons,
+   not a whole comment box. */
 .wos-doc-editor .bn-editor {
   padding-inline: 0 40px !important;
 }
@@ -240,6 +252,16 @@ input {
    a new line instead of looking like a soft-wrap of the previous one. */
 .bn-block-content {
   padding-block: 10px;
+}
+/* A block-version mini-editor (`BlockVersionEditor` — one per alt/primary in
+   `BlockExpanded`) is always exactly one block, laid out beside its own
+   drag-grip icon — the grip needs to align with the text's actual first
+   line, which the 10px block padding above would otherwise push down by an
+   amount the grip (positioned against the outer flex row, not this inner
+   padding) can't see. Zero it out here so the grip's own offset only has to
+   account for line-height, not this too. */
+.wos-version-editor .bn-block-content {
+  padding-block: 0;
 }
 /* A heading needs more air above it than a plain paragraph break — it's
    starting a new unit of the document, not just the next line — so give it
@@ -285,13 +307,23 @@ input {
 .bn-side-menu .bn-ak-button:hover {
   background: rgba(0, 0, 0, 0.05);
 }
-/* Whole-block-commented highlight (an unresolved, non-anchored comment) —
-   toggled imperatively via classList in DraftDocument, never touching the
-   block's editable content. */
+/* Whole-block-commented mark (an unresolved, non-anchored comment) — toggled
+   imperatively via classList in DraftDocument, never touching the block's
+   editable content. A left rail + faint tint rather than a solid fill: a
+   block can carry both this AND an anchored `::highlight()` mark on some of
+   its own text at once, and a full-background fill would visually swallow
+   the more precise inline highlight underneath it. */
 .wos-block-highlight {
-  background: var(--fill-highlight);
-  border-radius: var(--radius-xs);
+  background: var(--fill-highlight-subtle);
+  border-left: 2px solid var(--fill-highlight-rail);
+  border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
+  padding-left: 6px;
 }
+/* Selection-scoped (anchored) comment highlight — the actual `::highlight()`
+   rule is injected at runtime by commentHighlight.ts, not written here,
+   because this file goes through a CSS build step (PostCSS/lightningcss via
+   Tailwind) that doesn't recognize `::highlight()` as a valid pseudo-element
+   and silently drops the rule. */
 /* Dragging a block (via the side menu's drag handle) clones it straight
    into <body> for use as the native drag image (blocknote's own
    `dragging.ts`), outside our `max-w-[820px]` document column. Once

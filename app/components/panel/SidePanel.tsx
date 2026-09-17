@@ -1,12 +1,8 @@
 "use client";
 
-import { ChevronLeft } from "lucide-react";
-import { useWritingOS, capitalize } from "@/app/lib/writing-os/context";
-import { useDraftEditor } from "@/app/lib/writing-os/editor-context";
-import { deriveSections } from "@/app/lib/writing-os/sections";
+import { useWritingOS } from "@/app/lib/writing-os/context";
 import { PanelShell } from "@/app/components/panel/PanelShell";
 import { AllNotesList } from "@/app/components/panel/AllNotesList";
-import { SectionTabs } from "@/app/components/panel/SectionTabs";
 import { PanelComposer } from "@/app/components/panel/PanelComposer";
 
 /**
@@ -18,37 +14,19 @@ import { PanelComposer } from "@/app/components/panel/PanelComposer";
  *   the bottom always stays in view.
  * - Fullscreen: covers the whole app, sidebar included, with its content
  *   constrained to a centered 60% column instead of stretching edge to edge.
- * - No section open: AllNotesList (every note, newest first).
- * - A section open: SectionTabs (that section's blocks + notes) — the
- *   panel's title becomes a back button to return to all notes.
+ * Always shows AllNotesList (every note, newest first) — sections have no
+ * panel view of their own.
  */
 export function SidePanel() {
-  const { panelMode, setPanelMode, panelSection, closeSectionPanel } = useWritingOS();
-  const { document: draftDoc } = useDraftEditor();
+  const { panelMode, setPanelMode } = useWritingOS();
 
   if (panelMode === "collapsed") return null;
 
   const isFullscreen = panelMode === "fullscreen";
 
-  // The persistent panel always carries a title — "Notes & Research" by
-  // default, or a functional back button once a section is open. Unlike the
-  // one-off expanded views, it's a standing part of the UI and needs the
-  // label to orient people.
-  const title = panelSection ? (
-    <button
-      onClick={closeSectionPanel}
-      className="flex items-center gap-[4px] bg-transparent border-none p-0 cursor-pointer text-[13px] font-bold text-[var(--text-primary)]"
-    >
-      <ChevronLeft size={15} strokeWidth={1.8} className="shrink-0" />
-      {deriveSections(draftDoc).find((s) => s.key === panelSection)?.label || capitalize(panelSection)}
-    </button>
-  ) : (
-    "Notes"
-  );
-
   return (
     <PanelShell
-      title={title}
+      title="Notes"
       mode={panelMode}
       onFullscreen={() => setPanelMode("fullscreen")}
       onRestore={() => setPanelMode("docked")}
@@ -57,7 +35,7 @@ export function SidePanel() {
     >
       <div className={`h-full flex flex-col ${isFullscreen ? "max-w-[60%] w-full mx-auto" : ""}`}>
         <div className="flex-1 min-h-0 overflow-y-auto overflow-x-hidden overscroll-contain px-[20px] pt-[22px]">
-          {panelSection ? <SectionTabs /> : <AllNotesList />}
+          <AllNotesList />
         </div>
         <div className="px-[20px] pb-[20px] shrink-0">
           <PanelComposer />

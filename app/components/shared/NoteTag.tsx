@@ -6,12 +6,12 @@ import Link from "next/link";
 /**
  * One tag on a note/inbox item — rendered as plain inline text (no pill),
  * trailing the note's text like a hashtag at the end of a caption. An "@"
- * tag (cross-listed project) reads semibold; a "#" tag (section/block) reads
- * regular weight, matching the distinction the composer already draws when
- * picking one. `href`, when present, makes the tag itself a link to the
- * project/section/block it references. Hovering reveals a "×" to remove it;
- * omit `onRemove` (e.g. once a note is resolved) to render it as a plain,
- * non-removable label.
+ * project tag and a "#" section/block tag render identically — same weight,
+ * same color — since neither kind takes precedence over the other; a note
+ * can carry any number of both. `href`, when present, makes the tag itself a
+ * link to the project/section/block it references. Hovering reveals a "×" to
+ * remove it; omit `onRemove` (e.g. once a note is resolved) to render it as a
+ * plain, non-removable label.
  */
 export function NoteTag({
   tag,
@@ -25,9 +25,8 @@ export function NoteTag({
   size?: "sm" | "md";
 }) {
   const [hover, setHover] = useState(false);
-  const isAt = tag.startsWith("@");
   const text = size === "md" ? "text-[14px]" : "text-[13px]";
-  const labelClassName = `${text} ${isAt ? "font-semibold" : "font-normal"} no-underline`;
+  const labelClassName = `${text} font-semibold no-underline`;
   // Forced inline rather than relying on class specificity to beat the
   // global `a { color }` rule — a tag stays the same subtle, muted color
   // whether or not it's clickable; only a hover underline signals the link.

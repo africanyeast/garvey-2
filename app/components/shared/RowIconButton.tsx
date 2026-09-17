@@ -1,6 +1,6 @@
 "use client";
 
-import type { DragEvent, MouseEvent, ReactNode } from "react";
+import type { DragEvent, MouseEvent, ReactNode, RefObject } from "react";
 
 /**
  * The single icon-button primitive behind every hover-revealed row action in
@@ -17,6 +17,7 @@ export function RowIconButton({
   drag,
   reveal = true,
   className = "",
+  buttonRef,
 }: {
   icon: ReactNode;
   label: string;
@@ -24,6 +25,9 @@ export function RowIconButton({
   drag?: { onDragStart: (e: DragEvent) => void; onDragEnd: () => void };
   reveal?: boolean;
   className?: string;
+  /** Exposes the underlying `<button>` — e.g. so a click-outside handler
+   * elsewhere can treat clicking this trigger as "inside". */
+  buttonRef?: RefObject<HTMLButtonElement | null>;
 }) {
   const shared = `bg-transparent border-none text-[var(--text-muted)] p-[3px] flex ${reveal ? "wos-reveal" : ""} ${className}`;
 
@@ -42,7 +46,7 @@ export function RowIconButton({
   }
 
   return (
-    <button onClick={onClick} title={label} className={`cursor-pointer ${shared}`}>
+    <button ref={buttonRef} onClick={onClick} title={label} className={`cursor-pointer ${shared}`}>
       {icon}
     </button>
   );

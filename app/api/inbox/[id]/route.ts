@@ -8,6 +8,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
     body: patch.body,
     resolved: patch.resolved,
     links: patch.links,
+    attachments: patch.attachments,
   });
   if (!item) return NextResponse.json({ error: "not found" }, { status: 404 });
   return NextResponse.json(item);

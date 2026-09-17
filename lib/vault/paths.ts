@@ -73,3 +73,34 @@ export function commentFilePath(slug: string, id: string) {
 export function inboxFilePath(id: string) {
   return path.join(INBOX_DIR, `${id}.md`);
 }
+
+// Comments on raw Inbox captures — global like the captures themselves (not
+// under any `project-{slug}/`), since an inbox item may not be tagged to a
+// project at all.
+export const INBOX_COMMENTS_DIR = path.join(VAULT_DIR, "inbox-comments");
+
+export function inboxCommentFilePath(id: string) {
+  return path.join(INBOX_COMMENTS_DIR, `${id}.md`);
+}
+
+export function variantsDir(slug: string) {
+  return path.join(projectDir(slug), "variants");
+}
+
+export function variantFilePath(slug: string, id: string) {
+  return path.join(variantsDir(slug), `${id}.json`);
+}
+
+// Anchored (selection) comments — native BlockNote comment marks, not a
+// substring found after the fact (see [[comment-freeze]] memory). One file
+// per thread; each thread's own comments live inline in that same file
+// rather than one-file-per-comment, since a thread is always read/written
+// as a whole (there's no "list every comment across every thread" use case
+// the way there is for notes/block comments).
+export function threadsDir(slug: string) {
+  return path.join(projectDir(slug), "threads");
+}
+
+export function threadFilePath(slug: string, id: string) {
+  return path.join(threadsDir(slug), `${id}.json`);
+}

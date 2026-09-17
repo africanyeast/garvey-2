@@ -1,13 +1,20 @@
-import { readdir, readFile, writeFile, mkdir, rename } from "node:fs/promises";
+import { readdir, readFile, writeFile, mkdir, rename, cp } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import path from "node:path";
 import matter from "gray-matter";
+import { ulid } from "ulid";
 import { ensureVault } from "./bootstrap";
 import { VAULT_DIR, TRASH_DIR, projectDir, projectFilePath, trashedProjectDir, notesDir, commentsDir } from "./paths";
 import { slugify } from "./slug";
 import type { Project, TitleCandidate, TrashedProject } from "@/app/lib/writing-os/types";
+import { projectDisplayTitle } from "@/app/lib/writing-os/types";
 
 interface ProjectFrontmatter {
+  /** Stable id — absent on projects written before this field existed;
+   * `toProject` backfills those with the slug they happened to be at read
+   * time (a one-time default, not a real guarantee of stability for
+   * anything tagged before the backfill — see `toProject`). */
+  id?: string;
   title: string;
   subtitle: string;
   writing_type: string;
@@ -25,6 +32,7 @@ interface ProjectFrontmatter {
 
 function toProject(slug: string, fm: ProjectFrontmatter): Project {
   return {
+    id: fm.id ?? slug,
     slug,
     title: fm.title ?? "",
     subtitle: fm.subtitle ?? "",
@@ -50,6 +58,7 @@ function orderKey(p: Project): number {
 
 function toFrontmatter(p: Omit<Project, "slug">): ProjectFrontmatter {
   return {
+    id: p.id,
     title: p.title,
     subtitle: p.subtitle,
     writing_type: p.writingType,
@@ -62,8 +71,21 @@ function toFrontmatter(p: Omit<Project, "slug">): ProjectFrontmatter {
     status: p.status,
     updated_at: p.updatedAt,
     created_at: p.createdAt,
-    order: p.order,
+    // Only set when defined — js-yaml's dump rejects an explicit `undefined`
+    // value outright, and every project without a manual drag-reorder
+    // position has `order === undefined`.
+    ...(p.order !== undefined ? { order: p.order } : {}),
   };
+}
+
+/** A project's stable id never changes, but a note's stored `NoteLinks`
+ * still has to translate id ↔ slug both ways — into a slug to build a
+ * link/URL, and (for legacy on-disk notes tagged before ids existed) from a
+ * slug back to whatever id that project now has. One map, built fresh per
+ * call so a rename that happened moments ago is always reflected. */
+export async function projectSlugToIdMap(): Promise<Map<string, string>> {
+  const projects = await listProjects();
+  return new Map(projects.map((p) => [p.slug, p.id]));
 }
 
 export async function listProjectSlugs(): Promise<string[]> {
@@ -79,12 +101,18 @@ export async function listProjects(): Promise<Project[]> {
 
   const projects = await Promise.all(
     slugs.map(async (slug) => {
-      const raw = await readFile(projectFilePath(slug), "utf-8");
-      const { data } = matter(raw);
-      return toProject(slug, data as ProjectFrontmatter);
+      try {
+        const raw = await readFile(projectFilePath(slug), "utf-8");
+        const { data } = matter(raw);
+        return toProject(slug, data as ProjectFrontmatter);
+      } catch {
+        // A project directory can exist without project.md if creation was
+        // interrupted mid-write; skip it rather than failing the whole list.
+        return null;
+      }
     })
   );
-  return projects.sort((a, b) => orderKey(b) - orderKey(a));
+  return projects.filter((p): p is Project => p !== null).sort((a, b) => orderKey(b) - orderKey(a));
 }
 
 export async function getProject(slug: string): Promise<Project | null> {
@@ -98,20 +126,6 @@ export async function getProject(slug: string): Promise<Project | null> {
   }
 }
 
-/** A brand-new, un-named project gets a real "Untitled"/"Untitled 2"/...
- * title rather than an empty string — that way every place that displays a
- * project (sidebar, trash, the @ mention picker) can just render the title
- * directly, with no separate "what do we show when it's blank" logic. */
-async function nextUntitledTitle(): Promise<string> {
-  const projects = await listProjects();
-  const numbers = projects
-    .map((p) => p.title.match(/^Untitled(?: (\d+))?$/))
-    .filter((m): m is RegExpMatchArray => m !== null)
-    .map((m) => (m[1] ? parseInt(m[1], 10) : 1));
-  if (numbers.length === 0) return "Untitled";
-  return `Untitled ${Math.max(...numbers) + 1}`;
-}
-
 export async function createProject(input: {
   title?: string;
   problem?: string;
@@ -119,7 +133,11 @@ export async function createProject(input: {
   goal?: string;
 }): Promise<Project> {
   await ensureVault();
-  const title = input.title?.trim() || (await nextUntitledTitle());
+  // A brand-new project stays untitled (no fake "Untitled" title stored)
+  // until the user actually sets one, or closes the brief without doing so
+  // (see `finalizeUntitledProject`). Its slug still needs *something*, so it
+  // falls back to `slugify`'s own "untitled" default, uniquified below.
+  const title = input.title?.trim() ?? "";
   const base = slugify(title);
   let slug = base;
   let n = 2;
@@ -130,6 +148,7 @@ export async function createProject(input: {
 
   const now = new Date().toISOString();
   const project: Omit<Project, "slug"> = {
+    id: ulid(),
     title,
     subtitle: "",
     writingType: "",
@@ -276,9 +295,97 @@ export async function updateProject(
   }
   const { data } = matter(raw);
   const current = toProject(slug, data as ProjectFrontmatter);
-  const next: Project = { ...current, ...patch, slug, updatedAt: new Date().toISOString() };
+
+  // Every rename re-slugs to match the new title — safe now that nothing
+  // long-lived references a project by slug: a "@"/"#" tag stores the
+  // project's stable `id` (see `MentionRef`/`NoteLinks` in `types.ts`),
+  // resolved back to a live slug/title at display time (`resolveTags`), so
+  // renaming never orphans a tag. (Still a no-op unless the title actually
+  // changed — nothing here forces a needless directory rename.)
+  let nextSlug = slug;
+  const newTitle = patch.title?.trim();
+  if (newTitle && newTitle !== current.title.trim()) {
+    const base = slugify(newTitle);
+    nextSlug = base;
+    let n = 2;
+    while (nextSlug !== slug && existsSync(projectDir(nextSlug))) {
+      nextSlug = `${base}-${n}`;
+      n += 1;
+    }
+  }
+
+  const next: Project = { ...current, ...patch, slug: nextSlug, updatedAt: new Date().toISOString() };
   const file = matter.stringify("", toFrontmatter(next));
-  await writeFile(filePath, file, "utf-8");
+  if (nextSlug !== slug) {
+    await rename(projectDir(slug), projectDir(nextSlug));
+  }
+  await writeFile(projectFilePath(nextSlug), file, "utf-8");
+  return next;
+}
+
+/** Called when the user closes the brief having never set a title — backs
+ * an untitled project into a real "Untitled"/"Untitled N" title (matching
+ * the numeric suffix its slug already got at creation, via
+ * `projectDisplayTitle`) so a blank title never lingers once they've moved
+ * on. A no-op if the project already has a real title. */
+export async function finalizeUntitledProject(slug: string): Promise<Project | null> {
+  await ensureVault();
+  const filePath = projectFilePath(slug);
+  let raw: string;
+  try {
+    raw = await readFile(filePath, "utf-8");
+  } catch {
+    return null;
+  }
+  const { data } = matter(raw);
+  const current = toProject(slug, data as ProjectFrontmatter);
+  if (current.title.trim()) return current;
+
+  const title = projectDisplayTitle(current);
+  const next: Project = { ...current, title, updatedAt: new Date().toISOString() };
+  await writeFile(filePath, matter.stringify("", toFrontmatter(next)), "utf-8");
+  return next;
+}
+
+/** Copies a project's whole directory (project.md, notes/, draft.md,
+ * comments/) to a new slug — comments carry over too since they anchor to
+ * block ids in the duplicated draft, which stay identical. Gets a fresh
+ * "<title> Copy" title/slug/candidates and its own created/updated
+ * timestamps, uniquified the same way `createProject` uniquifies a
+ * brand-new one. */
+export async function duplicateProject(slug: string): Promise<Project | null> {
+  await ensureVault();
+  const source = await getProject(slug);
+  if (!source) return null;
+
+  const newTitle = source.title.trim() ? `${source.title.trim()} Copy` : "";
+  const base = slugify(newTitle);
+  let newSlug = base;
+  let n = 2;
+  while (existsSync(projectDir(newSlug))) {
+    newSlug = `${base}-${n}`;
+    n += 1;
+  }
+
+  await cp(projectDir(slug), projectDir(newSlug), { recursive: true });
+
+  const now = new Date().toISOString();
+  // `order` is left out (not set to undefined) — js-yaml's dump rejects an
+  // explicit `undefined` value, and a fresh duplicate is meant to sort by
+  // `createdAt` like any other project without a manual position anyway.
+  const { order: _sourceOrder, ...rest } = source;
+  const next: Project = {
+    ...rest,
+    // A fresh id — the duplicate is a distinct project going forward, not
+    // an alias of the source, so tags should never conflate the two.
+    id: ulid(),
+    slug: newSlug,
+    title: newTitle,
+    titleCandidates: newTitle ? [{ text: newTitle, current: true }] : [],
+    createdAt: now,
+    updatedAt: now,
+  };
+  await writeFile(projectFilePath(newSlug), matter.stringify("", toFrontmatter(next)), "utf-8");
   return next;
 }
 

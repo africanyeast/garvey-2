@@ -4,7 +4,7 @@ import { useMemo } from "react";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useDraftEditor } from "@/app/lib/writing-os/editor-context";
 import { buildProjectTargets, sectionMentionTargets, blockMentionTargets, type MentionTarget } from "@/app/lib/writing-os/mentions";
-import { NoteComposer } from "@/app/components/shared/NoteComposer";
+import { IntentComposer } from "@/app/components/shared/IntentComposer";
 
 /** The "Add a note or research item..." input pinned to the bottom of the panel. */
 export function PanelComposer() {
@@ -17,22 +17,22 @@ export function PanelComposer() {
     setNewNoteAttachments,
     addItem,
     projectsList,
-    activeProjectSlug,
+    activeProjectId,
   } = useWritingOS();
   const { document: draftDoc } = useDraftEditor();
 
   const mentionTargets: MentionTarget[] = useMemo(() => {
-    if (!activeProjectSlug) return buildProjectTargets(projectsList);
+    if (!activeProjectId) return buildProjectTargets(projectsList);
     return [
       ...buildProjectTargets(projectsList),
-      ...sectionMentionTargets(draftDoc, activeProjectSlug),
-      ...blockMentionTargets(draftDoc, activeProjectSlug),
+      ...sectionMentionTargets(draftDoc, activeProjectId),
+      ...blockMentionTargets(draftDoc, activeProjectId),
     ];
-  }, [projectsList, draftDoc, activeProjectSlug]);
+  }, [projectsList, draftDoc, activeProjectId]);
 
   return (
     <div className="border-t border-t-[var(--border-default)] pt-[14px] mt-[6px]">
-      <NoteComposer
+      <IntentComposer
         value={newNoteDraft}
         onChange={setNewNoteDraft}
         links={newNoteLinks}

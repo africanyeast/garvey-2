@@ -28,15 +28,21 @@ function soleUrl(text: string): string | null {
 const MAX_HEIGHT = 240;
 
 /**
- * The one composer used everywhere a note/inbox item gets typed — the
- * inbox screen, the notes panel, and a block's expanded view — always
- * pinned to the bottom of its container. A `<textarea>` that grows with its
- * content (ChatGPT-style) up to `MAX_HEIGHT`, then scrolls; typing "@"
- * opens a mention dropdown over `mentionTargets` (projects and/or
- * sections/blocks, whichever the caller has available) and picking one adds
- * a structured chip to `links` rather than leaving raw text behind.
+ * The one text-input surface for sending anything into the harness — a
+ * note/inbox capture, or a plugin invocation like OCR's "transcribe this
+ * image, optionally with feedback." Both are the same shape at the input
+ * layer: type text, optionally point it at something ("@" a project, "#" a
+ * section/block, or a fixed target like "@ocr"), submit. What the submission
+ * *does* is entirely the caller's business — this component only collects
+ * the text (plus, where offered, links/attachments) and fires `onSubmit`.
+ *
+ * `links`/`attachments`/`mentionTargets` are only for the note-composing
+ * case — omit them (as the OCR composer does) to get a bare text box with
+ * no paperclip, no "@"/"#" picker. `fixedChip` renders a permanent,
+ * non-removable tag in their place — a intent already has a target, so
+ * there's nothing to pick.
  */
-export function NoteComposer({
+export function IntentComposer({
   value,
   onChange,
   links,
@@ -47,17 +53,40 @@ export function NoteComposer({
   placeholder,
   mentionTargets,
   autoFocus = false,
+  fixedChip,
+  submitAlwaysEnabled = false,
+  submitLabel = "Add",
+  disabled = false,
 }: {
   value: string;
   onChange: (v: string) => void;
-  links: MentionTarget[];
-  onLinksChange: (links: MentionTarget[]) => void;
-  attachments: Attachment[];
-  onAttachmentsChange: (attachments: Attachment[]) => void;
+  /** Omit together with `onLinksChange` for an intent with no "@"/"#"
+   * tagging (e.g. a plugin invocation, which targets something fixed). */
+  links?: MentionTarget[];
+  onLinksChange?: (links: MentionTarget[]) => void;
+  /** Omit together with `onAttachmentsChange` to drop the paperclip/file
+   * upload affordance entirely. */
+  attachments?: Attachment[];
+  onAttachmentsChange?: (attachments: Attachment[]) => void;
   onSubmit: () => void;
   placeholder?: string;
-  mentionTargets: MentionTarget[];
+  mentionTargets?: MentionTarget[];
   autoFocus?: boolean;
+  /** A permanent, non-removable chip shown before any links — for an
+   * intent already aimed at something specific (e.g. `{ label: "@ocr" }`),
+   * as opposed to the free "@"/"#" picker a note capture offers. */
+  fixedChip?: { label: string };
+  /** True for an intent that's meaningful with no text at all (OCR needs no
+   * instructions to just run) — the arrow stays enabled even when empty,
+   * rather than requiring non-empty text the way a note capture does. */
+  submitAlwaysEnabled?: boolean;
+  /** Tooltip on the submit arrow — "Add" fits a note capture, but a plugin
+   * invocation reads better as whatever it actually does ("Transcribe"). */
+  submitLabel?: string;
+  /** True while the submission this composer triggers is in flight — locks
+   * out both the arrow button and Enter-to-submit so a slow request can't be
+   * re-fired by an impatient extra press. */
+  disabled?: boolean;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -79,9 +108,9 @@ export function NoteComposer({
   useEffect(autoResize, [value]);
 
   const filteredTargets = useMemo(() => {
-    if (mentionQuery === null || mentionTrigger === null) return [];
+    if (mentionQuery === null || mentionTrigger === null || !mentionTargets) return [];
     const q = mentionQuery.toLowerCase();
-    const alreadyLinked = new Set(links.map((l) => `${l.kind}:${l.id}`));
+    const alreadyLinked = new Set((links ?? []).map((l) => `${l.kind}:${l.id}`));
     return mentionTargets
       .filter((t) => (mentionTrigger === "@" ? t.kind === "project" : t.kind !== "project"))
       .filter((t) => !alreadyLinked.has(`${t.kind}:${t.id}`))
@@ -98,6 +127,7 @@ export function NoteComposer({
   const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
     const v = e.target.value;
     onChange(v);
+    if (!mentionTargets) return;
     const caret = e.target.selectionStart;
     const uptoCaret = v.slice(0, caret);
     // "@" tags a project, "#" tags a section/block — each only offers its
@@ -120,7 +150,7 @@ export function NoteComposer({
     const after = value.slice(caret);
     const nextValue = before + after;
     onChange(nextValue);
-    onLinksChange([...links, target]);
+    onLinksChange?.([...(links ?? []), target]);
     closeMention();
     requestAnimationFrame(() => {
       el?.focus();
@@ -130,16 +160,16 @@ export function NoteComposer({
   };
 
   const removeLink = (target: MentionTarget) => {
-    onLinksChange(links.filter((l) => !(l.kind === target.kind && l.id === target.id)));
+    onLinksChange?.((links ?? []).filter((l) => !(l.kind === target.kind && l.id === target.id)));
   };
 
   const removeAttachment = (url: string) => {
-    onAttachmentsChange(attachments.filter((a) => a.url !== url));
+    onAttachmentsChange?.((attachments ?? []).filter((a) => a.url !== url));
   };
 
   const uploadFiles = async (files: FileList | File[]) => {
     const list = Array.from(files);
-    if (list.length === 0) return;
+    if (list.length === 0 || !onAttachmentsChange) return;
     setUploading(true);
     try {
       const form = new FormData();
@@ -147,13 +177,14 @@ export function NoteComposer({
       const res = await fetch("/api/uploads", { method: "POST", body: form });
       if (!res.ok) return;
       const uploaded: Attachment[] = await res.json();
-      onAttachmentsChange([...attachments, ...uploaded]);
+      onAttachmentsChange([...(attachments ?? []), ...uploaded]);
     } finally {
       setUploading(false);
     }
   };
 
   const handlePaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
+    if (!onAttachmentsChange) return;
     const text = e.clipboardData.getData("text");
     const url = soleUrl(text);
     if (!url) return;
@@ -162,7 +193,7 @@ export function NoteComposer({
     try {
       label = new URL(url).hostname.replace(/^www\./, "");
     } catch {}
-    onAttachmentsChange([...attachments, { kind: "link", label, url }]);
+    onAttachmentsChange([...(attachments ?? []), { kind: "link", label, url }]);
   };
 
   const handleKeyDown = (e: KeyboardEvent<HTMLTextAreaElement>) => {
@@ -178,9 +209,11 @@ export function NoteComposer({
     }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      onSubmit();
+      if (!disabled) onSubmit();
     }
   };
+
+  const canSubmit = !disabled && (submitAlwaysEnabled || !!value.trim());
 
   return (
     <div className="relative">
@@ -201,9 +234,14 @@ export function NoteComposer({
         </div>
       )}
       <div className="bg-[var(--surface-raised)] border border-[var(--border-strong)] rounded-md p-[9px]">
-        {(links.length > 0 || attachments.length > 0) && (
+        {(fixedChip || (links?.length ?? 0) > 0 || (attachments?.length ?? 0) > 0) && (
           <div className="flex flex-wrap gap-[4px] mb-[8px]">
-            {links.map((l) => (
+            {fixedChip && (
+              <span className="inline-flex items-center text-[10px] font-bold text-[var(--text-primary)] bg-neutral-100 py-[2px] px-[6px] rounded-xs border border-[var(--border-strong)]">
+                {fixedChip.label}
+              </span>
+            )}
+            {links?.map((l) => (
               <span
                 key={`${l.kind}-${l.id}`}
                 className="inline-flex items-center gap-[4px] text-[10px] font-bold text-[var(--text-primary)] bg-neutral-100 py-[2px] px-[6px] rounded-xs border border-[var(--border-strong)]"
@@ -219,7 +257,7 @@ export function NoteComposer({
                 </button>
               </span>
             ))}
-            {attachments.map((a) => (
+            {attachments?.map((a) => (
               <span
                 key={a.url}
                 className="inline-flex items-center gap-[4px] text-[10px] font-semibold text-[var(--text-secondary)] bg-neutral-100 py-[2px] px-[6px] rounded-xs border border-[var(--border-default)] max-w-[160px]"
@@ -240,25 +278,29 @@ export function NoteComposer({
          * textarea don't need matching box heights to line up — centering
          * holds regardless of how tall the textarea grows. */}
         <div className="flex items-center gap-[10px]">
-          <input
-            ref={fileInputRef}
-            type="file"
-            multiple
-            accept={ACCEPTED_FILE_TYPES}
-            onChange={(e) => {
-              if (e.target.files) uploadFiles(e.target.files);
-              e.target.value = "";
-            }}
-            className="hidden"
-          />
-          <button
-            onClick={() => fileInputRef.current?.click()}
-            title="Attach files"
-            disabled={uploading}
-            className="w-[28px] h-[28px] rounded-full bg-transparent border-none text-[var(--text-muted)] cursor-pointer flex items-center justify-center shrink-0 disabled:opacity-50"
-          >
-            <Paperclip size={14} strokeWidth={1.8} />
-          </button>
+          {onAttachmentsChange && (
+            <>
+              <input
+                ref={fileInputRef}
+                type="file"
+                multiple
+                accept={ACCEPTED_FILE_TYPES}
+                onChange={(e) => {
+                  if (e.target.files) uploadFiles(e.target.files);
+                  e.target.value = "";
+                }}
+                className="hidden"
+              />
+              <button
+                onClick={() => fileInputRef.current?.click()}
+                title="Attach files"
+                disabled={uploading}
+                className="w-[28px] h-[28px] rounded-full bg-transparent border-none text-[var(--text-muted)] cursor-pointer flex items-center justify-center shrink-0 disabled:opacity-50"
+              >
+                <Paperclip size={14} strokeWidth={1.8} />
+              </button>
+            </>
+          )}
           <textarea
             ref={textareaRef}
             value={value}
@@ -268,15 +310,16 @@ export function NoteComposer({
             rows={1}
             autoFocus={autoFocus}
             placeholder={placeholder}
-            className="font-sans text-[13px] font-semibold flex-1 min-w-0 resize-none border-none outline-none bg-transparent text-[var(--text-primary)] leading-[1.5] overflow-y-auto"
+            className="font-sans text-[14px] font-normal flex-1 min-w-0 resize-none border-none outline-none bg-transparent text-[var(--text-primary)] leading-[1.5] overflow-y-auto"
           />
           <button
             onClick={onSubmit}
-            title="Add"
-            className={`w-[28px] h-[28px] rounded-full border-none cursor-pointer flex items-center justify-center shrink-0 ${
-              value.trim()
-                ? "bg-[var(--surface-inverse)] text-[var(--text-inverse)]"
-                : "bg-transparent text-[var(--text-muted)]"
+            title={submitLabel}
+            disabled={!canSubmit}
+            className={`w-[28px] h-[28px] rounded-full border-none flex items-center justify-center shrink-0 ${
+              canSubmit
+                ? "bg-[var(--surface-inverse)] text-[var(--text-inverse)] cursor-pointer"
+                : "bg-transparent text-[var(--text-muted)] cursor-default"
             }`}
           >
             <ArrowUp size={15} strokeWidth={2} />

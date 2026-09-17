@@ -1,9 +1,16 @@
 "use client";
 
-import { filterSuggestionItems, insertOrUpdateBlockForSlashMenu, SideMenuExtension } from "@blocknote/core/extensions";
+import {
+  filterSuggestionItems,
+  FormattingToolbarExtension,
+  insertOrUpdateBlockForSlashMenu,
+  SideMenuExtension,
+} from "@blocknote/core/extensions";
 import {
   FormattingToolbar,
   FormattingToolbarController,
+  FloatingComposerController,
+  FloatingThreadController,
   getDefaultReactSlashMenuItems,
   SideMenuController,
   SuggestionMenuController,
@@ -23,16 +30,18 @@ import {
   Heading3,
   Italic,
   Link,
-  MessageCircle,
+  Loader2,
   Palette,
   Quote,
+  Sparkles,
   Strikethrough,
   Text,
   Underline,
 } from "lucide-react";
-import { useState } from "react";
-import { useWritingOS } from "@/app/lib/writing-os/context";
+import { createContext, useContext, useEffect, useRef, useState } from "react";
+import { createPortal } from "react-dom";
 import { MenuRow } from "@/app/components/shared/MenuRow";
+import { blockPlainText } from "@/app/lib/writing-os/blockText";
 import { draftSchema, type DraftEditor } from "@/app/lib/writing-os/schema";
 
 /**
@@ -288,21 +297,183 @@ function TypographyMenuItem() {
   return <MenuRow icon={active.icon} label={active.label} onClick={() => setOpen(true)} />;
 }
 
+type SynonymState = "closed" | "loading" | { suggestions: string[] } | "error";
+
+/**
+ * Holds the "suggest synonyms" popover's state above the formatting toolbar
+ * rather than inside it. `FormattingToolbarController` unmounts its whole
+ * component tree the instant `show` goes false — and closing the toolbar
+ * (so it doesn't visually stack with the popover, see `SynonymMenuItem`
+ * below) does exactly that — so any state living inside the toolbar's own
+ * subtree would vanish with it. This context is provided once by
+ * `BlockNoteDocument` and read by both `SynonymMenuItem` (inside the
+ * toolbar, to trigger a fetch) and `SynonymPopoverHost` (a sibling of the
+ * toolbar controller, unaffected by it closing, to render the result).
+ */
+const SynonymPopoverContext = createContext<{
+  state: SynonymState;
+  anchorRect: DOMRect | null;
+  setSuggesting: (anchorRect: DOMRect) => void;
+  setResult: (state: SynonymState) => void;
+} | null>(null);
+
+/**
+ * The floating suggestion list itself — portaled to `document.body` and
+ * positioned under the text selection that triggered it, rather than living
+ * inside the toolbar column (a fixed ~270px list has no room to show several
+ * suggestions at once, and burying them behind toolbar scroll defeats the
+ * point of a quick glance-and-pick). Arrow keys move `activeIndex`, Enter
+ * accepts the active suggestion, and Escape closes without changing the
+ * document — the same keyset as the slash menu, so accepting a suggestion
+ * never requires leaving the keyboard.
+ */
+function SynonymSuggestPopover({
+  anchorRect,
+  state,
+  onPick,
+  onClose,
+}: {
+  anchorRect: DOMRect;
+  state: "loading" | { suggestions: string[] } | "error";
+  onPick: (suggestion: string) => void;
+  onClose: () => void;
+}) {
+  const [activeIndex, setActiveIndex] = useState(0);
+  const suggestions = typeof state === "object" ? state.suggestions : [];
+  const activeRef = useRef<HTMLButtonElement>(null);
+
+  useEffect(() => {
+    activeRef.current?.scrollIntoView({ block: "nearest" });
+  }, [activeIndex]);
+
+  useEffect(() => {
+    function onKeyDown(e: KeyboardEvent) {
+      if (e.key === "Escape") {
+        e.preventDefault();
+        onClose();
+      } else if (e.key === "ArrowDown" && suggestions.length > 0) {
+        e.preventDefault();
+        setActiveIndex((i) => (i + 1) % suggestions.length);
+      } else if (e.key === "ArrowUp" && suggestions.length > 0) {
+        e.preventDefault();
+        setActiveIndex((i) => (i - 1 + suggestions.length) % suggestions.length);
+      } else if (e.key === "Enter" && suggestions[activeIndex]) {
+        e.preventDefault();
+        onPick(suggestions[activeIndex]);
+      }
+    }
+    window.addEventListener("keydown", onKeyDown, true);
+    return () => window.removeEventListener("keydown", onKeyDown, true);
+  }, [suggestions, activeIndex, onPick, onClose]);
+
+  return createPortal(
+    <div
+      className="fixed z-[60] flex flex-col bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-[8px] shadow-[0_4px_12px_rgba(0,0,0,0.08)] py-[4px] w-[220px] max-h-[240px] overflow-y-auto"
+      style={{ top: anchorRect.bottom + 6, left: anchorRect.left }}
+    >
+      {state === "loading" && (
+        <div className="flex items-center gap-[6px] py-[7px] px-[10px] text-xs text-[var(--text-muted)]">
+          <Loader2 size={13} className="animate-spin" />
+          Suggesting…
+        </div>
+      )}
+      {state === "error" && <div className="py-[7px] px-[10px] text-xs text-[var(--text-muted)]">No suggestions</div>}
+      {suggestions.map((suggestion, i) => (
+        <button
+          key={suggestion}
+          ref={i === activeIndex ? activeRef : undefined}
+          onMouseEnter={() => setActiveIndex(i)}
+          onClick={() => onPick(suggestion)}
+          className={`text-left text-xs font-medium py-[7px] px-[10px] rounded-[4px] cursor-pointer border-none ${
+            i === activeIndex ? "bg-[rgba(0,0,0,0.05)]" : "bg-transparent"
+          } text-[var(--text-primary)]`}
+        >
+          {suggestion}
+        </button>
+      ))}
+    </div>,
+    document.body,
+  );
+}
+
+/**
+ * "Suggest synonyms" — the `contextual-suggest` plugin's selection-triggered
+ * variant. Just the trigger row: the fetch's result lives in
+ * `SynonymPopoverContext` (see above) rather than local state, and
+ * `SynonymPopoverHost` — a sibling of the toolbar, not a descendant — is what
+ * actually renders the popover, so it survives the toolbar closing.
+ */
+function SynonymMenuItem() {
+  const editor = useBlockNoteEditor(draftSchema);
+  const formattingToolbar = useExtension(FormattingToolbarExtension, { editor });
+  const popover = useContext(SynonymPopoverContext)!;
+
+  async function open() {
+    const selection = editor.getSelectedText();
+    if (!selection) return;
+    const domSelection = window.getSelection();
+    if (!domSelection || domSelection.rangeCount === 0) return;
+    const anchorRect = domSelection.getRangeAt(0).getBoundingClientRect();
+    // The popover renders in the same spot the toolbar just occupied — close
+    // the toolbar itself so the two don't stack, rather than layering the
+    // popover on top of it.
+    formattingToolbar.store.setState(false);
+    popover.setSuggesting(anchorRect);
+
+    const localContext = blockPlainText(editor.getTextCursorPosition().block);
+    try {
+      const res = await fetch("/api/plugins/contextual-suggest", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ selection, localContext }),
+      });
+      if (!res.ok) throw new Error();
+      const data = (await res.json()) as { suggestions: string[] };
+      popover.setResult(data.suggestions.length > 0 ? { suggestions: data.suggestions } : "error");
+    } catch {
+      popover.setResult("error");
+    }
+  }
+
+  return <MenuRow icon={Sparkles} label="Suggest synonyms" onClick={open} />;
+}
+
+/**
+ * Renders the synonym popover from `SynonymPopoverContext`, as a sibling of
+ * `FormattingToolbarController` rather than inside it — see the context's
+ * own comment for why that placement matters.
+ */
+function SynonymPopoverHost() {
+  const editor = useBlockNoteEditor(draftSchema);
+  const popover = useContext(SynonymPopoverContext)!;
+  if (popover.state === "closed" || !popover.anchorRect) return null;
+
+  return (
+    <SynonymSuggestPopover
+      anchorRect={popover.anchorRect}
+      state={popover.state}
+      onPick={(suggestion) => {
+        editor.insertInlineContent(suggestion);
+        editor.focus();
+        popover.setResult("closed");
+      }}
+      onClose={() => popover.setResult("closed")}
+    />
+  );
+}
+
 /**
  * The selection formatting toolbar — reduced to the handful of marks this
  * app actually uses (bold/italic/underline/strike), "Link", and "Comment",
  * and laid out as a vertical list (icon + label per row, via the shared
  * `MenuRow`) instead of BlockNote's horizontal icon strip. The full default
- * set (headings, colors, alignment, file actions, native comments) doesn't
- * fit — literally, in the ~270px expanded-block panel — and isn't used here
- * anyway; a vertical list also matches the "/" slash menu's own layout
- * instead of introducing a second toolbar shape. No shortcut hints on these
- * rows (or the slash menu's) — see the full list instead via the document
- * header's "Shortcuts" entry. */
+ * set (headings, colors, alignment, file actions) doesn't fit — literally,
+ * in the ~270px expanded-block panel — and isn't used here anyway; a
+ * vertical list also matches the "/" slash menu's own layout instead of
+ * introducing a second toolbar shape. No shortcut hints on these rows (or
+ * the slash menu's) — see the full list instead via the document header's
+ * "Shortcuts" entry. */
 function CommentFormattingToolbar() {
-  const editor = useBlockNoteEditor(draftSchema);
-  const { setPendingAnchor, setCommentOpenId } = useWritingOS();
-
   return (
     <FormattingToolbar>
       <div className="flex flex-col">
@@ -314,17 +485,12 @@ function CommentFormattingToolbar() {
         <LinkMenuItem />
         <ColorMenuItem />
         <div className="h-px bg-[var(--border-default)] my-[4px]" />
-        <MenuRow
-          icon={MessageCircle}
-          label="Comment"
-          onClick={() => {
-            const text = editor.getSelectedText();
-            if (!text) return;
-            const block = editor.getTextCursorPosition().block;
-            setPendingAnchor(text);
-            setCommentOpenId(block.id);
-          }}
-        />
+        <SynonymMenuItem />
+        {/* "Comment" row disabled for now — selection-anchored comments are
+         * being simplified into a single block-level thread system. The
+         * only way to start/add to a comment is the block's own comment
+         * icon on hover (see DraftDocument.tsx). Re-enable CommentMenuRow
+         * here once the new block-thread system lands. */}
       </div>
     </FormattingToolbar>
   );
@@ -355,6 +521,9 @@ export function BlockNoteDocument({
   slashMenu?: boolean;
   linkToolbar?: boolean;
 }) {
+  const [synonymState, setSynonymState] = useState<SynonymState>("closed");
+  const [synonymAnchorRect, setSynonymAnchorRect] = useState<DOMRect | null>(null);
+
   return (
     <BlockNoteView
       editor={editor}
@@ -366,9 +535,33 @@ export function BlockNoteDocument({
       slashMenu={false}
       linkToolbar={linkToolbar}
     >
-      {sideMenu && <SideMenuController sideMenu={DraftSideMenu} />}
-      {commentable && <FormattingToolbarController formattingToolbar={CommentFormattingToolbar} />}
-      {slashMenu !== false && <DraftSlashMenu />}
+      <SynonymPopoverContext.Provider
+        value={{
+          state: synonymState,
+          anchorRect: synonymAnchorRect,
+          setSuggesting: (anchorRect) => {
+            setSynonymAnchorRect(anchorRect);
+            setSynonymState("loading");
+          },
+          setResult: setSynonymState,
+        }}
+      >
+        {sideMenu && <SideMenuController sideMenu={DraftSideMenu} />}
+        {commentable && <FormattingToolbarController formattingToolbar={CommentFormattingToolbar} />}
+        {commentable && <SynonymPopoverHost />}
+        {slashMenu !== false && <DraftSlashMenu />}
+        {/* The floating "write a comment" composer and the floating thread
+         * popover shown when a comment mark is clicked — both are BlockNote's
+         * own default UI, only meaningful when this editor actually has the
+         * `comments` extension registered (the shared draft editor does; the
+         * single-block mini-editors in BlockExpanded don't). */}
+        {commentable && editor.getExtension("comments") && (
+          <>
+            <FloatingComposerController />
+            <FloatingThreadController />
+          </>
+        )}
+      </SynonymPopoverContext.Provider>
     </BlockNoteView>
   );
 }

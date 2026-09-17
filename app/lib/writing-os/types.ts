@@ -1,3 +1,5 @@
+import type { DraftPartialBlock } from "./schema";
+
 // Sections aren't a separate data structure — a top-level heading block in
 // the document *is* a section (see `writing-os/sections.ts`), so a
 // `SectionKey` is just that heading block's own (stable) id.
@@ -8,6 +10,17 @@ export type SectionKey = string;
 // file/PDF preview). They share this shape and the same row component.
 export type AttachmentKind = "link" | "image" | "pdf" | "file";
 
+/** An image's OCR result — a durable property of the attachment, not a
+ * one-shot dialog result: it persists on the note so reopening it later
+ * still shows the transcript. `instructions` is the standing feedback the
+ * user gave last time ("this is handwritten", "ignore the letterhead") —
+ * reused on the next retry until the user changes it. */
+export interface AttachmentTranscription {
+  text: string;
+  instructions?: string;
+  updatedAt: string;
+}
+
 export interface Attachment {
   kind: AttachmentKind;
   label: string; // domain for a link, filename for an image/pdf/file
@@ -15,6 +28,7 @@ export interface Attachment {
    * for anything uploaded from disk. */
   url: string;
   mimeType?: string;
+  transcription?: AttachmentTranscription;
 }
 
 export const attachmentMeta: Record<AttachmentKind, string> = {
@@ -27,25 +41,29 @@ export const attachmentMeta: Record<AttachmentKind, string> = {
 /** A resolved "#" tag onto a section or an arbitrary content block —
  * captured once, at tag time, from the mention picker's own label (a
  * section's title, or a block's first-sentence excerpt), and never
- * re-derived from the bare id afterward. `projectSlug` is the project whose
- * document the section/block actually lives in — always the note's own
- * project for an in-project "#" tag, but potentially a different one when
- * tagged from the Inbox (which offers sections/blocks across every
- * project). Together with `id` it's also everything needed to navigate
- * there, without re-fetching anything. */
+ * re-derived from the bare id afterward. `projectId` is the *stable id* of
+ * the project whose document the section/block actually lives in — always
+ * the note's own project for an in-project "#" tag, but potentially a
+ * different one when tagged from the Inbox (which offers sections/blocks
+ * across every project). It's an id, not a slug, so the tag survives the
+ * target project being renamed (which changes its slug/URL but never its
+ * id) — resolving it to a live URL/title is `resolveTags`' job, done at
+ * display time via a slug/title lookup, not stored here. */
 export interface MentionRef {
   kind: "section" | "block";
   id: string;
-  projectSlug: string;
+  projectId: string;
   label: string;
 }
 
 /** Structured tag references captured from the "@"/"#" mention picker in
- * `NoteComposer` — the machine-readable counterpart to the derived display
+ * `IntentComposer` — the machine-readable counterpart to the derived display
  * tag, kept around so AI agents (and any future filtering) can resolve a
- * note's tagged projects/sections/blocks without re-parsing text. */
+ * note's tagged projects/sections/blocks without re-parsing text.
+ * `projectIds` are stable project ids, not slugs — same reasoning as
+ * `MentionRef.projectId`. */
 export interface NoteLinks {
-  projectSlugs: string[];
+  projectIds: string[];
   refs: MentionRef[];
 }
 
@@ -70,18 +88,42 @@ export interface Note {
   fromInbox?: boolean;
 }
 
+/** A whole-item comment — made via a block/section/note's own comment icon,
+ * not a text selection. A comment on a specific selected phrase is a
+ * different, separate mechanism now: BlockNote's own native comment
+ * marks/threads (see `editor-context.tsx`'s `CommentsExtension` and
+ * `threadStore.ts`), not this type — see the `comment-freeze` memory for why
+ * the two were split apart.
+ *
+ * One shared module (`CommentsBody`, `commentsData`, `resolveComment`/
+ * `addReply`) backs comments on any kind of item — a block, a section (a
+ * section *is* a heading block, so it's just `targetId` pointing at that
+ * block's id), or a note — so `targetId` is deliberately untyped as to which
+ * kind of thing it points at. */
 export interface Comment {
   id: string;
-  /** The block this comment is anchored to — always present; comments are
-   * always scoped to one block in the draft document. */
-  blockId: string;
+  /** The block/section/note this comment is anchored to — always present. */
+  targetId: string;
   text: string;
   time: string;
   resolved: boolean;
-  /** The exact substring this comment was made on, if it was made by
-   * selecting text (Notion-style) rather than via the block's comment icon.
-   * Absent means the comment applies to the whole block. */
-  anchor?: string;
+}
+
+/** A block, replicated: an alternate draft of a block, visible and
+ * reorderable only in the expanded-block view (`BlockExpanded`). Never a
+ * live block in the shared draft document — see `writing-os/blocks` for why
+ * (alts must never leak into the main draft/Preview/Copy). `id` doubles as
+ * this alt's own comment-anchor id, so it can be commented on exactly like
+ * the primary block it's an alternate of. */
+export interface BlockVariant {
+  id: string;
+  /** The live block (in the shared draft document) this is an alternate
+   * of. Comments and content get re-keyed across this and `id` on
+   * promotion — see `promoteVariant` in `editor-context.tsx`. */
+  blockId: string;
+  /** Rank among a block's alts — lower sorts first (closer to primary). */
+  order: number;
+  content: DraftPartialBlock;
 }
 
 export interface InboxItem {
@@ -121,6 +163,13 @@ export interface TitleCandidate {
 }
 
 export interface Project {
+  /** Stable identity, generated once at creation and never changed —
+   * everything that needs to keep pointing at "this project" regardless of
+   * a rename (tags via `NoteLinks`/`MentionRef`) stores this, not `slug`. */
+  id: string;
+  /** The URL/directory name — derived from `title`, and free to change on
+   * rename (see `updateProject`). Never stored as a long-lived reference;
+   * always resolved fresh from `id` at display/link time. */
   slug: string;
   title: string;
   subtitle: string;
@@ -181,4 +230,3 @@ export interface StyleProfile {
 
 export type Screen = "inbox" | "draft" | "style";
 export type DocMode = "edit" | "preview";
-export type PanelTab = "blocks" | "notes";

@@ -1,13 +1,17 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Copy, CopyPlus, EllipsisVertical, Eye, FileText, Keyboard, Pencil, StickyNotes } from "lucide-react";
+import { useRouter } from "next/navigation";
+import { Copy, CopyPlus, EllipsisVertical, Eye, FileText, Keyboard, Pencil, StickyNotes, Trash2 } from "lucide-react";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useDraftEditor } from "@/app/lib/writing-os/editor-context";
 import { DraftDocument } from "@/app/components/draft/DraftDocument";
 import { MenuRow } from "@/app/components/shared/MenuRow";
 import { DropdownMenu } from "@/app/components/shared/DropdownMenu";
+import { ConfirmDialog } from "@/app/components/shared/ConfirmDialog";
 import { formatRelativeClient } from "@/app/lib/writing-os/time";
+import { Toast } from "@/app/components/shared/Toast";
+import type { Project } from "@/app/lib/writing-os/types";
 
 export function DraftEditor({
   title,
@@ -26,9 +30,21 @@ export function DraftEditor({
   onOpenBrief: () => void;
   onOpenShortcuts: () => void;
 }) {
-  const { openMenu, toggleMenu, closeMenu, stop, setDocMode, docMode, setCommentOpenId, panelMode, setPanelMode } =
-    useWritingOS();
+  const {
+    openMenu,
+    toggleMenu,
+    closeMenu,
+    stop,
+    setDocMode,
+    docMode,
+    panelMode,
+    setPanelMode,
+    activeProjectSlug,
+    addProjectToList,
+    removeProjectFromList,
+  } = useWritingOS();
   const { editor } = useDraftEditor();
+  const router = useRouter();
 
   // Re-render every 30s so "2 min ago" keeps advancing without a refresh.
   const [, forceTick] = useState(0);
@@ -36,6 +52,64 @@ export function DraftEditor({
     const timer = setInterval(() => forceTick((n) => n + 1), 30000);
     return () => clearInterval(timer);
   }, []);
+
+  const [toast, setToast] = useState<string | null>(null);
+  const showToast = (message: string) => {
+    setToast(message);
+    setTimeout(() => setToast((current) => (current === message ? null : current)), 1500);
+  };
+
+  const togglePreview = () => {
+    setDocMode(docMode === "edit" ? "preview" : "edit");
+  };
+
+  const copyMarkdown = () => {
+    navigator.clipboard.writeText(editor.blocksToMarkdownLossy());
+    showToast("Copied");
+  };
+
+  const duplicateDoc = () => {
+    if (!activeProjectSlug) return;
+    fetch(`/api/projects/${activeProjectSlug}/duplicate`, { method: "POST" })
+      .then((res) => (res.ok ? res.json() : undefined))
+      .then((project: Project | undefined) => {
+        if (!project) return;
+        addProjectToList(project);
+        router.push(`/${project.slug}`);
+      });
+  };
+
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const deleteDoc = () => {
+    if (!activeProjectSlug) return;
+    fetch(`/api/projects/${activeProjectSlug}`, { method: "DELETE" }).then((res) => {
+      if (!res.ok) return;
+      removeProjectFromList(activeProjectSlug);
+      router.push("/inbox");
+    });
+  };
+
+  // ⌃P preview/edit, ⌃C copy, ⌃D duplicate — matches ShortcutsPanel. Control
+  // specifically (not ⌘), so it doesn't collide with browser copy/print on
+  // any platform's Cmd bindings.
+  useEffect(() => {
+    const onKeyDown = (e: KeyboardEvent) => {
+      if (!e.ctrlKey || e.metaKey || e.altKey) return;
+      const key = e.key.toLowerCase();
+      if (key === "p") {
+        e.preventDefault();
+        togglePreview();
+      } else if (key === "c") {
+        e.preventDefault();
+        copyMarkdown();
+      } else if (key === "d") {
+        e.preventDefault();
+        duplicateDoc();
+      }
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [docMode, activeProjectSlug, editor, addProjectToList, router]);
 
   return (
     <>
@@ -64,8 +138,8 @@ export function DraftEditor({
               {updatedAt && (
                 <>
                   <span className="text-[var(--text-muted)] text-sm select-none">•</span>
-                  <span className="font-sans text-sm text-[var(--text-muted)] whitespace-nowrap">
-                    Edited {formatRelativeClient(updatedAt)}
+                  <span className="text-subtitle whitespace-nowrap">
+                    {formatRelativeClient(updatedAt)}
                   </span>
                 </>
               )}
@@ -102,20 +176,34 @@ export function DraftEditor({
                 icon={docMode === "edit" ? Eye : Pencil}
                 label={docMode === "edit" ? "Preview" : "Edit"}
                 onClick={() => {
-                  setDocMode(docMode === "edit" ? "preview" : "edit");
+                  togglePreview();
                   closeMenu();
-                  setCommentOpenId(null);
                 }}
               />
               <MenuRow
                 icon={Copy}
                 label="Copy"
                 onClick={() => {
-                  navigator.clipboard.writeText(editor.blocksToMarkdownLossy());
+                  copyMarkdown();
                   closeMenu();
                 }}
               />
-              <MenuRow icon={CopyPlus} label="Duplicate" onClick={closeMenu} />
+              <MenuRow
+                icon={CopyPlus}
+                label="Duplicate"
+                onClick={() => {
+                  duplicateDoc();
+                  closeMenu();
+                }}
+              />
+              <MenuRow
+                icon={Trash2}
+                label="Delete"
+                onClick={() => {
+                  setDeleteConfirmOpen(true);
+                  closeMenu();
+                }}
+              />
               <div className="h-px bg-[var(--border-default)] my-[4px]" />
               <MenuRow
                 icon={Keyboard}
@@ -131,6 +219,19 @@ export function DraftEditor({
       </div>
 
       <DraftDocument />
+      <Toast message={toast} />
+      {deleteConfirmOpen && (
+        <ConfirmDialog
+          title="Move to trash?"
+          message={`"${title || "Untitled"}" will be moved to trash. You can restore it later.`}
+          confirmLabel="Move to trash"
+          onConfirm={() => {
+            deleteDoc();
+            setDeleteConfirmOpen(false);
+          }}
+          onCancel={() => setDeleteConfirmOpen(false)}
+        />
+      )}
     </>
   );
 }

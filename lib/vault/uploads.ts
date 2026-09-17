@@ -30,6 +30,21 @@ export async function saveUpload(originalName: string, mimeType: string, data: B
   };
 }
 
+const VISION_MIME_TYPES: Record<string, "image/jpeg" | "image/png" | "image/gif" | "image/webp"> = {
+  ".png": "image/png",
+  ".jpg": "image/jpeg",
+  ".jpeg": "image/jpeg",
+  ".gif": "image/gif",
+  ".webp": "image/webp",
+};
+
+/** The subset of `kindFor`'s "image" bucket Claude's vision endpoint accepts
+ * (no `.svg` — not a raster format the API takes). Returns `null` for
+ * anything else, including non-images. */
+export function visionMimeTypeFor(storedName: string): "image/jpeg" | "image/png" | "image/gif" | "image/webp" | null {
+  return VISION_MIME_TYPES[path.extname(storedName).toLowerCase()] ?? null;
+}
+
 export async function readUpload(storedName: string): Promise<Buffer> {
   // `uploadFilePath` joins onto `UPLOADS_DIR`; reject anything trying to
   // escape it via `..` before that join ever happens.
