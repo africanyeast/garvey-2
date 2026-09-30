@@ -44,7 +44,6 @@ import {
 import { createContext, useContext, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import { MenuRow } from "@/app/components/shared/MenuRow";
-import { blockPlainText } from "@/app/lib/writing-os/blockText";
 import { draftSchema, type DraftEditor } from "@/app/lib/writing-os/schema";
 
 /**
@@ -427,12 +426,14 @@ function SynonymMenuItem() {
     formattingToolbar.store.setState(false);
     popover.setSuggesting(anchorRect);
 
-    const localContext = blockPlainText(editor.getTextCursorPosition().block);
+    // The harness reads the containing block itself, from the cursor and
+    // this editor's live document (which can be ahead of the last save).
+    const cursor = { block: editor.getTextCursorPosition().block.id };
     try {
       const res = await fetch("/api/plugins/contextual-suggest", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ selection, localContext }),
+        body: JSON.stringify({ selection, cursor, document: editor.document }),
       });
       if (!res.ok) throw new Error();
       const data = (await res.json()) as { suggestions: string[] };

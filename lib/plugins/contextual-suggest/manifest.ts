@@ -5,7 +5,7 @@ export const manifest: PluginManifest = {
   name: "Contextual Suggest",
   trigger: "selection",
   kind: "completion",
-  permissions: ["read:style"],
+  permissions: ["read:style", "read:draft"],
   // Cheapest tier — a bounded word-choice call has no need for a larger
   // model's reasoning/writing quality.
   model: "claude-haiku-4-5",
@@ -14,4 +14,7 @@ export const manifest: PluginManifest = {
   // 100-200+ tokens "thinking" about a 5-word list before this was set.
   effort: "low",
   thinking: false,
+  // The style profile and the one block the selection is in — what the
+  // client used to send by hand, now resolved by the harness.
+  context: { include: ["style"], draft: "block", budget: 20_000 },
 };

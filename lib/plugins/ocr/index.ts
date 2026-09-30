@@ -1,5 +1,5 @@
 import { complete } from "@/lib/ai/client";
-import { buildSystemPrompt } from "../harness";
+import { buildSystemPrompt } from "../prompt";
 import type { Plugin, PluginContext } from "../types";
 import { manifest } from "./manifest";
 
@@ -25,7 +25,7 @@ async function run(ctx: PluginContext<OcrInput>) {
   const fragment = instructions
     ? `${INSTRUCTION}\n\nAdditional instructions from the user: ${instructions}`
     : INSTRUCTION;
-  const system = buildSystemPrompt(fragment, { style: null });
+  const system = buildSystemPrompt(fragment, ctx);
   const text = await complete({
     system,
     prompt: "Transcribe the text in this image.",

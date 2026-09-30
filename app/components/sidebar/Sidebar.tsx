@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { EllipsisVertical, FileText, Inbox, Plus, Search, Trash2, Feather, GripVertical } from "lucide-react";
+import { EllipsisVertical, FileText, Inbox, Plus, Search, Trash2, Feather, GripVertical, ScanEye } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -70,8 +70,9 @@ export function Sidebar() {
   const isInbox = pathname === "/inbox" || pathname === "/";
   const isStyle = pathname === "/style";
   const isTrash = pathname === "/trash";
+  const isInspector = pathname === "/inspector";
   const activeSlug =
-    !isInbox && !isStyle && !isTrash ? pathname?.split("/").filter(Boolean)[0] : null;
+    !isInbox && !isStyle && !isTrash && !isInspector ? pathname?.split("/").filter(Boolean)[0] : null;
 
   const createProject = async () => {
     const res = await fetch("/api/projects", {
@@ -167,6 +168,13 @@ export function Sidebar() {
         >
           <Feather size={16} className="text-[var(--text-secondary)]" />
           <span className={`text-[12px] font-semibold text-[var(--text-secondary)]`}>Style</span>
+        </Link>
+        <Link
+          href="/inspector"
+          className={`flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer ${isInspector ? "border border-[var(--border-default)]" : "bg-transparent"}`}
+        >
+          <ScanEye size={16} className="text-[var(--text-secondary)]" />
+          <span className={`text-[12px] font-semibold text-[var(--text-secondary)]`}>Inspector</span>
         </Link>
         <Link
           href="/trash"

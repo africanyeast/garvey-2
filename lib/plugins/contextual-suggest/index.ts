@@ -1,12 +1,13 @@
 import { complete } from "@/lib/ai/client";
-import { buildSystemPrompt } from "../harness";
+import { buildSystemPrompt, contextText } from "../prompt";
 import type { Plugin, PluginContext } from "../types";
 import { manifest } from "./manifest";
 
+/** The containing block comes from the harness (`context.draft: "block"`),
+ * not from the caller. */
 export interface SynonymInput {
   task: "synonym";
   selection: string;
-  localContext: string;
 }
 
 export interface SynonymResult {
@@ -39,9 +40,9 @@ function parseSuggestions(text: string): string[] {
 }
 
 async function run(ctx: PluginContext<SynonymInput>) {
-  const { selection, localContext } = ctx.input;
-  const system = buildSystemPrompt(INSTRUCTION, { style: ctx.style });
-  const prompt = `Selected text: "${selection}"\nContaining block: "${localContext}"`;
+  const { selection } = ctx.input;
+  const system = buildSystemPrompt(INSTRUCTION, ctx);
+  const prompt = `Selected text: "${selection}"\nContaining block: "${contextText(ctx)}"`;
   const text = await complete({ system, prompt, model: manifest.model, effort: manifest.effort, thinking: manifest.thinking });
   return { ok: true, data: { suggestions: parseSuggestions(text) } };
 }

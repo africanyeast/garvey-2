@@ -1,4 +1,4 @@
-import type { StyleProfile } from "@/app/lib/writing-os/types";
+import type { ContextBundle, ContextDeclaration } from "@/lib/context/resolve";
 
 export type PluginTrigger = "idle" | "selection" | "command" | "cursor";
 export type PluginKind = "completion" | "agentic";
@@ -35,14 +35,20 @@ export interface PluginManifest {
    * tradeoffs (a future coherence/argument check) would ask for more. */
   effort: PluginEffort;
   thinking: boolean;
+  /** What this plugin sees, resolved by the harness from the cursor (see
+   * lib/context/resolve.ts). Omitted: it sees nothing but its own input.
+   * Every part needs its permission in `permissions`, or the harness
+   * refuses to run it. */
+  context?: ContextDeclaration;
 }
 
 /** Built by the harness (`runPlugin`), never assembled by a plugin itself —
- * this is what makes style injection structural rather than a per-plugin
- * discipline. `style` is only populated when the manifest declares
- * `read:style`. `input` is the plugin-specific payload for this call. */
+ * this is what makes context (style included) structural rather than a
+ * per-plugin discipline. `context` is the bundle the manifest declared,
+ * null when it declares none. `input` is the plugin-specific payload for
+ * this call. */
 export interface PluginContext<TInput = unknown> {
-  style: { raw: string; profile: StyleProfile } | null;
+  context: ContextBundle | null;
   input: TInput;
 }
 
@@ -50,6 +56,8 @@ export interface PluginResult<TData = unknown> {
   ok: boolean;
   data?: TData;
   error?: string;
+  /** The inspector's record of this call (`/api/plugins/runs/<runId>`). */
+  runId?: string;
 }
 
 export interface Plugin<TInput = unknown, TData = unknown> {

@@ -33,9 +33,12 @@ function writeProject(t: Thing, p: Project): Thing {
   return t;
 }
 
+/** Top-level app routes a project's URL must not shadow. */
+const RESERVED_SLUGS = ["inbox", "style", "trash", "inspector", "api"];
+
 async function liveSlugs(): Promise<Set<string>> {
   const store = await vault();
-  return new Set((await store.list({ kind: "project" })).map((p) => p.header.slug as string));
+  return new Set([...RESERVED_SLUGS, ...(await store.list({ kind: "project" })).map((p) => p.header.slug as string)]);
 }
 
 /** `base`, or `base-2`, `base-3`… — the first not taken. */

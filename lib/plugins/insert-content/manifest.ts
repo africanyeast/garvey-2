@@ -16,4 +16,7 @@ export const manifest: PluginManifest = {
   // synonym list or a transcription — worth the extra reasoning depth.
   effort: "medium",
   thinking: false,
+  // Only the style profile. The outline and project list it chooses a
+  // placement from are its input (the options), not context.
+  context: { include: ["style"], draft: "none", budget: 20_000 },
 };

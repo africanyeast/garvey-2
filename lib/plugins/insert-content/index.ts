@@ -1,5 +1,5 @@
 import { complete } from "@/lib/ai/client";
-import { buildSystemPrompt } from "../harness";
+import { buildSystemPrompt } from "../prompt";
 import type { Plugin, PluginContext } from "../types";
 import type { ContentPlacement, ContentTarget } from "@/app/lib/writing-os/contentTarget";
 import type { MentionTarget } from "@/app/lib/writing-os/mentions";
@@ -246,7 +246,7 @@ function parsePlacements(text: string, input: InsertContentInput): ContentPlacem
 async function run(ctx: PluginContext<InsertContentInput>) {
   const input = ctx.input;
   const hinted = input.hintedTargets?.length ? targetFromHints(input.hintedTargets, input) : null;
-  const system = buildSystemPrompt(INSTRUCTION, { style: ctx.style });
+  const system = buildSystemPrompt(INSTRUCTION, ctx);
   const prompt = buildPrompt(input);
   const text = await complete({ system, prompt, model: manifest.model, effort: manifest.effort, thinking: manifest.thinking });
   const placements = parsePlacements(text, input);

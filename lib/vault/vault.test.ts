@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, realpath, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { StoreError } from "@/lib/store";
@@ -20,6 +20,13 @@ beforeAll(async () => {
   const cwd = process.cwd();
   process.chdir(tmp);
   try {
+    // bun runs every test file in one process: if anything imported
+    // lib/vault before this file, the vault is already pinned to the
+    // checkout's real vault/. Never run these writes against it.
+    const { VAULT_DIR } = await import("./paths");
+    if (!(await realpath(path.dirname(VAULT_DIR))).startsWith(await realpath(tmp))) {
+      throw new Error(`lib/vault was already loaded for ${VAULT_DIR}; refusing to run vault tests against it`);
+    }
     [P, N, C, D, V] = await Promise.all([
       import("./project"),
       import("./notes"),
