@@ -25,8 +25,8 @@ export function NoteTag({
   size?: "sm" | "md";
 }) {
   const [hover, setHover] = useState(false);
-  const text = size === "md" ? "text-[14px]" : "text-[13px]";
-  const labelClassName = `${text} font-semibold no-underline`;
+  const text = size === "md" ? "text-[14px]" : "text-[12px]";
+  const labelClassName = `${text} font-medium no-underline`;
   // Forced inline rather than relying on class specificity to beat the
   // global `a { color }` rule — a tag stays the same subtle, muted color
   // whether or not it's clickable; only a hover underline signals the link.

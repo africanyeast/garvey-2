@@ -1,6 +1,6 @@
 import path from "node:path";
 import { NextRequest, NextResponse } from "next/server";
-import { readUpload } from "@/lib/vault/uploads";
+import { readUploadTranscoded } from "@/lib/vault/uploads";
 
 // The original mimeType is only ever recorded on the note's `Attachment`
 // (in frontmatter), not alongside the file on disk — so this route, which
@@ -26,8 +26,10 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ nam
   const { name } = await params;
   try {
     const decoded = decodeURIComponent(name);
-    const data = await readUpload(decoded);
-    const contentType = MIME_TYPES[path.extname(decoded).toLowerCase()] ?? "application/octet-stream";
+    const data = await readUploadTranscoded(decoded);
+    const ext = path.extname(decoded).toLowerCase();
+    const contentType = ext === ".heic" || ext === ".heif" ? "image/jpeg" : MIME_TYPES[ext] ?? "application/octet-stream";
+
     return new NextResponse(new Uint8Array(data), {
       headers: {
         "Content-Type": contentType,

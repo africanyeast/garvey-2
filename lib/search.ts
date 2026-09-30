@@ -105,7 +105,8 @@ export async function searchVault(query: string): Promise<SearchResult[]> {
     slugs.map(async (slug) => {
       const notes = await listNotes(slug);
       for (const note of notes) {
-        if (note.body.toLowerCase().includes(qLower)) {
+        const noteText = blockTreeText(note.body);
+        if (noteText.toLowerCase().includes(qLower)) {
           const projectTitle = projectTitleBySlug.get(slug) ?? slug;
           results.push({
             kind: "note",
@@ -113,7 +114,7 @@ export async function searchVault(query: string): Promise<SearchResult[]> {
             projectTitle,
             noteId: note.id,
             title: `Note in ${projectTitle}`,
-            snippet: makeSnippet(note.body, q),
+            snippet: makeSnippet(noteText, q),
             href: `/${slug}?notes=1`,
           });
         }
@@ -124,14 +125,15 @@ export async function searchVault(query: string): Promise<SearchResult[]> {
   // Raw Inbox captures — not filed under any project.
   const inboxItems = await listInboxItems();
   for (const item of inboxItems) {
-    if (item.body.toLowerCase().includes(qLower)) {
+    const itemText = blockTreeText(item.body);
+    if (itemText.toLowerCase().includes(qLower)) {
       results.push({
         kind: "note",
         projectSlug: "",
         projectTitle: "Inbox",
         noteId: item.id,
         title: "Inbox",
-        snippet: makeSnippet(item.body, q),
+        snippet: makeSnippet(itemText, q),
         href: `/inbox`,
       });
     }

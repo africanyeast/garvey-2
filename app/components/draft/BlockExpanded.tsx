@@ -295,7 +295,7 @@ export function BlockExpanded({ item }: { item: ExpandedItem }) {
               {sectionNotes.map((n) => (
                 <NoteRow
                   key={n.id}
-                  text={n.body}
+                  blocks={n.body}
                   tags={n.tags}
                   time={n.time}
                   resolved={n.resolved}

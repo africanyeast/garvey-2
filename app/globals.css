@@ -219,7 +219,7 @@ input {
 .bn-default-styles {
   font-family: var(--font-serif);
   color: var(--text-primary);
-  font-size: 18px;
+  font-size: 17px;
   line-height: 1.6;
 }
 .bn-editor {
@@ -271,6 +271,15 @@ input {
 [data-content-type="heading"] {
   padding-top: 32px !important;
 }
+/* BlockNote renders `---` as a plain `<hr>`, which inherits the browser's
+   default 1px inset/outset border — heavy and out of place next to this
+   app's own hairline dividers (e.g. the `divide-y` rule between note rows).
+   Match that same subtle, greyish line instead. */
+[data-content-type="divider"] hr {
+  border: none;
+  border-top: 1px solid var(--border-default);
+  margin-block: 8px;
+}
 /* BlockNote's own side menu (drag handle + "+") is a fixed 30px-tall
    horizontal strip by default (`.bn-side-menu{height:30px;display:flex}`,
    no flex-direction — built for exactly two icons side by side). The
@@ -318,6 +327,18 @@ input {
   border-left: 2px solid var(--fill-highlight-rail);
   border-radius: 0 var(--radius-xs) var(--radius-xs) 0;
   padding-left: 6px;
+}
+/* BlockNote's own codeBlock ships a large black card (24px padding, #161616
+   background) sized for a standalone code-heavy app — overridden here to a
+   compact, neutral gray inline-with-the-doc block instead. */
+.bn-block-content[data-content-type="codeBlock"] {
+  color: var(--text-primary);
+  background-color: var(--surface-sunken);
+  border-radius: var(--radius-xs, 4px);
+}
+.bn-block-content[data-content-type="codeBlock"] > pre {
+  padding: 8px 10px;
+  font-size: 0.85em;
 }
 /* Selection-scoped (anchored) comment highlight — the actual `::highlight()`
    rule is injected at runtime by commentHighlight.ts, not written here,

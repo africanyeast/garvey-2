@@ -11,7 +11,7 @@ export const manifest: PluginManifest = {
   // character-for-character transcription at ~3.5x lower cost. Revisit if
   // real-world use (messy phone photos, handwriting) shows Haiku degrading;
   // that's the one signal this test couldn't produce.
-  model: "claude-haiku-4-5",
+  model: "claude-sonnet-5",
   // Transcription, not judgment — nothing here benefits from reasoning depth.
   effort: "low",
   thinking: false,

@@ -1,5 +1,6 @@
 import { contextualSuggestPlugin } from "./contextual-suggest";
 import { ocrPlugin } from "./ocr";
+import { insertContentPlugin } from "./insert-content";
 import type { Plugin, PluginManifest } from "./types";
 
 /**
@@ -15,6 +16,7 @@ import type { Plugin, PluginManifest } from "./types";
 const PLUGINS: Record<string, Plugin<any, any>> = {
   [contextualSuggestPlugin.manifest.id]: contextualSuggestPlugin,
   [ocrPlugin.manifest.id]: ocrPlugin,
+  [insertContentPlugin.manifest.id]: insertContentPlugin,
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

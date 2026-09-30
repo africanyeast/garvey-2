@@ -8,6 +8,7 @@ import Inline from "yet-another-react-lightbox/plugins/inline";
 import "yet-another-react-lightbox/styles.css";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { TranscriptionPanel } from "@/app/components/shared/TranscriptionPanel";
+import type { MentionTarget } from "@/app/lib/writing-os/mentions";
 import type { Attachment, AttachmentTranscription } from "@/app/lib/writing-os/types";
 
 const MAX_TILES = 4;
@@ -119,16 +120,22 @@ export function AttachmentList({
   maxWidth = 320,
   onInsertText,
   onSetTranscription,
+  activeProjectSlug,
+  mentionTargets,
 }: {
   attachments?: Attachment[];
   maxWidth?: number;
-  /** Appends a transcript into the note body — the "Insert into note"
-   * button in the transcription panel. */
+  /** Commits the transcription panel's agent-routed "Insert" action. */
   onInsertText?: (text: string) => void;
   /** When present, opening an image also docks a transcription panel
    * beside the lightbox, offering OCR (with optional feedback/instructions)
    * and persisting the result onto that attachment. */
   onSetTranscription?: (attachmentUrl: string, transcription: AttachmentTranscription | null) => void;
+  /** Passed straight through to the transcription panel's "Insert" action —
+   * see its own doc comment. */
+  activeProjectSlug?: string;
+  /** Passed straight through to the transcription panel's tag picker. */
+  mentionTargets?: MentionTarget[];
 }) {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
   // Never open by default — the lightbox is for viewing, the panel is an
@@ -251,6 +258,8 @@ export function AttachmentList({
                 onSetTranscription={onSetTranscription}
                 onClose={() => setPanelOpen(false)}
                 autoFocus={autoFocus}
+                activeProjectSlug={activeProjectSlug}
+                mentionTargets={mentionTargets}
               />
             );
           })()}

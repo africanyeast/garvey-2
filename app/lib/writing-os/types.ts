@@ -16,7 +16,9 @@ export type AttachmentKind = "link" | "image" | "pdf" | "file";
  * user gave last time ("this is handwritten", "ignore the letterhead") —
  * reused on the next retry until the user changes it. */
 export interface AttachmentTranscription {
-  text: string;
+  /** Block JSON, same shape as a note/draft — edited through the same
+   * editor surface (see `TranscriptionPanel`), never a plain string. */
+  blocks: DraftPartialBlock[];
   instructions?: string;
   updatedAt: string;
 }
@@ -70,7 +72,9 @@ export interface NoteLinks {
 export interface Note {
   id: string;
   bucket: SectionKey | null;
-  body: string;
+  /** Block JSON, the same shape as the draft document — never a markdown
+   * string; see `lib/vault/blocks.ts`. */
+  body: DraftPartialBlock[];
   time: string;
   resolved: boolean;
   attachments?: Attachment[];
@@ -128,7 +132,9 @@ export interface BlockVariant {
 
 export interface InboxItem {
   id: string;
-  body: string;
+  /** Block JSON, the same shape as the draft document — never a markdown
+   * string; see `lib/vault/blocks.ts`. */
+  body: DraftPartialBlock[];
   time: string;
   resolved: boolean;
   attachments?: Attachment[];

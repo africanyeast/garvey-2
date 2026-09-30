@@ -7,7 +7,9 @@ import { INBOX_DIR, inboxFilePath, TRASH_INBOX_DIR, trashedInboxFilePath } from 
 import { formatRelative } from "./time";
 import { listProjectSlugs, projectSlugToIdMap, getProject } from "./project";
 import { listNotes, normalizeLinks } from "./notes";
+import { parseBody, serializeBody } from "./blocks";
 import type { Attachment, InboxItem, Note, NoteLinks, TrashedInboxItem } from "@/app/lib/writing-os/types";
+import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 
 interface InboxFrontmatter {
   resolved: boolean;
@@ -22,10 +24,10 @@ interface InboxFrontmatter {
 // `normalizeLinks`); passing "" as the home slug just means that branch
 // (which never applied to inbox items in practice) resolves to nothing
 // rather than a real project, same as any other unresolvable legacy tag.
-function toItem(id: string, fm: InboxFrontmatter, body: string, slugToId: Map<string, string>): InboxItem {
+function toItem(id: string, fm: InboxFrontmatter, content: string, slugToId: Map<string, string>): InboxItem {
   return {
     id,
-    body: body.trim(),
+    body: parseBody(content),
     // Falls back to `created_at` for items written before `updated_at`
     // existed — nothing to migrate, just a one-time default.
     time: formatRelative(fm.updated_at ?? fm.created_at),
@@ -104,7 +106,7 @@ export async function listInboxItemsForProject(slug: string): Promise<Note[]> {
 }
 
 export async function createInboxItem(input: {
-  body: string;
+  body: DraftPartialBlock[];
   attachments?: Attachment[];
   links?: NoteLinks;
 }): Promise<InboxItem> {
@@ -119,14 +121,15 @@ export async function createInboxItem(input: {
     ...(input.attachments?.length ? { attachments: input.attachments } : {}),
     ...(input.links ? { links: normalizeLinks(input.links, "", slugToId) } : {}),
   };
-  const file = matter.stringify(input.body, fm);
+  const content = serializeBody(input.body);
+  const file = matter.stringify(content, fm);
   await writeFile(inboxFilePath(id), file, "utf-8");
-  return toItem(id, fm, input.body, slugToId);
+  return toItem(id, fm, content, slugToId);
 }
 
 export async function updateInboxItem(
   id: string,
-  patch: { body?: string; resolved?: boolean; links?: NoteLinks; attachments?: Attachment[] }
+  patch: { body?: DraftPartialBlock[]; resolved?: boolean; links?: NoteLinks; attachments?: Attachment[] }
 ): Promise<InboxItem | null> {
   await ensureVault();
   const filePath = inboxFilePath(id);
@@ -148,10 +151,17 @@ export async function updateInboxItem(
     links: normalizeLinks(patch.links ?? fm.links, "", slugToId),
     updated_at: new Date().toISOString(),
   };
-  const nextBody = patch.body ?? content;
-  const file = matter.stringify(nextBody, nextFm);
+  const nextBody = patch.body ? serializeBody(patch.body) : content;
+  // js-yaml can't dump an explicit `undefined` property (as opposed to an
+  // absent key), which `attachments: patch.attachments ?? fm.attachments`
+  // produces whenever an item has never had attachments — strip those before
+  // serializing or the whole write silently throws and nothing gets saved.
+  const cleanFm = Object.fromEntries(
+    Object.entries(nextFm).filter(([, v]) => v !== undefined)
+  ) as InboxFrontmatter;
+  const file = matter.stringify(nextBody, cleanFm);
   await writeFile(filePath, file, "utf-8");
-  return toItem(id, nextFm, nextBody, slugToId);
+  return toItem(id, cleanFm, nextBody, slugToId);
 }
 
 export async function trashInboxItem(id: string): Promise<boolean> {

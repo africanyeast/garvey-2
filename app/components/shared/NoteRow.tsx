@@ -2,14 +2,16 @@
 
 import { Check, MessageCircle } from "lucide-react";
 import type { Attachment, AttachmentTranscription } from "@/app/lib/writing-os/types";
+import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 import type { ResolvedTag } from "@/app/lib/writing-os/mentions";
 import { AttachmentList } from "@/app/components/shared/AttachmentPreview";
 import { NoteTag } from "@/app/components/shared/NoteTag";
 import { NoteMoreMenu } from "@/app/components/shared/NoteMoreMenu";
 import { RowIconButton } from "@/app/components/shared/RowIconButton";
+import { BlockTextPreview } from "@/app/components/shared/BlockTextPreview";
 
 interface NoteRowProps {
-  text: string;
+  blocks: DraftPartialBlock[];
   tags: ResolvedTag[];
   time: string;
   resolved: boolean;
@@ -47,7 +49,7 @@ interface NoteRowProps {
  * which (unlike a border on every row) leaves the first row undecorated.
  */
 export function NoteRow({
-  text,
+  blocks,
   tags,
   time,
   resolved,
@@ -108,7 +110,7 @@ export function NoteRow({
             resolved ? "text-[var(--text-muted)] line-through" : "text-[var(--text-primary)]"
           }`}
         >
-          {text}
+          <BlockTextPreview blocks={blocks} />
         </div>
         {tags.length > 0 && (
           <div className="mt-[2px] flex flex-wrap items-baseline gap-x-[8px] gap-y-[2px]">

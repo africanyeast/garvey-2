@@ -51,3 +51,8 @@ next-env.d.ts
 # markdown docs (keep README)
 *.md
 !README.md
+
+# v2 migration backups and staging (artifacts/V2_SPEC.md)
+/vault.bak-*
+/vault.next/
+/vault.v1-*

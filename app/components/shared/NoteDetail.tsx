@@ -1,7 +1,8 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState } from "react";
+import { useCallback, useLayoutEffect, useMemo, useRef, useState } from "react";
 import { Check, MessageCircle } from "lucide-react";
+import { useCreateBlockNote } from "@blocknote/react";
 import type { Attachment, AttachmentTranscription, Comment } from "@/app/lib/writing-os/types";
 import type { MentionTarget, ResolvedTag } from "@/app/lib/writing-os/mentions";
 import { AttachmentList } from "@/app/components/shared/AttachmentPreview";
@@ -11,18 +12,23 @@ import { TagPicker } from "@/app/components/shared/TagPicker";
 import { CommentsBody } from "@/app/components/shared/CommentsBody";
 import { RowIconButton } from "@/app/components/shared/RowIconButton";
 import { useClickOutside } from "@/app/hooks/useClickOutside";
+import { BlockNoteDocument } from "@/app/components/draft/BlockNoteDocument";
+import { draftSchema, type DraftPartialBlock } from "@/app/lib/writing-os/schema";
+import { parseMarkdownToBlocks } from "@/app/lib/writing-os/parseMarkdown";
+
+const EMPTY_BLOCKS: DraftPartialBlock[] = [{ type: "paragraph" }];
 
 interface NoteDetailProps {
   /** Identifies which note this is — the DOM is only ever (re)initialized
-   * when this changes, never when `text` changes on its own (see below). */
+   * when this changes, never when `blocks` changes on its own (see below). */
   id: string | number;
-  text: string;
+  blocks: DraftPartialBlock[];
   tags: ResolvedTag[];
   time: string;
   resolved: boolean;
   attachments?: Attachment[];
   onToggleResolved: () => void;
-  onTextChange: (text: string) => void;
+  onBlocksChange: (blocks: DraftPartialBlock[]) => void;
   onRemoveTag: (tag: ResolvedTag) => void;
   onDelete: () => void;
   isFullscreen: boolean;
@@ -44,6 +50,9 @@ interface NoteDetailProps {
   /** Persists (or clears) an OCR result onto one of this note's attachments —
    * omitted for a surface with no durable place to save it. */
   onSetAttachmentTranscription?: (attachmentUrl: string, transcription: AttachmentTranscription | null) => void;
+  /** Passed straight through to the transcription panel's agent-routed
+   * "Insert" action — the project (if any) this note is filed under. */
+  activeProjectSlug?: string;
 }
 
 /**
@@ -56,13 +65,13 @@ interface NoteDetailProps {
  */
 export function NoteDetail({
   id,
-  text,
+  blocks,
   tags,
   time,
   resolved,
   attachments,
   onToggleResolved,
-  onTextChange,
+  onBlocksChange,
   onRemoveTag,
   onDelete,
   isFullscreen,
@@ -74,8 +83,8 @@ export function NoteDetail({
   onReplySubmit,
   onResolveComment,
   onSetAttachmentTranscription,
+  activeProjectSlug,
 }: NoteDetailProps) {
-  const textRef = useRef<HTMLDivElement>(null);
   const showCommentIcon = comments !== undefined && onResolveComment && onReplyChange && onReplySubmit;
   const [commentsOpen, setCommentsOpen] = useState(false);
   const showComments = commentsOpen || (comments?.length ?? 0) > 0;
@@ -106,25 +115,28 @@ export function NoteDetail({
     observer.observe(pane);
     return () => observer.disconnect();
   }, [showComments]);
-  // The div below renders with NO children — `{text}` as JSX children was
-  // the actual bug: React reconciles children on every render regardless of
-  // this effect, but contentEditable mutates its own DOM out from under
-  // React the moment you type (splitting text nodes, inserting <br>/<div>
-  // on Enter), so React's memoized "one text node" model drifts from
-  // reality and it forcibly rewrites the node — throwing the caret to
-  // position 0 — even when the string value hasn't actually changed.
-  // Keeping React out of this element's children entirely, and only ever
-  // writing `innerText` once per note `id` (never again while editing that
-  // same note), is what actually stops the reset.
-  const initializedFor = useRef<string | number | null>(null);
+  // Same schema/pattern as `BlockVersionEditor`'s mini-editors: keyed on
+  // `id` so switching notes fully re-creates the editor (rather than trying
+  // to diff blocks across two unrelated notes), seeded directly from this
+  // note's own stored blocks.
+  const initialContent = useMemo(() => (blocks.length > 0 ? blocks : EMPTY_BLOCKS), [id]); // eslint-disable-line react-hooks/exhaustive-deps -- deliberately keyed on `id` only, see below
+  const editor = useCreateBlockNote({ schema: draftSchema, initialContent }, [id]);
 
+  // Mirrors `BlockVersionEditor`'s own sync effect: only overwrite the
+  // editor's content from `blocks` when it's not the thing currently being
+  // typed into (`isFocused()` false) — otherwise an external update (e.g.
+  // an attachment's OCR text getting inserted via `onInsertText` below)
+  // would never reach the editor after its first mount.
   useLayoutEffect(() => {
-    const el = textRef.current;
-    if (!el || initializedFor.current === id) return;
-    el.innerText = text;
-    initializedFor.current = id;
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- deliberately re-runs only when `id` changes, not on every `text` edit
-  }, [id]);
+    if (editor.isFocused()) return;
+    const next = blocks.length > 0 ? blocks : EMPTY_BLOCKS;
+    if (JSON.stringify(editor.document) === JSON.stringify(next)) return;
+    editor.replaceBlocks(editor.document, next);
+  }, [editor, blocks]);
+
+  const handleBlocksChange = useCallback(() => {
+    onBlocksChange(editor.document);
+  }, [editor, onBlocksChange]);
 
   return (
     <div
@@ -174,25 +186,28 @@ export function NoteDetail({
           <Check size={12} strokeWidth={3} />
         </button>
         <div className="min-w-0 flex-1">
-          <div
-            ref={textRef}
-            contentEditable
-            suppressContentEditableWarning
-            onInput={(e) => onTextChange(e.currentTarget.innerText)}
-            onPaste={(e) => {
-              // Pasting from elsewhere (a doc, a webpage) brings its own
-              // font/size/color as inline HTML by default — strip to plain
-              // text so pasted content always matches Garvey's own type,
-              // not wherever it came from.
-              e.preventDefault();
-              document.execCommand("insertText", false, e.clipboardData.getData("text/plain"));
-            }}
-            className={`font-serif text-lg font-normal w-full outline-none text-[var(--text-primary)] leading-[1.75] ${resolved ? "line-through opacity-50" : ""}`}
-          />
+          {/* No `wos-version-editor` here — that class zeroes block-padding
+           * for `BlockVersionEditor`'s single-block mini-editors (so their
+           * drag grip aligns with the text), which is wrong for a note: a
+           * note is a full multi-block flow like the document editor, so it
+           * should get the document editor's own between-block spacing
+           * (`.bn-block-content`'s 10px padding, headings' 32px top gap),
+           * not the mini-editor's zeroed-out one. */}
+          <div className={`font-serif text-lg font-normal w-full leading-[1.75] ${resolved ? "line-through opacity-50" : ""}`}>
+            <BlockNoteDocument editor={editor} onChange={handleBlocksChange} editable={!resolved} sideMenu commentable slashMenu />
+          </div>
           <AttachmentList
             attachments={attachments}
-            onInsertText={(extracted) => onTextChange(text ? `${text}\n\n${extracted}` : extracted)}
+            onInsertText={(extracted) => {
+              const inserted = parseMarkdownToBlocks(extracted);
+              const doc = editor.document;
+              const lastId = doc[doc.length - 1]?.id;
+              if (lastId) editor.insertBlocks(inserted, lastId, "after");
+              else editor.replaceBlocks(editor.document, inserted);
+            }}
             onSetTranscription={onSetAttachmentTranscription}
+            activeProjectSlug={activeProjectSlug}
+            mentionTargets={mentionTargets}
           />
           <div className="mt-[14px] flex flex-wrap items-baseline gap-x-[10px] gap-y-[4px]">
             {tags.map((t) => (

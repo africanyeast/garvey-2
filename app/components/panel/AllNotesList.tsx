@@ -30,7 +30,7 @@ export function AllNotesList() {
       {notesDesc.map((note) => (
         <NoteRow
           key={note.id}
-          text={note.body}
+          blocks={note.body}
           tags={note.tags}
           time={note.time}
           resolved={note.resolved}

@@ -6,7 +6,9 @@ import { ensureVault } from "./bootstrap";
 import { notesDir, noteFilePath, TRASH_NOTES_DIR, trashedNoteFilePath } from "./paths";
 import { formatRelative } from "./time";
 import { listProjectSlugs, projectSlugToIdMap, getProject } from "./project";
+import { parseBody, serializeBody } from "./blocks";
 import type { Attachment, Note, NoteLinks, TrashedNote } from "@/app/lib/writing-os/types";
+import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 
 interface NoteFrontmatter {
   bucket: string | null;
@@ -17,11 +19,11 @@ interface NoteFrontmatter {
   links?: NoteLinks;
 }
 
-function toNote(slug: string, id: string, fm: NoteFrontmatter, body: string, slugToId: Map<string, string>): Note {
+function toNote(slug: string, id: string, fm: NoteFrontmatter, content: string, slugToId: Map<string, string>): Note {
   return {
     id,
     bucket: fm.bucket ?? null,
-    body: body.trim(),
+    body: parseBody(content),
     // Falls back to `created_at` for notes written before `updated_at`
     // existed — nothing to migrate, just a one-time default.
     time: formatRelative(fm.updated_at ?? fm.created_at),
@@ -112,7 +114,7 @@ export async function listNotesForProjectView(slug: string): Promise<Note[]> {
 
 export async function createNote(
   slug: string,
-  input: { body: string; bucket: string | null; attachments?: Attachment[]; links?: NoteLinks }
+  input: { body: DraftPartialBlock[]; bucket: string | null; attachments?: Attachment[]; links?: NoteLinks }
 ): Promise<Note> {
   await ensureVault();
   await mkdir(notesDir(slug), { recursive: true });
@@ -127,15 +129,16 @@ export async function createNote(
     ...(input.attachments?.length ? { attachments: input.attachments } : {}),
     ...(input.links ? { links: normalizeLinks(input.links, slug, slugToId) } : {}),
   };
-  const file = matter.stringify(input.body, fm);
+  const content = serializeBody(input.body);
+  const file = matter.stringify(content, fm);
   await writeFile(noteFilePath(slug, id), file, "utf-8");
-  return toNote(slug, id, fm, input.body, slugToId);
+  return toNote(slug, id, fm, content, slugToId);
 }
 
 export async function updateNote(
   slug: string,
   id: string,
-  patch: { body?: string; resolved?: boolean; bucket?: string | null; links?: NoteLinks; attachments?: Attachment[] }
+  patch: { body?: DraftPartialBlock[]; resolved?: boolean; bucket?: string | null; links?: NoteLinks; attachments?: Attachment[] }
 ): Promise<Note | null> {
   await ensureVault();
   const filePath = noteFilePath(slug, id);
@@ -159,10 +162,17 @@ export async function updateNote(
     links: normalizeLinks(patch.links ?? fm.links, slug, slugToId),
     updated_at: new Date().toISOString(),
   };
-  const nextBody = patch.body ?? content;
-  const file = matter.stringify(nextBody, nextFm);
+  const nextBody = patch.body ? serializeBody(patch.body) : content;
+  // js-yaml can't dump an explicit `undefined` property (as opposed to an
+  // absent key), which `attachments: patch.attachments ?? fm.attachments`
+  // produces whenever a note has never had attachments — strip those before
+  // serializing or the whole write silently throws and nothing gets saved.
+  const cleanFm = Object.fromEntries(
+    Object.entries(nextFm).filter(([, v]) => v !== undefined)
+  ) as NoteFrontmatter;
+  const file = matter.stringify(nextBody, cleanFm);
   await writeFile(filePath, file, "utf-8");
-  return toNote(slug, id, nextFm, nextBody, slugToId);
+  return toNote(slug, id, cleanFm, nextBody, slugToId);
 }
 
 // Moves the note's file out of `notes/` into a flat, cross-project trash

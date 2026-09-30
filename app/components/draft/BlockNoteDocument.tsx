@@ -28,6 +28,9 @@ import {
   Heading1,
   Heading2,
   Heading3,
+  Heading4,
+  Heading5,
+  Heading6,
   Italic,
   Link,
   Loader2,
@@ -246,6 +249,9 @@ const TYPOGRAPHY_OPTIONS = [
   { key: "heading1", label: "Heading 1", icon: Heading1 },
   { key: "heading2", label: "Heading 2", icon: Heading2 },
   { key: "heading3", label: "Heading 3", icon: Heading3 },
+  { key: "heading4", label: "Heading 4", icon: Heading4 },
+  { key: "heading5", label: "Heading 5", icon: Heading5 },
+  { key: "heading6", label: "Heading 6", icon: Heading6 },
   { key: "quote", label: "Quote", icon: Quote },
 ] as const;
 
@@ -254,9 +260,10 @@ type TypographyKey = (typeof TYPOGRAPHY_OPTIONS)[number]["key"];
 function typographyKeyOf(block: { type: string; props?: Record<string, unknown> }): TypographyKey {
   if (block.type === "heading") {
     const level = block.props?.level;
-    if (level === 1) return "heading1";
-    if (level === 2) return "heading2";
-    return "heading3";
+    if (level === 1 || level === 2 || level === 3 || level === 4 || level === 5 || level === 6) {
+      return `heading${level}` as TypographyKey;
+    }
+    return "heading1";
   }
   if (block.type === "quote") return "quote";
   return "paragraph";
@@ -283,7 +290,7 @@ function TypographyMenuItem() {
               const block = editor.getTextCursorPosition().block;
               if (opt.key === "paragraph") editor.updateBlock(block, { type: "paragraph" });
               else if (opt.key === "quote") editor.updateBlock(block, { type: "quote" });
-              else editor.updateBlock(block, { type: "heading", props: { level: Number(opt.key.slice(-1)) as 1 | 2 | 3 } });
+              else editor.updateBlock(block, { type: "heading", props: { level: Number(opt.key.slice(-1)) as 1 | 2 | 3 | 4 | 5 | 6 } });
               editor.focus();
               setOpen(false);
             }}

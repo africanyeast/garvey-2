@@ -24,6 +24,7 @@ import type {
 } from "./types";
 import type { DraftBlock, DraftPartialBlock } from "./schema";
 import { type MentionTarget, type ProjectLookup, type ResolvedTag, resolveNoteLinks, resolveTags, sectionMentionTargets } from "./mentions";
+import { parseMarkdownToBlocks } from "./parseMarkdown";
 
 export const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -137,8 +138,8 @@ interface WritingOSState {
   toggleInboxResolved: (id: string) => void;
   deleteNote: (id: string) => void;
   deleteInboxItem: (id: string) => void;
-  updateNoteBody: (id: string, body: string) => void;
-  updateInboxBody: (id: string, body: string) => void;
+  updateNoteBody: (id: string, body: DraftPartialBlock[]) => void;
+  updateInboxBody: (id: string, body: DraftPartialBlock[]) => void;
   /** Persists (or clears, passing `null`) an OCR result onto one attachment
    * of a note/inbox item — durable, unlike the old review-dialog flow, so
    * reopening the item later still shows the transcript. */
@@ -161,6 +162,12 @@ interface WritingOSState {
     links?: MentionTarget[],
     attachments?: Attachment[]
   ) => void;
+  /** Pushes a note/inbox item created *outside* the normal composer flow
+   * (e.g. the `insert-content` agent filing one from the transcription
+   * panel) into whatever list state is currently showing it — same
+   * project-tab + global-feed mirroring `addItem` already does for a
+   * hand-typed note. */
+  registerCreatedNote: (note: Note | InboxItem, projectSlug?: string) => void;
   setNewInboxDraft: (v: string) => void;
   addInboxItem: () => void;
   addRestoredNote: (n: Note) => void;
@@ -361,7 +368,7 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     const url = item?.homeSlug ? `/api/projects/${item.homeSlug}/notes/${id}` : `/api/inbox/${id}`;
     fetch(url, { method: "DELETE" }).catch(() => {});
   };
-  const updateNoteBody = (id: string, body: string) => {
+  const updateNoteBody = (id: string, body: DraftPartialBlock[]) => {
     if (!activeProjectSlug) return;
     const note = notesData.find((n) => n.id === id);
     if (!note) return;
@@ -372,7 +379,7 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
       body: JSON.stringify({ body }),
     }).catch(() => {});
   };
-  const updateInboxBody = (id: string, body: string) => {
+  const updateInboxBody = (id: string, body: DraftPartialBlock[]) => {
     const item = inboxItems.find((i) => i.id === id);
     setInboxItems((prev) => prev.map((i) => (i.id === id ? { ...i, body } : i)));
     const url = item?.homeSlug ? `/api/projects/${item.homeSlug}/notes/${id}` : `/api/inbox/${id}`;
@@ -683,6 +690,15 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     homeSlug,
   });
 
+  const registerCreatedNote = (note: Note | InboxItem, projectSlug?: string) => {
+    if (projectSlug) {
+      if (projectSlug === activeProjectSlug) setNotesData((prev) => [...prev, note as Note]);
+      setInboxItems((prev) => [...prev, asInboxFeedItem(note as Note, projectSlug)]);
+    } else {
+      setInboxItems((prev) => [...prev, note as InboxItem]);
+    }
+  };
+
   const addItem = (draftDoc: DraftBlock[]) => {
     const raw = newNoteDraft.trim();
     if (!raw || !activeProjectSlug) return;
@@ -696,7 +712,7 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     fetch(`/api/projects/${activeProjectSlug}/notes`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body: raw, bucket, links, attachments }),
+      body: JSON.stringify({ body: parseMarkdownToBlocks(raw), bucket, links, attachments }),
     })
       .then((res) => res.json())
       .then((note: Note) => {
@@ -722,7 +738,7 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     fetch(`/api/projects/${activeProjectSlug}/notes`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body: raw, bucket: sec, links: resolveNoteLinks(targets), attachments }),
+      body: JSON.stringify({ body: parseMarkdownToBlocks(raw), bucket: sec, links: resolveNoteLinks(targets), attachments }),
     })
       .then((res) => res.json())
       .then((note: Note) => {
@@ -743,7 +759,7 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     fetch("/api/inbox", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body: raw, links, attachments }),
+      body: JSON.stringify({ body: parseMarkdownToBlocks(raw), links, attachments }),
     })
       .then((res) => res.json())
       .then((item: InboxItem) => setInboxItems((prev) => [...prev, item]))
@@ -834,6 +850,7 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     setNewNoteDraft,
     addItem,
     addNoteToSection,
+    registerCreatedNote,
     setNewInboxDraft,
     addInboxItem,
     addRestoredNote,

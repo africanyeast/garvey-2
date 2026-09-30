@@ -33,13 +33,13 @@ export function InboxItemExpanded({ id }: { id: string | number }) {
     <PanelShell mode="fullscreen" onClose={closeExpanded}>
       <NoteDetail
         id={it.id}
-        text={it.body}
+        blocks={it.body}
         tags={it.tags}
         time={it.time}
         resolved={it.resolved}
         attachments={it.attachments}
         onToggleResolved={() => toggleInboxResolved(it.id)}
-        onTextChange={(text) => updateInboxBody(it.id, text)}
+        onBlocksChange={(blocks) => updateInboxBody(it.id, blocks)}
         onSetAttachmentTranscription={(url, t) => setInboxAttachmentTranscription(it.id, url, t)}
         onRemoveTag={(t) => removeInboxTag(it.id, t.kind, t.tagId)}
         onDelete={() => deleteInboxItem(it.id)}
@@ -51,6 +51,7 @@ export function InboxItemExpanded({ id }: { id: string | number }) {
         onReplyChange={(v) => setReplyDraft(it.id, v)}
         onReplySubmit={() => addInboxReply(it.id)}
         onResolveComment={(id) => resolveInboxComment(it.id, id)}
+        activeProjectSlug={it.homeSlug}
       />
     </PanelShell>
   );

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type KeyboardEvent } from "react";
+import { Fragment, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
 import { ArrowUp, Paperclip, X } from "lucide-react";
 import type { Attachment } from "@/app/lib/writing-os/types";
 import type { MentionTarget } from "@/app/lib/writing-os/mentions";
@@ -26,6 +26,90 @@ function soleUrl(text: string): string | null {
 }
 
 const MAX_HEIGHT = 240;
+
+/** Inline markdown tokens styled without touching font-size/line-height, so a
+ * line renders at the exact same width/wrap as the invisible textarea text
+ * sitting on top of it — only color/weight/decoration change. */
+function renderInlineMarkdown(text: string, keyPrefix: string): ReactNode[] {
+  const nodes: ReactNode[] = [];
+  const re = /(\*\*[^*\n]+\*\*|__[^_\n]+__|\*[^*\n]+\*|_[^_\n]+_|`[^`\n]+`|!?\[[^\]\n]*\]\([^)\n]+\))/g;
+  let last = 0;
+  let match: RegExpExecArray | null;
+  let i = 0;
+  while ((match = re.exec(text))) {
+    if (match.index > last) nodes.push(text.slice(last, match.index));
+    const tok = match[0];
+    const key = `${keyPrefix}-${i++}`;
+    if (tok.startsWith("**") || tok.startsWith("__")) {
+      nodes.push(<strong key={key} className="font-bold">{tok}</strong>);
+    } else if (tok.startsWith("`")) {
+      nodes.push(
+        <span key={key} className="font-mono bg-[var(--fill-highlight)] rounded-[2px]">
+          {tok}
+        </span>
+      );
+    } else if (tok.startsWith("!") || tok.startsWith("[")) {
+      nodes.push(
+        <span key={key} className="text-[var(--text-link,#2563eb)] underline decoration-dotted">
+          {tok}
+        </span>
+      );
+    } else {
+      nodes.push(<em key={key} className="italic">{tok}</em>);
+    }
+    last = match.index + tok.length;
+  }
+  if (last < text.length) nodes.push(text.slice(last));
+  return nodes;
+}
+
+/** Renders the same text as the composer textarea, but with markdown syntax
+ * styled (headings bold, quotes/list markers colored, inline emphasis/code)
+ * — sits absolutely behind the transparent-text textarea so the caret and
+ * selection stay native while the letters underneath show styled. */
+function MarkdownHighlight({ text }: { text: string }) {
+  const lines = text.length === 0 ? [""] : text.split("\n");
+  return (
+    <>
+      {lines.map((line, idx) => {
+        const heading = line.match(/^(#{1,6}\s+)(.*)$/);
+        const quote = line.match(/^(>\s?)(.*)$/);
+        const listItem = line.match(/^(\s*(?:[-*+]|\d+\.)\s+)(.*)$/);
+        let content: ReactNode;
+        if (heading) {
+          content = (
+            <>
+              <span className="text-[var(--text-muted)]">{heading[1]}</span>
+              <strong className="font-bold">{renderInlineMarkdown(heading[2], `h${idx}`)}</strong>
+            </>
+          );
+        } else if (quote) {
+          content = (
+            <span className="italic text-[var(--text-secondary)]">
+              <span className="text-[var(--text-muted)]">{quote[1]}</span>
+              {renderInlineMarkdown(quote[2], `q${idx}`)}
+            </span>
+          );
+        } else if (listItem) {
+          content = (
+            <>
+              <span className="text-[var(--text-muted)]">{listItem[1]}</span>
+              {renderInlineMarkdown(listItem[2], `l${idx}`)}
+            </>
+          );
+        } else {
+          content = renderInlineMarkdown(line, `p${idx}`);
+        }
+        return (
+          <Fragment key={idx}>
+            {content}
+            {idx < lines.length - 1 ? "\n" : null}
+          </Fragment>
+        );
+      })}
+    </>
+  );
+}
 
 /**
  * The one text-input surface for sending anything into the harness — a
@@ -89,6 +173,7 @@ export function IntentComposer({
   disabled?: boolean;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
+  const highlightRef = useRef<HTMLDivElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionStart, setMentionStart] = useState<number | null>(null);
@@ -106,6 +191,16 @@ export function IntentComposer({
   };
 
   useEffect(autoResize, [value]);
+
+  const syncHighlightScroll = () => {
+    const el = textareaRef.current;
+    const hl = highlightRef.current;
+    if (!el || !hl) return;
+    hl.scrollTop = el.scrollTop;
+    hl.scrollLeft = el.scrollLeft;
+  };
+
+  useEffect(syncHighlightScroll, [value]);
 
   const filteredTargets = useMemo(() => {
     if (mentionQuery === null || mentionTrigger === null || !mentionTargets) return [];
@@ -301,17 +396,31 @@ export function IntentComposer({
               </button>
             </>
           )}
-          <textarea
-            ref={textareaRef}
-            value={value}
-            onChange={handleChange}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-            rows={1}
-            autoFocus={autoFocus}
-            placeholder={placeholder}
-            className="font-sans text-[14px] font-normal flex-1 min-w-0 resize-none border-none outline-none bg-transparent text-[var(--text-primary)] leading-[1.5] overflow-y-auto"
-          />
+          <div className="relative flex-1 min-w-0">
+            {/* Styled markdown sits behind the textarea; the textarea's own
+             * text is made transparent so only its caret/selection show,
+             * with the highlighted letters showing through from behind. Both
+             * share font/padding/line-height so wrapping lines up exactly. */}
+            <div
+              ref={highlightRef}
+              aria-hidden
+              className="font-sans text-[14px] font-normal absolute inset-0 whitespace-pre-wrap break-words leading-[1.5] overflow-hidden pointer-events-none text-[var(--text-primary)]"
+            >
+              <MarkdownHighlight text={value} />
+            </div>
+            <textarea
+              ref={textareaRef}
+              value={value}
+              onChange={handleChange}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              onScroll={syncHighlightScroll}
+              rows={1}
+              autoFocus={autoFocus}
+              placeholder={placeholder}
+              className="relative block font-sans text-[14px] font-normal w-full p-0 m-0 resize-none border-none outline-none bg-transparent caret-[var(--text-primary)] text-transparent placeholder:text-[var(--text-muted)] leading-[1.5] overflow-y-auto"
+            />
+          </div>
           <button
             onClick={onSubmit}
             title={submitLabel}

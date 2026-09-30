@@ -3,7 +3,9 @@
 import { useEffect, useState } from "react";
 import { RotateCcw, Trash2 } from "lucide-react";
 import type { Project, TrashedProject, TrashedNote, TrashedInboxItem, Attachment } from "@/app/lib/writing-os/types";
+import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 import { AttachmentList } from "@/app/components/shared/AttachmentPreview";
+import { BlockTextPreview } from "@/app/components/shared/BlockTextPreview";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 
 type TrashTab = "projects" | "inbox";
@@ -12,8 +14,8 @@ type TrashTab = "projects" | "inbox";
 // `types.ts`), so trash treats them as one list too — a deleted note isn't
 // a different kind of thing just because it used to live under a project.
 type TrashedCapture =
-  | { origin: "note"; id: string; projectSlug: string; body: string; attachments?: Attachment[]; trashedAt: string }
-  | { origin: "inbox"; id: string; body: string; attachments?: Attachment[]; trashedAt: string };
+  | { origin: "note"; id: string; projectSlug: string; body: DraftPartialBlock[]; attachments?: Attachment[]; trashedAt: string }
+  | { origin: "inbox"; id: string; body: DraftPartialBlock[]; attachments?: Attachment[]; trashedAt: string };
 
 function formatDate(iso: string) {
   if (!iso) return "";
@@ -121,7 +123,9 @@ export function TrashScreen() {
               <div key={`${capture.origin}-${capture.id}`} className="flex items-start gap-[10px] py-[13px]">
                 <Trash2 size={15} className="shrink-0 mt-[2px] text-[var(--text-muted)]" />
                 <div className="min-w-0 flex-1">
-                  <p className="font-serif text-[15px] leading-[1.6] text-[var(--text-primary)] break-words m-[0] line-clamp-2">{capture.body}</p>
+                  <p className="font-serif text-[15px] leading-[1.6] text-[var(--text-primary)] break-words m-[0] line-clamp-2">
+                    <BlockTextPreview blocks={capture.body} />
+                  </p>
                   <AttachmentList attachments={capture.attachments} />
                 </div>
                 {capture.trashedAt && <span className="text-xs font-medium text-[var(--text-muted)] shrink-0">{formatDate(capture.trashedAt)}</span>}

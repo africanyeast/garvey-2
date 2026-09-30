@@ -8,7 +8,7 @@ export async function GET() {
 
 export async function POST(req: NextRequest) {
   const body = await req.json();
-  if (typeof body.body !== "string" || !body.body.trim()) {
+  if (!Array.isArray(body.body) || body.body.length === 0) {
     return NextResponse.json({ error: "body is required" }, { status: 400 });
   }
   const item = await createInboxItem({

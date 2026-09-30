@@ -16,9 +16,9 @@ export interface SynonymResult {
 const INSTRUCTION =
   "Suggest alternative words or phrases for the selected text, register-appropriate " +
   "for the given style and natural in the containing sentence. List every genuinely fitting " +
-  "alternative — don't pad with a loose or unrelated one just to lengthen the list, and don't " +
-  "stop early if more good ones exist. Reply with ONLY a JSON array of strings, most fitting " +
-  'first, e.g. ["word one", "word two"]. No prose, no markdown fences.';
+  "alternative exhaustively, up to 50 — don't pad with a loose or unrelated one just to reach " +
+  "20, and don't stop early if more good ones exist below that cap. Reply with ONLY a JSON " +
+  'array of strings, most fitting first, e.g. ["word one", "word two"]. No prose, no markdown fences.';
 
 /** Best-effort recovery for a reply that isn't strict JSON — strips a
  * ```json ... ``` fence if the model added one despite being told not to,

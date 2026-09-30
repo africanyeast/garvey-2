@@ -14,7 +14,7 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ slu
 export async function POST(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;
   const body = await req.json();
-  if (typeof body.body !== "string" || !body.body.trim()) {
+  if (!Array.isArray(body.body) || body.body.length === 0) {
     return NextResponse.json({ error: "body is required" }, { status: 400 });
   }
   const note = await createNote(slug, {

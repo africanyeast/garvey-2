@@ -7,6 +7,9 @@ export async function PATCH(
 ) {
   const { slug, id } = await params;
   const patch = await req.json();
+  if (patch.body !== undefined && !Array.isArray(patch.body)) {
+    return NextResponse.json({ error: "body must be a block array" }, { status: 400 });
+  }
   const note = await updateNote(slug, id, {
     body: patch.body,
     resolved: patch.resolved,

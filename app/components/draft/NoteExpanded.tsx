@@ -29,6 +29,7 @@ export function NoteExpanded({ item }: { item: ExpandedItem }) {
     resolveComment,
     addInboxReply,
     resolveInboxComment,
+    activeProjectSlug,
   } = useWritingOS();
   const { document: draftDoc } = useDraftEditor();
 
@@ -60,13 +61,13 @@ export function NoteExpanded({ item }: { item: ExpandedItem }) {
     <PanelShell mode="fullscreen" onClose={closeExpanded} closeTitle={closeTitle}>
       <NoteDetail
         id={n.id}
-        text={n.body}
+        blocks={n.body}
         tags={n.tags}
         time={n.time}
         resolved={n.resolved}
         attachments={n.attachments}
         onToggleResolved={() => toggleNoteResolved(n.id)}
-        onTextChange={(text) => updateNoteBody(n.id, text)}
+        onBlocksChange={(blocks) => updateNoteBody(n.id, blocks)}
         onSetAttachmentTranscription={(url, t) => setNoteAttachmentTranscription(n.id, url, t)}
         onRemoveTag={(t) => removeNoteTag(n.id, t.kind, t.tagId)}
         onDelete={() => deleteNote(n.id)}
@@ -78,6 +79,7 @@ export function NoteExpanded({ item }: { item: ExpandedItem }) {
         onReplyChange={(v) => setReplyDraft(n.id, v)}
         onReplySubmit={onReplySubmit}
         onResolveComment={onResolveComment}
+        activeProjectSlug={n.homeSlug ?? activeProjectSlug ?? undefined}
       />
     </PanelShell>
   );

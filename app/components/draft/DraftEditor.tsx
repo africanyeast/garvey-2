@@ -138,7 +138,7 @@ export function DraftEditor({
               {updatedAt && (
                 <>
                   <span className="text-[var(--text-muted)] text-sm select-none">•</span>
-                  <span className="text-subtitle whitespace-nowrap">
+                  <span className="text-subtitle text-xs whitespace-nowrap">
                     {formatRelativeClient(updatedAt)}
                   </span>
                 </>

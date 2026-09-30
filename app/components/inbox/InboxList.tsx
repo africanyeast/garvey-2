@@ -37,7 +37,7 @@ export function InboxList() {
         {inboxItemsDesc.map((item) => (
           <NoteRow
             key={item.id}
-            text={item.body}
+            blocks={item.body}
             tags={item.tags}
             time={item.time}
             resolved={item.resolved}
