@@ -1,13 +1,11 @@
-import { readdir, readFile, writeFile, mkdir, unlink } from "node:fs/promises";
-import { ulid } from "ulid";
-import { ensureVault } from "./bootstrap";
-import { threadsDir, threadFilePath } from "./paths";
+import { newId, linkOf, type Store, type Thing } from "@/lib/store";
+import { liveProjectBySlug, vault } from "./store";
 
 // Mirrors @blocknote/core's `ThreadData`/`CommentData` shape closely enough
 // that the client-side ThreadStore (`app/lib/writing-os/threadStore.ts`) can
-// round-trip it with minimal translation — see that file for why comments
-// are backed by BlockNote's own native marks/ThreadStore now instead of a
-// hand-rolled substring search.
+// round-trip it with minimal translation. A thread is one thing,
+// `comment-on` its project; its own comments are the body, as JSON, since a
+// thread is always read and written as a whole.
 export interface StoredComment {
   id: string;
   userId: string;
@@ -28,59 +26,87 @@ export interface StoredThread {
   comments: StoredComment[];
 }
 
+function toThread(t: Thing): StoredThread {
+  const h = t.header;
+  return {
+    id: h.id,
+    createdAt: h.created_at,
+    updatedAt: h.updated_at,
+    resolved: (h.resolved as boolean) ?? false,
+    ...(h.resolved_at !== undefined ? { resolvedAt: h.resolved_at as string } : {}),
+    ...(h.resolved_by !== undefined ? { resolvedBy: h.resolved_by as string } : {}),
+    ...(h.metadata !== undefined ? { metadata: h.metadata } : {}),
+    comments: JSON.parse(t.body) as StoredComment[],
+  };
+}
+
+/** Read-modify-write of one thread of this project, under its lock. */
+async function withThread(
+  slug: string,
+  threadId: string,
+  fn: (thread: StoredThread) => StoredThread | null
+): Promise<StoredThread | null> {
+  const { store } = await vault();
+  if (!(await threadIn(store, slug, threadId))) return null;
+  let result: StoredThread | null = null;
+  await store.update(threadId, (t) => {
+    const next = fn(toThread(t));
+    if (!next) return t;
+    result = next;
+    t.body = JSON.stringify(next.comments, null, 2);
+    t.header.resolved = next.resolved;
+    for (const [key, value] of [
+      ["resolved_at", next.resolvedAt],
+      ["resolved_by", next.resolvedBy],
+      ["metadata", next.metadata],
+    ] as const) {
+      if (value === undefined) delete t.header[key];
+      else t.header[key] = value;
+    }
+    return t;
+  });
+  // `update` bumped updated_at; report the thread as stored.
+  const stored = await store.get(threadId);
+  return result && stored ? toThread(stored) : null;
+}
+
+async function threadIn(store: Store, slug: string, threadId: string): Promise<Thing | null> {
+  const project = await liveProjectBySlug(store, slug);
+  const t = await store.get(threadId);
+  if (!project || !t || t.header.kind !== "thread" || t.header.trashed_at !== null) return null;
+  return linkOf(t, "comment-on")?.to.id === project.header.id ? t : null;
+}
+
 export async function listThreads(slug: string): Promise<StoredThread[]> {
-  await ensureVault();
-  await mkdir(threadsDir(slug), { recursive: true });
-  const files = (await readdir(threadsDir(slug))).filter((f) => f.endsWith(".json"));
-  const threads = await Promise.all(
-    files.map(async (file) => {
-      const raw = await readFile(threadFilePath(slug, file.replace(/\.json$/, "")), "utf-8");
-      return JSON.parse(raw) as StoredThread;
-    })
-  );
-  return threads.sort((a, b) => a.id.localeCompare(b.id));
+  const { views } = await vault();
+  return views.listThreads(slug);
 }
 
 export async function createThread(
   slug: string,
   input: { userId: string; body: unknown; commentMetadata?: unknown; metadata?: unknown }
 ): Promise<StoredThread> {
-  await ensureVault();
-  await mkdir(threadsDir(slug), { recursive: true });
-  const id = ulid();
+  const { store } = await vault();
+  const project = await liveProjectBySlug(store, slug);
+  if (!project) throw new Error(`no project ${slug}`);
   const now = new Date().toISOString();
   const comment: StoredComment = {
-    id: ulid(),
+    id: newId(),
     userId: input.userId,
     createdAt: now,
     updatedAt: now,
     body: input.body,
-    metadata: input.commentMetadata,
+    ...(input.commentMetadata !== undefined ? { metadata: input.commentMetadata } : {}),
   };
-  const thread: StoredThread = {
-    id,
-    createdAt: now,
-    updatedAt: now,
-    resolved: false,
-    metadata: input.metadata,
-    comments: [comment],
-  };
-  await writeFile(threadFilePath(slug, id), JSON.stringify(thread, null, 2), "utf-8");
-  return thread;
-}
-
-async function readThread(slug: string, id: string): Promise<StoredThread | null> {
-  try {
-    const raw = await readFile(threadFilePath(slug, id), "utf-8");
-    return JSON.parse(raw) as StoredThread;
-  } catch {
-    return null;
-  }
-}
-
-async function writeThread(slug: string, thread: StoredThread): Promise<void> {
-  thread.updatedAt = new Date().toISOString();
-  await writeFile(threadFilePath(slug, thread.id), JSON.stringify(thread, null, 2), "utf-8");
+  const t = await store.create({
+    kind: "thread",
+    body: JSON.stringify([comment], null, 2),
+    links: [{ rel: "comment-on", to: { id: project.header.id } }],
+    created_at: now,
+    updated_at: now,
+    fields: { resolved: false, ...(input.metadata !== undefined ? { metadata: input.metadata } : {}) },
+  });
+  return toThread(t);
 }
 
 export async function addComment(
@@ -88,13 +114,18 @@ export async function addComment(
   threadId: string,
   input: { userId: string; body: unknown; metadata?: unknown }
 ): Promise<StoredThread | null> {
-  await ensureVault();
-  const thread = await readThread(slug, threadId);
-  if (!thread) return null;
   const now = new Date().toISOString();
-  thread.comments.push({ id: ulid(), userId: input.userId, createdAt: now, updatedAt: now, body: input.body, metadata: input.metadata });
-  await writeThread(slug, thread);
-  return thread;
+  return withThread(slug, threadId, (thread) => {
+    thread.comments.push({
+      id: newId(),
+      userId: input.userId,
+      createdAt: now,
+      updatedAt: now,
+      body: input.body,
+      ...(input.metadata !== undefined ? { metadata: input.metadata } : {}),
+    });
+    return thread;
+  });
 }
 
 export async function updateComment(
@@ -103,35 +134,27 @@ export async function updateComment(
   commentId: string,
   patch: { body?: unknown; metadata?: unknown }
 ): Promise<StoredThread | null> {
-  await ensureVault();
-  const thread = await readThread(slug, threadId);
-  if (!thread) return null;
-  const comment = thread.comments.find((c) => c.id === commentId);
-  if (!comment) return null;
-  if (patch.body !== undefined) comment.body = patch.body;
-  if (patch.metadata !== undefined) comment.metadata = patch.metadata;
-  comment.updatedAt = new Date().toISOString();
-  await writeThread(slug, thread);
-  return thread;
+  return withThread(slug, threadId, (thread) => {
+    const comment = thread.comments.find((c) => c.id === commentId);
+    if (!comment) return null;
+    if (patch.body !== undefined) comment.body = patch.body;
+    if (patch.metadata !== undefined) comment.metadata = patch.metadata;
+    comment.updatedAt = new Date().toISOString();
+    return thread;
+  });
 }
 
 export async function deleteComment(slug: string, threadId: string, commentId: string): Promise<StoredThread | null> {
-  await ensureVault();
-  const thread = await readThread(slug, threadId);
-  if (!thread) return null;
-  thread.comments = thread.comments.filter((c) => c.id !== commentId);
-  await writeThread(slug, thread);
-  return thread;
+  return withThread(slug, threadId, (thread) => {
+    thread.comments = thread.comments.filter((c) => c.id !== commentId);
+    return thread;
+  });
 }
 
 export async function deleteThread(slug: string, threadId: string): Promise<boolean> {
-  await ensureVault();
-  try {
-    await unlink(threadFilePath(slug, threadId));
-    return true;
-  } catch {
-    return false;
-  }
+  const { store } = await vault();
+  if (!(await threadIn(store, slug, threadId))) return false;
+  return store.delete(threadId);
 }
 
 export async function setThreadResolved(
@@ -140,17 +163,15 @@ export async function setThreadResolved(
   resolved: boolean,
   resolvedBy?: string
 ): Promise<StoredThread | null> {
-  await ensureVault();
-  const thread = await readThread(slug, threadId);
-  if (!thread) return null;
-  thread.resolved = resolved;
-  if (resolved) {
-    thread.resolvedAt = new Date().toISOString();
-    thread.resolvedBy = resolvedBy;
-  } else {
-    thread.resolvedAt = undefined;
-    thread.resolvedBy = undefined;
-  }
-  await writeThread(slug, thread);
-  return thread;
+  return withThread(slug, threadId, (thread) => {
+    thread.resolved = resolved;
+    if (resolved) {
+      thread.resolvedAt = new Date().toISOString();
+      thread.resolvedBy = resolvedBy;
+    } else {
+      thread.resolvedAt = undefined;
+      thread.resolvedBy = undefined;
+    }
+    return thread;
+  });
 }

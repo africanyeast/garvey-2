@@ -1,7 +1,7 @@
-import { mkdir, readdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import matter from "gray-matter";
-import { VAULT_DIR, VERSION_PATH, THINGS_DIR, OS_DIR, STYLES_DIR, OS_CONFIG_PATH, DEFAULT_STYLE_PATH } from "./paths";
+import { INBOX_DIR, VAULT_DIR, OS_DIR, STYLES_DIR, OS_CONFIG_PATH, DEFAULT_STYLE_PATH } from "./paths";
 
 const DEFAULT_STYLE_FRONTMATTER = {
   writing_samples: [
@@ -21,32 +21,15 @@ const DEFAULT_CONFIG_YAML = `active_style: default\nplugins:\n  - contextual-sug
 let bootstrapped = false;
 
 /**
- * Ensures the on-disk vault/.os layout exists before any read/write.
- * Idempotent and cheap once `bootstrapped` is set, so every API route can
- * call this unconditionally instead of assuming setup happened.
- *
- * A vault with content but no VERSION file is a v1 vault (one folder per
- * project). This code must never write into one — that would scatter
- * `things/` into the old tree — so it refuses until the migration has been
- * run and swapped in (artifacts/V2_SPEC.md, Phase 3).
+ * Ensures the on-disk vault/.os layout from V1_SPEC.md exists before any
+ * read/write. Idempotent and cheap once `bootstrapped` is set, so every API
+ * route can call this unconditionally instead of assuming setup happened.
  */
 export async function ensureVault() {
   if (bootstrapped) return;
 
   await mkdir(VAULT_DIR, { recursive: true });
-  if (existsSync(VERSION_PATH)) {
-    const version = (await readFile(VERSION_PATH, "utf-8")).trim();
-    if (version !== "2") throw new Error(`${VAULT_DIR} is vault version ${version}; this code reads version 2`);
-  } else {
-    const entries = (await readdir(VAULT_DIR)).filter((n) => !n.startsWith("."));
-    if (entries.length > 0) {
-      throw new Error(
-        `${VAULT_DIR} is a v1 vault (no VERSION file). Run scripts/migrate-vault.ts and swap vault.next/ in first (artifacts/V2_SPEC.md, Phase 3).`
-      );
-    }
-    await writeFile(VERSION_PATH, "2\n", "utf-8");
-  }
-  await mkdir(THINGS_DIR, { recursive: true });
+  await mkdir(INBOX_DIR, { recursive: true });
   await mkdir(OS_DIR, { recursive: true });
   await mkdir(STYLES_DIR, { recursive: true });
 

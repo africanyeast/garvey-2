@@ -12,7 +12,9 @@ MANIFEST="$OFF/manifest-$TS.sha256"
 ARCHIVE="$OFF/garvey-backup-$TS.tar.gz"
 
 [ -e "$COPY" ] && { echo "refusing: $COPY exists"; exit 1; }
-if lsof -iTCP:3001 -sTCP:LISTEN >/dev/null 2>&1; then echo "refusing: something is listening on :3001 (dev server?)"; exit 1; fi
+for port in 3000 3001; do
+  if lsof -iTCP:$port -sTCP:LISTEN >/dev/null 2>&1; then echo "refusing: something is listening on :$port (dev server?)"; exit 1; fi
+done
 mkdir -p "$OFF"
 
 # verify_dir <dir-containing-vault-and-.os> : every manifest line matches, and no extra files

@@ -55,4 +55,6 @@ next-env.d.ts
 # v2 migration backups and staging (artifacts/V2_SPEC.md)
 /vault.bak-*
 /vault.next/
+/vault.next.tmp/
+/vault.next-report.*
 /vault.v1-*

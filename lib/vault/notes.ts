@@ -1,37 +1,26 @@
-import { readdir, readFile, writeFile, mkdir, unlink } from "node:fs/promises";
-import { existsSync } from "node:fs";
-import { ulid } from "ulid";
-import matter from "gray-matter";
-import { ensureVault } from "./bootstrap";
-import { notesDir, noteFilePath, TRASH_NOTES_DIR, trashedNoteFilePath } from "./paths";
-import { formatRelative } from "./time";
-import { listProjectSlugs, projectSlugToIdMap, getProject } from "./project";
-import { parseBody, serializeBody } from "./blocks";
+import {
+  blockText,
+  filedUnder,
+  findBlock,
+  labelSnippet,
+  noteLinksOf,
+  noteLinksToLinks,
+  parseBlocks,
+  toNote,
+  type Link,
+  type Store,
+  type Thing,
+} from "@/lib/store";
+import { liveProjectBySlug, setLegacy, vault } from "./store";
+import { projectSlugToIdMap } from "./project";
+import { serializeBody } from "./blocks";
 import type { Attachment, Note, NoteLinks, TrashedNote } from "@/app/lib/writing-os/types";
+import { projectDisplayTitle } from "@/app/lib/writing-os/types";
 import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 
-interface NoteFrontmatter {
-  bucket: string | null;
-  resolved: boolean;
-  created_at: string;
-  updated_at?: string;
-  attachments?: Attachment[];
-  links?: NoteLinks;
-}
-
-function toNote(slug: string, id: string, fm: NoteFrontmatter, content: string, slugToId: Map<string, string>): Note {
-  return {
-    id,
-    bucket: fm.bucket ?? null,
-    body: parseBody(content),
-    // Falls back to `created_at` for notes written before `updated_at`
-    // existed — nothing to migrate, just a one-time default.
-    time: formatRelative(fm.updated_at ?? fm.created_at),
-    resolved: fm.resolved ?? false,
-    attachments: fm.attachments ?? [],
-    links: normalizeLinks(fm.links, slug, slugToId),
-  };
-}
+// A note is a thing with a `filed-under` link to its project (and section,
+// when it has a bucket). Its "@"/"#" tags are `about` links. An inbox
+// capture is the same kind of thing with no `filed-under` (see inbox.ts).
 
 interface LegacyNoteLinks {
   projectIds?: string[];
@@ -40,17 +29,14 @@ interface LegacyNoteLinks {
   blockIds?: string[];
 }
 
-/** Legacy on-disk notes may still carry an older shape — `{ blockIds }`
- * from before "#" tags recorded a label/project, or `{ projectSlugs, refs:
- * [{ projectSlug }] }` from before tags referenced a project's stable id
- * instead of its (renameable) slug. `slugToId` resolves any lingering slug
- * to whatever id that project has *now* — a slug already valid at tag time
- * always matches, since a project's slug only ever changes on a rename that
- * happens after the tag was made. An unresolvable slug (the project was
- * deleted) is left as-is, which just won't resolve to a project at display
- * time (see `resolveTags`) rather than crashing. Both callers that persist
- * the result (`createNote`/`updateNote`) write the normalized shape back to
- * disk, so this migration only ever has to run once per note. */
+/** Legacy tag shapes — `{ blockIds }` from before "#" tags recorded a
+ * label/project, or `{ projectSlugs, refs: [{ projectSlug }] }` from before
+ * tags referenced a project's stable id instead of its (renameable) slug.
+ * `slugToId` resolves any lingering slug to whatever id that project has
+ * *now*. An unresolvable slug (the project was deleted) is left as-is,
+ * which just won't resolve to a project at display time. The migration
+ * already normalised everything on disk; this still guards what clients
+ * send. */
 export function normalizeLinks(links: unknown, homeSlug: string, slugToId: Map<string, string>): NoteLinks {
   const l = links as LegacyNoteLinks | undefined;
   const resolveId = (slugOrId: string) => slugToId.get(slugOrId) ?? slugOrId;
@@ -76,63 +62,90 @@ export function normalizeLinks(links: unknown, homeSlug: string, slugToId: Map<s
   return { projectIds, refs: [] };
 }
 
+export interface BuiltLinks {
+  links: Link[];
+  /** The exact tags, when links can't reproduce them. */
+  noteLinks: NoteLinks | undefined;
+}
+
+/** Turns a note's tags (and filing) into links. Async, so it runs before a
+ * write; `setNoteLinks` applies the result inside the write. */
+export async function buildNoteLinks(
+  store: Store,
+  tags: NoteLinks,
+  filing: { project: Thing; bucket: string | null } | null
+): Promise<BuiltLinks> {
+  const projects = await store.list({ kind: "project", trashed: "any" });
+  const label = (p: Thing) => projectDisplayTitle({ title: (p.header.title as string) ?? "", slug: p.header.slug as string });
+  const byId = new Map(projects.map((p) => [p.header.id, p]));
+  let filed = null;
+  if (filing) {
+    const { project, bucket } = filing;
+    const block = bucket ? findBlock(parseBlocks(project.body), bucket) : null;
+    filed = {
+      projectId: project.header.id,
+      bucket,
+      label: bucket ? (block && labelSnippet(blockText(block))) || undefined : label(project),
+    };
+  }
+  const { links, exact } = noteLinksToLinks(tags, filed, (id) => {
+    const p = byId.get(id);
+    return p ? label(p) : undefined;
+  });
+  return { links, noteLinks: exact ? undefined : tags };
+}
+
+export function setNoteLinks(t: Thing, built: BuiltLinks): Thing {
+  t.header.links = [...built.links, ...t.header.links.filter((l) => l.rel !== "filed-under" && l.rel !== "about")];
+  setLegacy(t, "note_links", built.noteLinks);
+  return t;
+}
+
+/** Drops keys whose value is undefined, as the v1 writer had to. */
+function defined<T extends object>(o: T): Partial<T> {
+  return Object.fromEntries(Object.entries(o).filter(([, v]) => v !== undefined)) as Partial<T>;
+}
+
+async function liveNoteIn(store: Store, slug: string, id: string): Promise<{ note: Thing; project: Thing } | null> {
+  const project = await liveProjectBySlug(store, slug);
+  const note = await store.get(id);
+  if (!project || !note || note.header.kind !== "note" || note.header.trashed_at !== null) return null;
+  if (filedUnder(note)?.to.id !== project.header.id) return null;
+  return { note, project };
+}
+
 export async function listNotes(slug: string): Promise<Note[]> {
-  await ensureVault();
-  await mkdir(notesDir(slug), { recursive: true });
-  const files = (await readdir(notesDir(slug))).filter((f) => f.endsWith(".md"));
-  const slugToId = await projectSlugToIdMap();
-  const notes = await Promise.all(
-    files.map(async (file) => {
-      const id = file.replace(/\.md$/, "");
-      const raw = await readFile(noteFilePath(slug, id), "utf-8");
-      const { data, content } = matter(raw);
-      return toNote(slug, id, data as NoteFrontmatter, content, slugToId);
-    })
-  );
-  return notes.sort((a, b) => a.id.localeCompare(b.id));
+  const { views } = await vault();
+  return views.listNotes(slug);
 }
 
 /** A project's Notes tab: its own notes plus any note filed under a
- * *different* project that was also "@"-tagged with this one — a note can
- * be cross-listed onto several projects' tabs without moving out of the
- * project it's actually filed under. */
+ * *different* project that was also "@"-tagged with this one. */
 export async function listNotesForProjectView(slug: string): Promise<Note[]> {
-  const home = (await listNotes(slug)).map((n) => ({ ...n, homeSlug: slug }));
-  const project = await getProject(slug);
-  const otherSlugs = (await listProjectSlugs()).filter((s) => s !== slug);
-  const crossListed = (
-    await Promise.all(
-      otherSlugs.map(async (otherSlug) =>
-        (await listNotes(otherSlug))
-          .filter((n) => !!project && n.links?.projectIds.includes(project.id))
-          .map((n) => ({ ...n, homeSlug: otherSlug }))
-      )
-    )
-  ).flat();
-  return [...home, ...crossListed].sort((a, b) => a.id.localeCompare(b.id));
+  const { views } = await vault();
+  return views.listNotesForProjectView(slug);
 }
 
 export async function createNote(
   slug: string,
   input: { body: DraftPartialBlock[]; bucket: string | null; attachments?: Attachment[]; links?: NoteLinks }
 ): Promise<Note> {
-  await ensureVault();
-  await mkdir(notesDir(slug), { recursive: true });
-  const id = ulid();
-  const now = new Date().toISOString();
-  const slugToId = input.links ? await projectSlugToIdMap() : new Map<string, string>();
-  const fm: NoteFrontmatter = {
-    bucket: input.bucket,
-    resolved: false,
-    created_at: now,
-    updated_at: now,
-    ...(input.attachments?.length ? { attachments: input.attachments } : {}),
-    ...(input.links ? { links: normalizeLinks(input.links, slug, slugToId) } : {}),
-  };
-  const content = serializeBody(input.body);
-  const file = matter.stringify(content, fm);
-  await writeFile(noteFilePath(slug, id), file, "utf-8");
-  return toNote(slug, id, fm, content, slugToId);
+  const { store } = await vault();
+  const project = await liveProjectBySlug(store, slug);
+  if (!project) throw new Error(`no project ${slug}`);
+  const tags = input.links ? normalizeLinks(input.links, slug, await projectSlugToIdMap()) : { projectIds: [], refs: [] };
+  const built = await buildNoteLinks(store, tags, { project, bucket: input.bucket });
+  const t = await store.create({
+    kind: "note",
+    body: serializeBody(input.body),
+    links: built.links,
+    fields: defined({
+      resolved: false,
+      attachments: input.attachments?.length ? input.attachments : undefined,
+      legacy: built.noteLinks ? { note_links: built.noteLinks } : undefined,
+    }),
+  });
+  return toNote(t, input.bucket);
 }
 
 export async function updateNote(
@@ -140,85 +153,82 @@ export async function updateNote(
   id: string,
   patch: { body?: DraftPartialBlock[]; resolved?: boolean; bucket?: string | null; links?: NoteLinks; attachments?: Attachment[] }
 ): Promise<Note | null> {
-  await ensureVault();
-  const filePath = noteFilePath(slug, id);
-  let raw: string;
-  try {
-    raw = await readFile(filePath, "utf-8");
-  } catch {
-    return null;
-  }
-  const { data, content } = matter(raw);
-  const fm = data as NoteFrontmatter;
-  const slugToId = await projectSlugToIdMap();
-  const nextFm: NoteFrontmatter = {
-    ...fm,
-    resolved: patch.resolved ?? fm.resolved,
-    bucket: patch.bucket !== undefined ? patch.bucket : fm.bucket,
-    attachments: patch.attachments ?? fm.attachments,
-    // Always normalized before it's written back — self-heals any
-    // legacy-shaped `links` still sitting on disk the moment this note is
-    // next touched, even if this particular patch didn't change tags.
-    links: normalizeLinks(patch.links ?? fm.links, slug, slugToId),
-    updated_at: new Date().toISOString(),
-  };
-  const nextBody = patch.body ? serializeBody(patch.body) : content;
-  // js-yaml can't dump an explicit `undefined` property (as opposed to an
-  // absent key), which `attachments: patch.attachments ?? fm.attachments`
-  // produces whenever a note has never had attachments — strip those before
-  // serializing or the whole write silently throws and nothing gets saved.
-  const cleanFm = Object.fromEntries(
-    Object.entries(nextFm).filter(([, v]) => v !== undefined)
-  ) as NoteFrontmatter;
-  const file = matter.stringify(nextBody, cleanFm);
-  await writeFile(filePath, file, "utf-8");
-  return toNote(slug, id, cleanFm, nextBody, slugToId);
+  const { store } = await vault();
+  const found = await liveNoteIn(store, slug, id);
+  if (!found) return null;
+  // Links are only rebuilt when the tags or the section change, so a body
+  // save racing a tag edit can't write back stale tags.
+  const relink = patch.links !== undefined || patch.bucket !== undefined;
+  const bucket = patch.bucket !== undefined ? patch.bucket : (filedUnder(found.note)?.to.block ?? null);
+  const built = relink
+    ? await buildNoteLinks(
+        store,
+        normalizeLinks(patch.links ?? noteLinksOf(found.note), slug, await projectSlugToIdMap()),
+        { project: found.project, bucket }
+      )
+    : null;
+  const t = await store.update(id, (t) => {
+    if (patch.resolved !== undefined) t.header.resolved = patch.resolved;
+    if (patch.attachments !== undefined) t.header.attachments = patch.attachments;
+    if (patch.body) t.body = serializeBody(patch.body);
+    return built ? setNoteLinks(t, built) : t;
+  });
+  return t ? toNote(t, filedUnder(t)?.to.block ?? null) : null;
 }
 
-// Moves the note's file out of `notes/` into a flat, cross-project trash
-// directory (rather than flagging it `deleted` in place) so a trashed note
-// disappears from every listing for free, with nothing to filter.
+// Trash is a flag, not a folder: the note keeps its links and simply drops
+// out of every live listing. `legacy.trashed_from_slug` is the trash list's
+// `projectSlug` (and the restore route's key), as the old file name was.
 export async function trashNote(slug: string, id: string): Promise<boolean> {
-  await ensureVault();
-  const src = noteFilePath(slug, id);
-  if (!existsSync(src)) return false;
-  await mkdir(TRASH_NOTES_DIR, { recursive: true });
-  const raw = await readFile(src, "utf-8");
-  const { data, content } = matter(raw);
-  const fm = { ...(data as NoteFrontmatter), trashed_at: new Date().toISOString() };
-  await writeFile(trashedNoteFilePath(slug, id), matter.stringify(content, fm), "utf-8");
-  await unlink(src);
+  const { store } = await vault();
+  if (!(await liveNoteIn(store, slug, id))) return false;
+  await store.update(
+    id,
+    (t) => {
+      t.header.trashed_at = new Date().toISOString();
+      t.header.trashed_with = null;
+      setLegacy(t, "trashed_from_slug", slug);
+      return t;
+    },
+    { touch: false }
+  );
   return true;
 }
 
 export async function listTrashedNotes(): Promise<TrashedNote[]> {
-  await ensureVault();
-  if (!existsSync(TRASH_NOTES_DIR)) return [];
-  const files = (await readdir(TRASH_NOTES_DIR)).filter((f) => f.endsWith(".md"));
-  const slugToId = await projectSlugToIdMap();
-  const notes = await Promise.all(
-    files.map(async (file) => {
-      const [projectSlug, id] = file.replace(/\.md$/, "").split("__");
-      const raw = await readFile(trashedNoteFilePath(projectSlug, id), "utf-8");
-      const { data, content } = matter(raw);
-      const fm = data as NoteFrontmatter & { trashed_at?: string };
-      return { ...toNote(projectSlug, id, fm, content, slugToId), projectSlug, trashedAt: fm.trashed_at ?? "" };
-    })
-  );
-  return notes.sort((a, b) => b.trashedAt.localeCompare(a.trashedAt));
+  const { views } = await vault();
+  return views.listTrashedNotes();
 }
 
+/** Brings a trashed note back. It goes to the live project that has `slug`
+ * now; failing that it stays with the project it's filed under, if that is
+ * live; failing both it comes back unfiled, as an inbox capture, rather
+ * than into a project that no longer exists. */
 export async function restoreNote(slug: string, id: string): Promise<Note | null> {
-  await ensureVault();
-  const src = trashedNoteFilePath(slug, id);
-  if (!existsSync(src)) return null;
-  await mkdir(notesDir(slug), { recursive: true });
-  const raw = await readFile(src, "utf-8");
-  const { data, content } = matter(raw);
-  const { trashed_at: _trashedAt, ...fm } = data as NoteFrontmatter & { trashed_at?: string };
-  const slugToId = await projectSlugToIdMap();
-  const normalizedFm: NoteFrontmatter = { ...(fm as NoteFrontmatter), links: normalizeLinks(fm.links, slug, slugToId) };
-  await writeFile(noteFilePath(slug, id), matter.stringify(content, normalizedFm), "utf-8");
-  await unlink(src);
-  return toNote(slug, id, normalizedFm, content, slugToId);
+  const { store } = await vault();
+  const t = await store.get(id);
+  const legacy = (t?.header.legacy ?? {}) as { trashed_from_slug?: string; bucket?: string | null };
+  if (!t || t.header.kind !== "note" || t.header.trashed_at === null || t.header.trashed_with !== null) return null;
+  if (legacy.trashed_from_slug !== slug) return null;
+
+  const fu = filedUnder(t);
+  const bySlug = await liveProjectBySlug(store, slug);
+  const byLink = fu ? await store.get(fu.to.id) : null;
+  const project = bySlug ?? (byLink && byLink.header.kind === "project" && byLink.header.trashed_at === null ? byLink : null);
+  const bucket = fu ? (fu.to.block ?? null) : (legacy.bucket ?? null);
+
+  const tags = normalizeLinks(noteLinksOf(t), slug, await projectSlugToIdMap());
+  const built = await buildNoteLinks(store, tags, project ? { project, bucket } : null);
+  const restored = await store.update(
+    id,
+    (x) => {
+      x.header.trashed_at = null;
+      setNoteLinks(x, built);
+      setLegacy(x, "trashed_from_slug", undefined);
+      if (project) setLegacy(x, "bucket", undefined);
+      return x;
+    },
+    { touch: false }
+  );
+  return restored ? toNote(restored, project ? bucket : null) : null;
 }
