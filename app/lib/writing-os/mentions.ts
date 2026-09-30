@@ -1,6 +1,7 @@
 import type { DraftBlock } from "./schema";
 import { blockPlainText } from "./blockText";
-import type { NoteLinks, Project } from "./types";
+import type { Link, Project } from "./types";
+import { tagsOf } from "@/lib/store/links";
 
 /**
  * One thing that can be tagged onto a note via "@" (a project) or "#" (a
@@ -9,8 +10,9 @@ import type { NoteLinks, Project } from "./types";
  * "section"/"block" (it's what makes the tag navigable and, for the Inbox's
  * cross-project search, tells you which project's document to open) and
  * absent for "project" (its own `id` already identifies the project). It's
- * the project's stable id, not its slug — see `MentionRef` in `types.ts` for
- * why that matters.
+ * the project's stable id, not its slug, so a tag survives a rename. The
+ * same shape as `TagTarget` in `lib/store/links.ts`, which turns picked
+ * targets into a note's links.
  */
 export interface MentionTarget {
   kind: "project" | "section" | "block";
@@ -70,28 +72,10 @@ export function blockMentionTargets(doc: DraftBlock[], projectId: string): Menti
   return targets;
 }
 
-/** Turns the mention targets picked in the composer into the structured
- * `NoteLinks` a note/inbox item is stored with — project targets go into
- * `projectIds`, section/block targets (with their label already resolved,
- * see `MentionRef`) go into `refs`. */
-export function resolveNoteLinks(targets: MentionTarget[]): NoteLinks {
-  return {
-    projectIds: targets.filter((t) => t.kind === "project").map((t) => t.id),
-    refs: targets
-      .filter((t) => t.kind !== "project")
-      .map((t) => ({
-        kind: t.kind as "section" | "block",
-        id: t.id,
-        projectId: t.projectId as string,
-        label: t.label,
-      })),
-  };
-}
-
-/** One resolved, displayable tag — either an "@" project cross-link or a
- * "#" section/block ref. `kind`/`tagId` identify exactly which underlying
- * link this came from (a project id, or a ref's own id) so a single tag can
- * be added/removed without touching any of the note's other tags. */
+/** One resolved, displayable tag — either an "@" project or a "#"
+ * section/block. `kind`/`tagId` identify exactly which link this came from
+ * (a project id, or a block id) so a single tag can be removed without
+ * touching any of the note's other tags (`withoutTag`). */
 export interface ResolvedTag {
   text: string;
   href: string;
@@ -107,36 +91,24 @@ export interface ProjectLookup {
   title: string;
 }
 
-/** The single place that turns a note/inbox item's stored `links` into what
- * gets displayed and where clicking it goes. A note can carry any number of
- * "@" projects and "#" section/block refs at once — neither kind takes
- * precedence over the other, and none are hidden. Every link stores a
- * project's stable *id*, never its slug, so `projectFor` is what turns that
- * id into the current slug/title to link to and display — the one place a
- * rename (which only ever changes `slug`, never `id`) gets reflected, so a
- * tag never points at a stale URL. Used by both `enrichNote` (client, backed
- * by `projectsList`) and `listGlobalFeed` (server, backed by a vault
- * id-lookup) — one function, two thin adapters, no duplicated tag-string
- * logic. A ref/project whose target no longer exists (id lookup misses) is
- * dropped rather than shown as a broken link. */
-export function resolveTags(
-  links: NoteLinks | undefined,
-  projectFor: (id: string) => ProjectLookup | undefined
-): ResolvedTag[] {
-  const projectTags: ResolvedTag[] = (links?.projectIds ?? [])
-    .map((id): ResolvedTag | null => {
-      const project = projectFor(id);
+/** The single place that turns a note's links into what gets displayed
+ * and where clicking it goes (`tagsOf` decides which links show as which
+ * tags). A note can carry any number of "@" projects and "#" section/block
+ * tags at once — neither kind takes precedence over the other, and none
+ * are hidden. Every link stores a project's stable *id*, never its slug,
+ * so `projectFor` is what turns that id into the current slug/title to
+ * link to and display — the one place a rename (which only ever changes
+ * `slug`, never `id`) gets reflected, so a tag never points at a stale URL.
+ * A tag whose project no longer exists (id lookup misses, or it's in the
+ * trash) is dropped rather than shown as a broken link. */
+export function resolveTags(links: Link[], projectFor: (id: string) => ProjectLookup | undefined): ResolvedTag[] {
+  return tagsOf(links)
+    .map((tag): ResolvedTag | null => {
+      const project = projectFor(tag.projectId);
       if (!project) return null;
-      return { text: "@" + project.title, href: `/${project.slug}`, kind: "project", tagId: id };
+      if (tag.kind === "project") return { text: "@" + project.title, href: `/${project.slug}`, kind: "project", tagId: tag.id };
+      const href = tag.kind === "section" ? `/${project.slug}?section=${tag.id}` : `/${project.slug}?block=${tag.id}`;
+      return { text: "#" + tag.label, href, kind: tag.kind, tagId: tag.id };
     })
     .filter((t): t is ResolvedTag => t !== null);
-  const refTags: ResolvedTag[] = (links?.refs ?? [])
-    .map((ref): ResolvedTag | null => {
-      const project = projectFor(ref.projectId);
-      if (!project) return null;
-      const href = ref.kind === "section" ? `/${project.slug}?section=${ref.id}` : `/${project.slug}?block=${ref.id}`;
-      return { text: "#" + ref.label, href, kind: ref.kind, tagId: ref.id };
-    })
-    .filter((t): t is ResolvedTag => t !== null);
-  return [...projectTags, ...refTags];
 }

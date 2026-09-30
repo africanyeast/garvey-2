@@ -7,11 +7,7 @@ export async function PATCH(
 ) {
   const { slug, id } = await params;
   const patch = await req.json();
-  const variant = await updateVariant(slug, id, {
-    content: patch.content,
-    order: patch.order,
-    blockId: patch.blockId,
-  });
+  const variant = await updateVariant(slug, id, { content: patch.content, order: patch.order });
   if (!variant) return NextResponse.json({ error: "not found" }, { status: 404 });
   return NextResponse.json(variant);
 }

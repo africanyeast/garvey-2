@@ -4,13 +4,14 @@ import { useMemo } from "react";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useDraftEditor } from "@/app/lib/writing-os/editor-context";
 import { buildProjectTargets, sectionMentionTargets, blockMentionTargets } from "@/app/lib/writing-os/mentions";
+import { filedUnder } from "@/lib/store/links";
 import type { ExpandedItem } from "@/app/lib/writing-os/types";
 import { NoteDetail } from "@/app/components/shared/NoteDetail";
 import { PanelShell } from "@/app/components/panel/PanelShell";
 
 export function NoteExpanded({ item }: { item: ExpandedItem }) {
   const {
-    notesData,
+    notes,
     enrichNote,
     closeExpanded,
     toggleNoteResolved,
@@ -22,13 +23,10 @@ export function NoteExpanded({ item }: { item: ExpandedItem }) {
     projectsList,
     activeProjectId,
     commentsData,
-    inboxCommentsData,
     replyDrafts,
     setReplyDraft,
     addReply,
     resolveComment,
-    addInboxReply,
-    resolveInboxComment,
     activeProjectSlug,
   } = useWritingOS();
   const { document: draftDoc } = useDraftEditor();
@@ -42,18 +40,13 @@ export function NoteExpanded({ item }: { item: ExpandedItem }) {
     ];
   }, [projectsList, draftDoc, activeProjectId]);
 
-  const raw = notesData.find((x) => x.id === item.key);
+  const raw = notes.find((x) => x.id === item.key);
   if (!raw) return null;
   const n = enrichNote(raw);
   const closeTitle = item.backTo ? "Back to block" : "Close";
-
-  // A note surfaced from the Inbox (`fromInbox`) is backed by the global
-  // inbox-comments store, not this project's — same split `noteActionUrl`
-  // already makes for body/resolve/tag edits on these notes (see
-  // `context.tsx`), just for comments instead.
-  const comments = n.fromInbox ? inboxCommentsData[n.id] || [] : commentsData[n.id] || [];
-  const onReplySubmit = n.fromInbox ? () => addInboxReply(n.id) : () => addReply(n.id);
-  const onResolveComment = n.fromInbox ? (id: string) => resolveInboxComment(n.id, id) : (id: string) => resolveComment(n.id, id);
+  // The project whose draft an "Insert" from this note's attachments may
+  // target: the one it's filed under, else the one in view.
+  const home = projectsList.find((p) => p.id === filedUnder(n.links)?.to.id);
 
   // Always fullscreen — there's no docked/right-panel state for a note
   // anymore, so no minimize control either, just close.
@@ -74,12 +67,12 @@ export function NoteExpanded({ item }: { item: ExpandedItem }) {
         isFullscreen
         mentionTargets={mentionTargets}
         onAddTag={(target) => addNoteTag(n.id, target)}
-        comments={comments}
+        comments={commentsData[n.id] || []}
         replyDraft={replyDrafts[n.id]}
         onReplyChange={(v) => setReplyDraft(n.id, v)}
-        onReplySubmit={onReplySubmit}
-        onResolveComment={onResolveComment}
-        activeProjectSlug={n.homeSlug ?? activeProjectSlug ?? undefined}
+        onReplySubmit={() => addReply(n.id)}
+        onResolveComment={(id) => resolveComment(n.id, id)}
+        activeProjectSlug={home?.slug ?? activeProjectSlug ?? undefined}
       />
     </PanelShell>
   );

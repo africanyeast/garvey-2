@@ -12,9 +12,7 @@ export function AllNotesList() {
     removeNoteTag,
     deleteNote,
     commentsData,
-    inboxCommentsData,
     setNoteAttachmentTranscription,
-    setInboxAttachmentTranscription,
   } = useWritingOS();
 
   if (notesDesc.length === 0) {
@@ -39,14 +37,8 @@ export function AllNotesList() {
           onToggleResolved={() => toggleNoteResolved(note.id)}
           onRemoveTag={(t) => removeNoteTag(note.id, t.kind, t.tagId)}
           onDelete={() => deleteNote(note.id)}
-          commentCount={
-            note.fromInbox ? (inboxCommentsData[note.id] || []).length : (commentsData[note.id] || []).length
-          }
-          onSetTranscription={(url, t) =>
-            note.fromInbox
-              ? setInboxAttachmentTranscription(note.id, url, t)
-              : setNoteAttachmentTranscription(note.id, url, t)
-          }
+          commentCount={(commentsData[note.id] || []).length}
+          onSetTranscription={(url, t) => setNoteAttachmentTranscription(note.id, url, t)}
         />
       ))}
     </div>

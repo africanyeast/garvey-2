@@ -5,6 +5,7 @@ import { ArrowUp, EllipsisVertical, GripVertical, Sparkles, Trash2 } from "lucid
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useDraftEditor } from "@/app/lib/writing-os/editor-context";
 import { nearestSectionId } from "@/app/lib/writing-os/sections";
+import { sectionOf } from "@/lib/store/links";
 import { buildProjectTargets, sectionMentionTargets, blockMentionTargets, type MentionTarget } from "@/app/lib/writing-os/mentions";
 import { NoteRow } from "@/app/components/shared/NoteRow";
 import { IntentComposer } from "@/app/components/shared/IntentComposer";
@@ -55,7 +56,7 @@ function AltMoreMenu({ onDelete }: { onDelete: () => void }) {
 
 export function BlockExpanded({ item }: { item: ExpandedItem }) {
   const {
-    notesData,
+    notes,
     enrichNote,
     openExpanded,
     toggleNoteResolved,
@@ -72,9 +73,7 @@ export function BlockExpanded({ item }: { item: ExpandedItem }) {
     reorderVariants,
     swapCommentBlocks,
     commentsData,
-    inboxCommentsData,
     setNoteAttachmentTranscription,
-    setInboxAttachmentTranscription,
   } = useWritingOS();
   const { editor: sharedEditor, document: draftDoc, syncDocument } = useDraftEditor();
 
@@ -111,7 +110,9 @@ export function BlockExpanded({ item }: { item: ExpandedItem }) {
 
   const closeTitle = item.backTo ? "Back to block" : "Close";
   const sectionId = nearestSectionId(draftDoc, b.id);
-  const sectionNotes = notesData.filter((n) => n.bucket === sectionId).map(enrichNote).reverse();
+  const sectionNotes = activeProjectId && sectionId
+    ? notes.filter((n) => sectionOf(n.links, activeProjectId) === sectionId).map(enrichNote).reverse()
+    : [];
 
   const submitNote = () => {
     if (!sectionId) return;
@@ -304,14 +305,8 @@ export function BlockExpanded({ item }: { item: ExpandedItem }) {
                   onToggleResolved={() => toggleNoteResolved(n.id)}
                   onRemoveTag={(t) => removeNoteTag(n.id, t.kind, t.tagId)}
                   onDelete={() => deleteNote(n.id)}
-                  commentCount={
-                    n.fromInbox ? (inboxCommentsData[n.id] || []).length : (commentsData[n.id] || []).length
-                  }
-                  onSetTranscription={(url, t) =>
-                    n.fromInbox
-                      ? setInboxAttachmentTranscription(n.id, url, t)
-                      : setNoteAttachmentTranscription(n.id, url, t)
-                  }
+                  commentCount={(commentsData[n.id] || []).length}
+                  onSetTranscription={(url, t) => setNoteAttachmentTranscription(n.id, url, t)}
                 />
               ))}
             </div>

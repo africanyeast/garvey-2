@@ -1,4 +1,4 @@
-import { newId, linkOf, type Store, type Thing } from "@/lib/store";
+import { commentOn, newId, type Store, type Thing } from "@/lib/store";
 import { liveProjectBySlug, vault } from "./store";
 
 // Mirrors @blocknote/core's `ThreadData`/`CommentData` shape closely enough
@@ -46,7 +46,7 @@ async function withThread(
   threadId: string,
   fn: (thread: StoredThread) => StoredThread | null
 ): Promise<StoredThread | null> {
-  const { store } = await vault();
+  const store = await vault();
   if (!(await threadIn(store, slug, threadId))) return null;
   let result: StoredThread | null = null;
   await store.update(threadId, (t) => {
@@ -74,19 +74,24 @@ async function threadIn(store: Store, slug: string, threadId: string): Promise<T
   const project = await liveProjectBySlug(store, slug);
   const t = await store.get(threadId);
   if (!project || !t || t.header.kind !== "thread" || t.header.trashed_at !== null) return null;
-  return linkOf(t, "comment-on")?.to.id === project.header.id ? t : null;
+  return commentOn(t.header.links)?.id === project.header.id ? t : null;
 }
 
 export async function listThreads(slug: string): Promise<StoredThread[]> {
-  const { views } = await vault();
-  return views.listThreads(slug);
+  const store = await vault();
+  const p = await liveProjectBySlug(store, slug);
+  if (!p) return [];
+  return (await store.list({ kind: "thread" }))
+    .filter((t) => commentOn(t.header.links)?.id === p.header.id)
+    .map(toThread)
+    .sort((a, b) => a.id.localeCompare(b.id));
 }
 
 export async function createThread(
   slug: string,
   input: { userId: string; body: unknown; commentMetadata?: unknown; metadata?: unknown }
 ): Promise<StoredThread> {
-  const { store } = await vault();
+  const store = await vault();
   const project = await liveProjectBySlug(store, slug);
   if (!project) throw new Error(`no project ${slug}`);
   const now = new Date().toISOString();
@@ -152,7 +157,7 @@ export async function deleteComment(slug: string, threadId: string, commentId: s
 }
 
 export async function deleteThread(slug: string, threadId: string): Promise<boolean> {
-  const { store } = await vault();
+  const store = await vault();
   if (!(await threadIn(store, slug, threadId))) return false;
   return store.delete(threadId);
 }

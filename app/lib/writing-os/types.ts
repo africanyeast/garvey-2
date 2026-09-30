@@ -1,4 +1,7 @@
 import type { DraftPartialBlock } from "./schema";
+import type { Link } from "@/lib/store/types";
+
+export type { Link, Ref } from "@/lib/store/types";
 
 // Sections aren't a separate data structure — a top-level heading block in
 // the document *is* a section (see `writing-os/sections.ts`), so a
@@ -40,56 +43,20 @@ export const attachmentMeta: Record<AttachmentKind, string> = {
   file: "File",
 };
 
-/** A resolved "#" tag onto a section or an arbitrary content block —
- * captured once, at tag time, from the mention picker's own label (a
- * section's title, or a block's first-sentence excerpt), and never
- * re-derived from the bare id afterward. `projectId` is the *stable id* of
- * the project whose document the section/block actually lives in — always
- * the note's own project for an in-project "#" tag, but potentially a
- * different one when tagged from the Inbox (which offers sections/blocks
- * across every project). It's an id, not a slug, so the tag survives the
- * target project being renamed (which changes its slug/URL but never its
- * id) — resolving it to a live URL/title is `resolveTags`' job, done at
- * display time via a slug/title lookup, not stored here. */
-export interface MentionRef {
-  kind: "section" | "block";
-  id: string;
-  projectId: string;
-  label: string;
-}
-
-/** Structured tag references captured from the "@"/"#" mention picker in
- * `IntentComposer` — the machine-readable counterpart to the derived display
- * tag, kept around so AI agents (and any future filtering) can resolve a
- * note's tagged projects/sections/blocks without re-parsing text.
- * `projectIds` are stable project ids, not slugs — same reasoning as
- * `MentionRef.projectId`. */
-export interface NoteLinks {
-  projectIds: string[];
-  refs: MentionRef[];
-}
-
+/** A note — anything captured, in a project or in the Inbox (an inbox
+ * capture is a note filed under no project). What it's about is its
+ * `links`: at most one `filed-under` (its project, optionally a section in
+ * it) and any number of `about` links, which are its "@"/"#" tags. See
+ * `lib/store/links.ts` for what each tag operation does to them. */
 export interface Note {
   id: string;
-  bucket: SectionKey | null;
   /** Block JSON, the same shape as the draft document — never a markdown
    * string; see `lib/vault/blocks.ts`. */
   body: DraftPartialBlock[];
   time: string;
   resolved: boolean;
   attachments?: Attachment[];
-  links?: NoteLinks;
-  /** The project this note is actually filed under — only set when a note
-   * is being shown outside its home project (cross-listed into another
-   * project's Notes tab via an "@" tag, or surfaced in the global Inbox
-   * feed). Lets the UI PATCH/DELETE it at its real location rather than
-   * wherever it's currently being viewed from. */
-  homeSlug?: string;
-  /** Set when this "note" is actually a raw Inbox capture cross-listed onto
-   * a project's Notes tab (via an "@" tag from the Inbox composer), rather
-   * than a note physically filed under this project. Routes actions to
-   * `/api/inbox/<id>` instead of `/api/projects/<slug>/notes/<id>`. */
-  fromInbox?: boolean;
+  links: Link[];
 }
 
 /** A whole-item comment — made via a block/section/note's own comment icon,
@@ -99,18 +66,22 @@ export interface Note {
  * `threadStore.ts`), not this type — see the `comment-freeze` memory for why
  * the two were split apart.
  *
- * One shared module (`CommentsBody`, `commentsData`, `resolveComment`/
- * `addReply`) backs comments on any kind of item — a block, a section (a
- * section *is* a heading block, so it's just `targetId` pointing at that
- * block's id), or a note — so `targetId` is deliberately untyped as to which
- * kind of thing it points at. */
+ * One `comment-on` link says what it's on: a note or an alt version (by
+ * id), or a block in a project's draft (a section is its heading block).
+ * `commentKey` turns that into the key comments are grouped by on screen. */
 export interface Comment {
   id: string;
-  /** The block/section/note this comment is anchored to — always present. */
-  targetId: string;
+  links: Link[];
   text: string;
   time: string;
   resolved: boolean;
+}
+
+/** The key a comment is grouped under on screen: the block's id for a
+ * comment on a block, otherwise the id of the thing it's on. */
+export function commentKey(c: Comment): string {
+  const on = c.links.find((l) => l.rel === "comment-on")?.to;
+  return on?.block ?? on?.id ?? "";
 }
 
 /** A block, replicated: an alternate draft of a block, visible and
@@ -118,40 +89,24 @@ export interface Comment {
  * live block in the shared draft document — see `writing-os/blocks` for why
  * (alts must never leak into the main draft/Preview/Copy). `id` doubles as
  * this alt's own comment-anchor id, so it can be commented on exactly like
- * the primary block it's an alternate of. */
+ * the primary block it's an alternate of. Its `alternate-of` link is the
+ * live block (in the shared draft document) it's an alternate of; comments
+ * and content get re-keyed across that block and `id` on promotion — see
+ * `promoteVariant` in `BlockExpanded`. */
 export interface BlockVariant {
   id: string;
-  /** The live block (in the shared draft document) this is an alternate
-   * of. Comments and content get re-keyed across this and `id` on
-   * promotion — see `promoteVariant` in `editor-context.tsx`. */
-  blockId: string;
+  links: Link[];
   /** Rank among a block's alts — lower sorts first (closer to primary). */
   order: number;
   content: DraftPartialBlock;
 }
 
-export interface InboxItem {
-  id: string;
-  /** Block JSON, the same shape as the draft document — never a markdown
-   * string; see `lib/vault/blocks.ts`. */
-  body: DraftPartialBlock[];
-  time: string;
-  resolved: boolean;
-  attachments?: Attachment[];
-  links?: NoteLinks;
-  /** Present when this feed entry is actually a project note surfaced into
-   * the global Inbox feed rather than a standalone inbox capture — the
-   * project it's really filed under, so actions route to
-   * `/api/projects/<homeSlug>/notes/<id>` instead of `/api/inbox/<id>`. */
-  homeSlug?: string;
+/** The live block an alt version is an alternate of. */
+export function variantBlock(v: BlockVariant): string {
+  return v.links.find((l) => l.rel === "alternate-of")?.to.block ?? "";
 }
 
 export interface TrashedNote extends Note {
-  projectSlug: string;
-  trashedAt: string;
-}
-
-export interface TrashedInboxItem extends InboxItem {
   trashedAt: string;
 }
 
@@ -171,7 +126,7 @@ export interface TitleCandidate {
 export interface Project {
   /** Stable identity, generated once at creation and never changed —
    * everything that needs to keep pointing at "this project" regardless of
-   * a rename (tags via `NoteLinks`/`MentionRef`) stores this, not `slug`. */
+   * a rename (every link) stores this, not `slug`. */
   id: string;
   /** The URL/directory name — derived from `title`, and free to change on
    * rename (see `updateProject`). Never stored as a long-lived reference;
@@ -214,10 +169,7 @@ export function projectDisplayTitle(project: Pick<Project, "title" | "slug">): s
 }
 
 export interface TrashedProject {
-  /** Trash folder name — an opaque display id, not a live route (no
-   * restore/permanent-delete yet, so nothing links to it). */
-  dirName: string;
-  slug: string;
+  id: string;
   title: string;
   trashedAt: string;
 }

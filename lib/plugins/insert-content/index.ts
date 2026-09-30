@@ -3,7 +3,7 @@ import { buildSystemPrompt } from "../harness";
 import type { Plugin, PluginContext } from "../types";
 import type { ContentPlacement, ContentTarget } from "@/app/lib/writing-os/contentTarget";
 import type { MentionTarget } from "@/app/lib/writing-os/mentions";
-import type { NoteLinks } from "@/app/lib/writing-os/types";
+import { linksForNewNote } from "@/lib/store/links";
 import { manifest } from "./manifest";
 
 export interface DraftOutlineEntry {
@@ -137,7 +137,7 @@ function fallbackPlacement(sourceText: string): ContentPlacement {
 }
 
 /** Turns the model's raw target JSON into a real `ContentTarget`, resolving
- * a tagged outline entry into `NoteLinks`. Returns `null` for a shape this
+ * a tagged outline entry into the new note's links. Returns `null` for a shape this
  * app can't act on (wrong target kind for the given context, missing
  * required field) — the caller drops that candidate rather than risk
  * silently misfiling content. */
@@ -158,7 +158,7 @@ function resolveTarget(raw: RawTarget | undefined, input: InsertContentInput): C
     // captured while working on something belongs there unless told
     // otherwise); an explicit `projectId` naming a different known project
     // overrides that.
-    let project: { id: string; slug: string } | undefined = input.activeProject;
+    let project: { id: string; slug: string; title: string } | undefined = input.activeProject;
     if (raw.projectId && raw.projectId !== input.activeProject?.id) {
       project = input.projects.find((p) => p.id === raw.projectId);
     }
@@ -167,10 +167,11 @@ function resolveTarget(raw: RawTarget | undefined, input: InsertContentInput): C
         ? input.activeProject?.outline.find((o) => o.id === raw.sectionOrBlockId)
         : undefined;
     const links = project
-      ? {
-          projectIds: [project.id],
-          refs: tagged ? [{ kind: tagged.kind, id: tagged.id, projectId: project.id, label: tagged.label }] : [],
-        }
+      ? linksForNewNote(tagged ? [{ ...tagged, projectId: project.id }] : [], {
+          id: project.id,
+          label: project.title,
+          section: tagged?.kind === "section" ? tagged.id : null,
+        })
       : undefined;
     return { kind: "note", projectId: project?.id, projectSlug: project?.slug, links };
   }
@@ -194,10 +195,12 @@ function targetFromHints(hintedTargets: MentionTarget[], input: InsertContentInp
   const projectId = refTag?.projectId ?? projectTag?.id;
   if (!projectId) return null;
   const project = projectId === input.activeProject?.id ? input.activeProject : input.projects.find((p) => p.id === projectId);
-  const links: NoteLinks = {
-    projectIds: [projectId],
-    refs: refTag ? [{ kind: refTag.kind as "section" | "block", id: refTag.id, projectId, label: refTag.label }] : [],
-  };
+  const ref = refTag ? [{ ...refTag, projectId }] : [];
+  // Filed under the project when it's one we know; otherwise an inbox
+  // capture tagged with it.
+  const links = project
+    ? linksForNewNote(ref, { id: projectId, label: project.title, section: refTag?.kind === "section" ? refTag.id : null })
+    : linksForNewNote([{ kind: "project", id: projectId, label: projectTag?.label ?? "" }, ...ref], null);
   return { kind: "note", projectId, projectSlug: project?.slug, links };
 }
 

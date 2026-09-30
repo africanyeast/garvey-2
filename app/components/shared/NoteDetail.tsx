@@ -39,7 +39,7 @@ interface NoteDetailProps {
   mentionTargets?: MentionTarget[];
   onAddTag?: (target: MentionTarget) => void;
   /** Same whole-item comment module `BlockVersionEditor` uses, just anchored
-   * to this note's id instead of a block's — see `Comment.targetId`. Omitted
+   * to this note's id instead of a block's — see `commentKey`. Omitted
    * entirely (no icon shown) when the caller has no comment target for this
    * item, e.g. an Inbox capture that isn't filed under a project yet. */
   comments?: Comment[];

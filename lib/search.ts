@@ -1,6 +1,6 @@
-import { listProjectSlugs, listProjects } from "./vault/project";
+import { filedUnder } from "./store/links";
+import { listProjects } from "./vault/project";
 import { listNotes } from "./vault/notes";
-import { listInboxItems } from "./vault/inbox";
 import { getDraft } from "./vault/draft";
 import { projectDisplayTitle } from "@/app/lib/writing-os/types";
 import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
@@ -62,7 +62,6 @@ export async function searchVault(query: string): Promise<SearchResult[]> {
   const results: SearchResult[] = [];
 
   const projects = await listProjects();
-  const slugs = await listProjectSlugs();
 
   // One result per project — a project and its draft are the same document
   // from a search standpoint, so a match in either the brief fields or the
@@ -98,46 +97,38 @@ export async function searchVault(query: string): Promise<SearchResult[]> {
     })
   );
 
-  const projectTitleBySlug = new Map(projects.map((p) => [p.slug, projectDisplayTitle(p)]));
+  const projectById = new Map(projects.map((p) => [p.id, p]));
 
-  // Notes filed under a project.
-  await Promise.all(
-    slugs.map(async (slug) => {
-      const notes = await listNotes(slug);
-      for (const note of notes) {
-        const noteText = blockTreeText(note.body);
-        if (noteText.toLowerCase().includes(qLower)) {
-          const projectTitle = projectTitleBySlug.get(slug) ?? slug;
-          results.push({
-            kind: "note",
-            projectSlug: slug,
-            projectTitle,
-            noteId: note.id,
-            title: `Note in ${projectTitle}`,
-            snippet: makeSnippet(noteText, q),
-            href: `/${slug}?notes=1`,
-          });
-        }
-      }
-    })
-  );
-
-  // Raw Inbox captures — not filed under any project.
-  const inboxItems = await listInboxItems();
-  for (const item of inboxItems) {
-    const itemText = blockTreeText(item.body);
-    if (itemText.toLowerCase().includes(qLower)) {
+  // Notes: one result each, pointing at the project a note is filed under,
+  // or at the Inbox (listed after them) for a capture filed nowhere.
+  const inbox: SearchResult[] = [];
+  for (const note of await listNotes()) {
+    const noteText = blockTreeText(note.body);
+    if (!noteText.toLowerCase().includes(qLower)) continue;
+    const project = projectById.get(filedUnder(note.links)?.to.id ?? "");
+    if (project) {
+      const projectTitle = projectDisplayTitle(project);
       results.push({
+        kind: "note",
+        projectSlug: project.slug,
+        projectTitle,
+        noteId: note.id,
+        title: `Note in ${projectTitle}`,
+        snippet: makeSnippet(noteText, q),
+        href: `/${project.slug}?notes=1`,
+      });
+    } else {
+      inbox.push({
         kind: "note",
         projectSlug: "",
         projectTitle: "Inbox",
-        noteId: item.id,
+        noteId: note.id,
         title: "Inbox",
-        snippet: makeSnippet(itemText, q),
+        snippet: makeSnippet(noteText, q),
         href: `/inbox`,
       });
     }
   }
 
-  return results;
+  return [...results, ...inbox];
 }

@@ -1,6 +1,6 @@
 import type { ContentPlacement } from "./contentTarget";
 import { flattenBlocksToMarkdown } from "./blockText";
-import type { Note, InboxItem } from "./types";
+import type { Note } from "./types";
 import type { MentionTarget } from "./mentions";
 
 /**
@@ -40,14 +40,14 @@ export async function planContentPlacement({
 
 export type CommitResult =
   | { kind: "current" }
-  | { kind: "note"; note: Note | InboxItem; projectSlug?: string };
+  | { kind: "note"; note: Note };
 
 /**
  * Commits a placement the caller has already decided to go through with
  * (post-confirmation). A "note" target creates it via the same REST
  * endpoints a hand-typed note would use and hands the created record back
- * so the caller can push it into whatever list state is showing (see
- * `registerCreatedNote` in `context.tsx`) — this module has no React state
+ * so the caller can add it to the note list (see `addNoteToList` in
+ * `context.tsx`) — this module has no React state
  * of its own to update. "current" (and "draft", until something can commit
  * one directly) both fold back to `onInsertHere` with the blocks flattened
  * to markdown, which the existing insert path re-parses into real blocks.
@@ -57,16 +57,13 @@ export async function commitContentPlacement(
   onInsertHere: (text: string) => void
 ): Promise<CommitResult> {
   if (placement.target.kind === "note") {
-    const { projectSlug, links } = placement.target;
-    const url = projectSlug ? `/api/projects/${projectSlug}/notes` : "/api/inbox";
-    const bucket = links?.refs.find((r) => r.kind === "section")?.id ?? null;
-    const res = await fetch(url, {
+    const res = await fetch("/api/notes", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body: placement.blocks, links, ...(projectSlug ? { bucket } : {}) }),
+      body: JSON.stringify({ body: placement.blocks, links: placement.target.links ?? [] }),
     });
-    const note = (await res.json()) as Note | InboxItem;
-    return { kind: "note", note, projectSlug };
+    const note = (await res.json()) as Note;
+    return { kind: "note", note };
   }
   // "current" and (for now) "draft".
   onInsertHere(flattenBlocksToMarkdown(placement.blocks));

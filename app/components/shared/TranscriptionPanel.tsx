@@ -27,7 +27,7 @@ const OCR_INSTRUCTIONS_MAX = 300;
 function describeTarget(target: ContentTarget): string {
   if (target.kind === "current") return "Insert here";
   if (target.kind === "draft") return "Add to the draft (not wired up yet — will insert here instead)";
-  const tag = target.links?.refs[0]?.label;
+  const tag = target.links?.find((l) => l.to.block !== undefined)?.label;
   if (target.projectSlug) return tag ? `New note in this project, tagged "${tag}"` : "New note in this project";
   return "New note in Inbox";
 }
@@ -86,7 +86,7 @@ export function TranscriptionPanel({
    * has none to offer. */
   mentionTargets?: MentionTarget[];
 }) {
-  const { registerCreatedNote } = useWritingOS();
+  const { addNoteToList } = useWritingOS();
   const [draft, setDraft] = useState(attachment.transcription ? "" : DEFAULT_SEED);
   // Whatever's tagged via "@"/"#" here — an explicit destination for the
   // Insert action, distinct from `draft`'s free text. Cleared once acted on,
@@ -306,7 +306,7 @@ export function TranscriptionPanel({
                 setInserting(true);
                 try {
                   const result = await commitContentPlacement(pending, onInsertText);
-                  if (result.kind === "note") registerCreatedNote(result.note, result.projectSlug);
+                  if (result.kind === "note" && result.note?.id) addNoteToList(result.note);
                   setDraft("");
                   setLinks([]);
                 } finally {

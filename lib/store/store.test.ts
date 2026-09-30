@@ -9,8 +9,6 @@ import {
   ThingFormatError,
   deterministicUlid,
   isUlid,
-  linksToNoteLinks,
-  noteLinksToLinks,
   parseThing,
   serializeThing,
   ulidTime,
@@ -200,45 +198,5 @@ describe("store", () => {
     expect(await store.delete(n.header.id)).toBe(true);
     expect(await store.get(n.header.id)).toBeNull();
     expect(await store.delete(n.header.id)).toBe(false);
-  });
-});
-
-describe("note links", () => {
-  const P = "01M39KZ4Y9WEXCB32JTANPGQX0";
-  test("own project and section fold into filed-under and come back exactly", () => {
-    const n = {
-      projectIds: [P, "the-internet-proletariat"],
-      refs: [
-        { kind: "section" as const, id: "sec", label: "Anything else?", projectId: P },
-        { kind: "block" as const, id: "blk", label: "A block", projectId: "untitled-2-2" },
-      ],
-    };
-    const { links, exact } = noteLinksToLinks(n, { projectId: P, bucket: "sec", label: "ignored" }, (id) => (id === P ? "Paystack" : undefined));
-    expect(exact).toBe(true);
-    expect(links).toEqual([
-      { rel: "filed-under", to: { id: P, block: "sec" }, label: "Anything else?", place: "section" },
-      { rel: "about", to: { id: "the-internet-proletariat" } },
-      { rel: "about", to: { id: "untitled-2-2", block: "blk" }, label: "A block", place: "block" },
-    ]);
-    expect(linksToNoteLinks(links)).toEqual(n);
-  });
-
-  test("an untagged own project is reported as not exact", () => {
-    const { links, exact } = noteLinksToLinks({ projectIds: [], refs: [] }, { projectId: P, bucket: null, label: "Paystack" });
-    expect(links).toEqual([{ rel: "filed-under", to: { id: P }, label: "Paystack" }]);
-    expect(exact).toBe(false);
-  });
-
-  test("an inbox capture has only about links", () => {
-    const n = { projectIds: [P], refs: [{ kind: "section" as const, id: "s", label: "S", projectId: P }] };
-    const { links, exact } = noteLinksToLinks(n, null);
-    expect(exact).toBe(true);
-    expect(links.every((l) => l.rel === "about")).toBe(true);
-  });
-
-  test("an empty project id (legacy inbox blockIds) can't be linked and is not exact", () => {
-    const { links, exact } = noteLinksToLinks({ projectIds: [], refs: [{ kind: "section", id: "b", label: "b", projectId: "" }] }, null);
-    expect(links).toEqual([]);
-    expect(exact).toBe(false);
   });
 });

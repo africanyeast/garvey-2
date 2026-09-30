@@ -3,5 +3,17 @@ export { Store, StoreError, type ListQuery, type CreateInput, type Backlink, typ
 export { parseThing, serializeThing, validateHeader, ThingFormatError } from "./format";
 export { newId, isUlid, isValidId, ulidTime, deterministicUlid } from "./id";
 export { findBlock, parseBlocks, blockText, labelSnippet } from "./blocks";
-export { noteLinksToLinks, linksToNoteLinks, canonicalJson, type FiledUnder } from "./noteLinks";
-export { V1Views, toProject, toNote, toItem, toComment, filedUnder, linkOf, noteLinksOf, commentStoreOf, inferCommentStore } from "./v1";
+export {
+  linkOf,
+  filedUnder,
+  tagsOf,
+  isListedIn,
+  sectionOf,
+  withTag,
+  withoutTag,
+  linksForNewNote,
+  commentOn,
+  alternateOf,
+  type Tag,
+  type TagTarget,
+} from "./links";

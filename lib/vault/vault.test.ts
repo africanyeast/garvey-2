@@ -1,298 +1,156 @@
-import { afterAll, beforeAll, describe, expect, setSystemTime, test } from "bun:test";
-import { mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
-import { existsSync } from "node:fs";
+import { afterAll, beforeAll, describe, expect, test } from "bun:test";
+import { mkdtemp, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
-import matter from "gray-matter";
-import { canonicalJson } from "@/lib/store";
-import { migrateVault } from "@/scripts/migrate-vault";
-import { LIVE, NOTE, OLD, blocks, buildFixture } from "@/scripts/test-fixture";
+import { StoreError } from "@/lib/store";
 
-// Phase 3's differential test: the same scenario runs through the v1 code
-// (scripts/v1-reference, on a v1 fixture vault) and the new lib/vault (on
-// that vault migrated), with the clock fixed; after every step every read
-// function must answer the same. Ids the two sides mint differ, so each new
-// id is mapped back to its v1 counterpart before comparing.
-
-type Mod = Record<string, (...args: never[]) => Promise<unknown>>;
-type Side = Record<"project" | "notes" | "inbox" | "comments" | "variants" | "threads" | "draft", Mod>;
+// lib/vault on an empty vault in a temp directory. The vault's location is
+// read from the cwd when lib/vault/paths is first imported, so the modules
+// are imported after changing into it.
 
 let tmp: string;
-let v1: Side;
-let v2: Side;
-const idMap = new Map<string, string>(); // v2 id -> v1 id
-let clock = Date.parse("2026-10-01T09:00:00.000Z");
-const tick = () => setSystemTime(new Date((clock += 1000)));
+let P: typeof import("./project");
+let N: typeof import("./notes");
+let C: typeof import("./comments");
+let D: typeof import("./draft");
+let V: typeof import("./variants");
 
-async function load(dir: string, base: string): Promise<Side> {
+beforeAll(async () => {
+  tmp = await mkdtemp(path.join(os.tmpdir(), "vault-test-"));
   const cwd = process.cwd();
-  process.chdir(dir); // both resolve the vault from the cwd at first import
+  process.chdir(tmp);
   try {
-    const names = ["project", "notes", "inbox", "comments", "variants", "threads", "draft"] as const;
-    const mods = await Promise.all(names.map((n) => import(`${base}/${n}`)));
-    return Object.fromEntries(names.map((n, i) => [n, mods[i]])) as Side;
+    [P, N, C, D, V] = await Promise.all([
+      import("./project"),
+      import("./notes"),
+      import("./comments"),
+      import("./draft"),
+      import("./variants"),
+    ]);
   } finally {
     process.chdir(cwd);
   }
-}
-
-/** v1 re-resolves legacy slug-shaped tags (`projectSlugs`, `blockIds`) at
- * every read, against whichever projects hold those slugs at that moment;
- * v2 resolves them once, at migration (a deliberate difference, see
- * V2_SPEC.md "Phase 3 notes"). So this test starts from the fixture with
- * those tags already normalised, dangling ones pointed at a slug no project
- * will take, and compares write behaviour only. */
-async function normaliseLegacyTags(vaultDir: string) {
-  const rewrite = async (rel: string, links: object) => {
-    const file = path.join(vaultDir, rel);
-    const { data, content } = matter(await readFile(file, "utf-8"));
-    await writeFile(file, matter.stringify(content, { ...data, links }));
-  };
-  await rewrite("inbox/01M2PJ8Q2TWN2BPG7YND8VG4N8.md", { projectIds: [LIVE], refs: [] });
-  await rewrite("trash/inbox/01M2KTBTKSG44BCVWYBSV4N0YD.md", { projectIds: ["long-gone"], refs: [] });
-  await rewrite("trash/notes/untitled__01M2KZ9WJMHXFGXVFNZ8B39AJ9.md", {
-    projectIds: ["long-gone"],
-    refs: [{ kind: "section", id: "0639", label: "0639", projectId: "long-gone" }],
-  });
-}
-
-beforeAll(async () => {
-  tick();
-  tmp = await mkdtemp(path.join(os.tmpdir(), "vault-diff-"));
-  await buildFixture(path.join(tmp, "v1", "vault"));
-  await normaliseLegacyTags(path.join(tmp, "v1", "vault"));
-  await migrateVault({ src: path.join(tmp, "v1", "vault"), out: path.join(tmp, "v2", "vault"), reportBase: null });
-  v1 = await load(path.join(tmp, "v1"), "@/scripts/v1-reference");
-  v2 = await load(path.join(tmp, "v2"), "@/lib/vault");
 });
 afterAll(async () => {
-  setSystemTime();
   await rm(tmp, { recursive: true, force: true });
 });
 
-const mapIds = (v: unknown) => {
-  let s = canonicalJson(v);
-  for (const [n, o] of idMap) s = s.split(n).join(o);
-  return s;
-};
+const para = (text: string) => [{ type: "paragraph" as const, content: text }];
+const draft = [
+  { id: "s1", type: "section", content: [{ type: "text", text: "Opening" }], children: [] },
+  { id: "b1", type: "paragraph", content: [{ type: "text", text: "First block text" }], children: [] },
+];
 
-/** Runs one write on both sides; returns both results. */
-async function both<T>(fn: (side: Side) => Promise<T>): Promise<[T, T]> {
-  tick();
-  const a = await fn(v1);
-  const b = await fn(v2);
-  return [a, b];
-}
+describe("notes, comments and trash on links", () => {
+  let a: Awaited<ReturnType<typeof P.createProject>>;
+  let b: Awaited<ReturnType<typeof P.createProject>>;
+  let noteId: string;
 
-/** Pairs up ids the two sides minted for the same thing. */
-function pair(oldId: string | undefined, newId: string | undefined) {
-  if (oldId && newId && oldId !== newId) idMap.set(newId, oldId);
-}
-
-/** Every read the app does, for every slug either side knows. */
-async function snapshot(side: Side) {
-  const slugs = [
-    ...new Set([
-      ...((await v1.project.listProjects()) as { slug: string }[]).map((p) => p.slug),
-      ...((await v2.project.listProjects()) as { slug: string }[]).map((p) => p.slug),
-    ]),
-  ].sort();
-  const out: Record<string, unknown> = {
-    projects: await side.project.listProjects(),
-    trashedProjects: await side.project.listTrashedProjects(),
-    inbox: await side.inbox.listInboxItems(),
-    feed: await side.inbox.listGlobalFeed(),
-    inboxComments: await side.comments.listInboxComments(),
-    trashedNotes: await side.notes.listTrashedNotes(),
-    trashedInbox: await side.inbox.listTrashedInboxItems(),
-  };
-  for (const s of slugs) {
-    const call = (m: Mod, f: string) => (m[f] as (slug: string) => Promise<unknown>)(s);
-    out[s] = {
-      project: await call(side.project, "getProject"),
-      draft: await call(side.draft, "getDraft"),
-      notes: await call(side.notes, "listNotes"),
-      view: await call(side.notes, "listNotesForProjectView"),
-      fromInbox: await call(side.inbox, "listInboxItemsForProject"),
-      comments: await call(side.comments, "listComments"),
-      variants: await call(side.variants, "listVariants"),
-      threads: await call(side.threads, "listThreads"),
-    };
-  }
-  return out;
-}
-
-async function expectSame(label: string, a?: unknown, b?: unknown) {
-  if (a !== undefined || b !== undefined) expect(`${label}: ${mapIds(b)}`).toBe(`${label}: ${mapIds(a)}`);
-  expect(mapIds(await snapshot(v2))).toBe(mapIds(await snapshot(v1)));
-}
-
-/* eslint-disable @typescript-eslint/no-explicit-any -- the two sides are loaded dynamically */
-const P = (s: Side) => s.project as any;
-const N = (s: Side) => s.notes as any;
-const I = (s: Side) => s.inbox as any;
-const C = (s: Side) => s.comments as any;
-const V = (s: Side) => s.variants as any;
-const T = (s: Side) => s.threads as any;
-const D = (s: Side) => s.draft as any;
-/* eslint-enable @typescript-eslint/no-explicit-any */
-
-describe("lib/vault on the store behaves as the v1 code did", () => {
-  test("reads, straight after migration", async () => {
-    await expectSame("baseline");
+  test("set up two projects", async () => {
+    a = await P.createProject({ title: "Alpha" });
+    b = await P.createProject({ title: "Beta" });
+    await D.saveDraft(a.slug, draft as never);
+    expect((await P.listProjects()).map((p) => p.title).sort()).toEqual(["Alpha", "Beta"]);
   });
 
-  test("projects: create, rename, reorder, finalize, touch, draft", async () => {
-    const [a, b] = await both((s) => P(s).createProject({ title: "Fresh", problem: "why" }));
-    pair(a.id, b.id);
-    await expectSame("create", a, b);
-    await expectSame("rename", ...(await both((s) => P(s).updateProject("fresh", { title: "Fresh Renamed", goal: "g" }))));
-    await expectSame("rename onto a taken slug", ...(await both((s) => P(s).updateProject("fresh-renamed", { title: "Limits" }))));
-    await expectSame("reorder", ...(await both((s) => P(s).reorderProjects(["limits-2", "limits", "paystack-role"]))));
-
-    const [u1, u2] = await both((s) => P(s).createProject({}));
-    pair(u1.id, u2.id);
-    await expectSame("finalize", ...(await both((s) => P(s).finalizeUntitledProject("untitled"))));
-
-    const doc = [{ id: "sec-1", type: "heading", content: [{ type: "text", text: "Renamed section" }], children: [] }];
-    await expectSame("save draft", ...(await both((s) => D(s).saveDraft("paystack-role", doc))));
-    await expectSame("touch", ...(await both((s) => P(s).touchProject("paystack-role"))));
-    await expectSame("missing", ...(await both((s) => P(s).updateProject("nope", { title: "x" }))));
-  });
-
-  test("notes: create, edit, retag, trash, restore", async () => {
-    const links = { projectIds: [LIVE], refs: [{ kind: "section", id: "sec-1", label: "Renamed section", projectId: LIVE }] };
-    const [a, b] = await both((s) => N(s).createNote("paystack-role", { body: JSON.parse(blocks("new note")), bucket: "sec-1", links }));
-    pair(a.id, b.id);
-    await expectSame("create", a, b);
-    const id = a.id as string;
-    const idFor = (s: Side) => (s === v1 ? id : b.id);
-
-    await expectSame("body", ...(await both((s) => N(s).updateNote("paystack-role", idFor(s), { body: JSON.parse(blocks("edited")) }))));
-    await expectSame("resolve", ...(await both((s) => N(s).updateNote("paystack-role", idFor(s), { resolved: true }))));
-    await expectSame(
-      "retag",
-      ...(await both((s) => N(s).updateNote("paystack-role", idFor(s), { bucket: null, links: { projectIds: [LIVE, OLD], refs: [] } })))
-    );
-    await expectSame("attach", ...(await both((s) => N(s).updateNote("paystack-role", idFor(s), { attachments: [{ kind: "link", label: "x.com", url: "https://x.com" }] }))));
-    await expectSame("wrong project", ...(await both((s) => N(s).updateNote("limits", idFor(s), { resolved: false }))));
-
-    const [c, d] = await both((s) => N(s).createNote("limits", { body: JSON.parse(blocks("untagged")), bucket: null }));
-    pair(c.id, d.id);
-    await expectSame("create without tags", c, d);
-
-    await expectSame("trash", ...(await both((s) => N(s).trashNote("paystack-role", idFor(s)))));
-    await expectSame("restore", ...(await both((s) => N(s).restoreNote("paystack-role", idFor(s)))));
-    await expectSame("trash a fixture note", ...(await both((s) => N(s).trashNote("paystack-role", NOTE))));
-    await expectSame("restore it", ...(await both((s) => N(s).restoreNote("paystack-role", NOTE))));
-  });
-
-  test("inbox: capture, edit, trash, restore", async () => {
-    const [a, b] = await both((s) => I(s).createInboxItem({ body: JSON.parse(blocks("capture")), links: { projectIds: [OLD], refs: [] } }));
-    pair(a.id, b.id);
-    await expectSame("create", a, b);
-    const idFor = (s: Side) => (s === v1 ? a.id : b.id);
-    await expectSame("edit", ...(await both((s) => I(s).updateInboxItem(idFor(s), { body: JSON.parse(blocks("edited")), links: { projectIds: [LIVE], refs: [] } }))));
-    await expectSame("trash", ...(await both((s) => I(s).trashInboxItem(idFor(s)))));
-    await expectSame("restore", ...(await both((s) => I(s).restoreInboxItem(idFor(s)))));
-    await expectSame("restore a fixture capture", ...(await both((s) => I(s).restoreInboxItem("01M2KTBTKSG44BCVWYBSV4N0YD"))));
-  });
-
-  test("comments: project and inbox, create, edit, delete", async () => {
-    for (const target of ["blk-1", NOTE, "no-such-block"]) {
-      const [a, b] = await both((s) => C(s).createComment("paystack-role", { targetId: target, text: `on ${target}` }));
-      pair(a.id, b.id);
-      await expectSame(`create on ${target}`, a, b);
-    }
-    const [a, b] = await both((s) => C(s).createComment("paystack-role", { targetId: "blk-1", text: "to edit" }));
-    pair(a.id, b.id);
-    const idFor = (s: Side) => (s === v1 ? a.id : b.id);
-    await expectSame("resolve", ...(await both((s) => C(s).updateComment("paystack-role", idFor(s), { resolved: true }))));
-    await expectSame("text", ...(await both((s) => C(s).updateComment("paystack-role", idFor(s), { text: "edited" }))));
-    await expectSame("retarget", ...(await both((s) => C(s).updateComment("paystack-role", idFor(s), { targetId: "sec-1" }))));
-    await expectSame("other project", ...(await both((s) => C(s).deleteComment("limits", idFor(s)))));
-    await expectSame("delete", ...(await both((s) => C(s).deleteComment("paystack-role", idFor(s)))));
-
-    const [x, y] = await both((s) => C(s).createInboxComment({ targetId: "01M2PJ8Q2TWN2BPG7YND8VG4N8", text: "inbox" }));
-    pair(x.id, y.id);
-    await expectSame("inbox create", x, y);
-    const inboxId = (s: Side) => (s === v1 ? x.id : y.id);
-    await expectSame("inbox resolve", ...(await both((s) => C(s).updateInboxComment(inboxId(s), { resolved: true }))));
-    await expectSame("inbox delete", ...(await both((s) => C(s).deleteInboxComment(inboxId(s)))));
-  });
-
-  test("variants and threads", async () => {
-    const content = { type: "paragraph", content: [{ type: "text", text: "alt" }] };
-    const [a, b] = await both((s) => V(s).createVariant("paystack-role", { blockId: "blk-1", content, order: 2 }));
-    pair(a.id, b.id);
-    await expectSame("variant create", a, b);
-    const vid = (s: Side) => (s === v1 ? a.id : b.id);
-    await expectSame("variant order", ...(await both((s) => V(s).updateVariant("paystack-role", vid(s), { order: 0 }))));
-    await expectSame("variant content", ...(await both((s) => V(s).updateVariant("paystack-role", vid(s), { content: { ...content, id: vid(s) } }))));
-    await expectSame("variant delete", ...(await both((s) => V(s).deleteVariant("paystack-role", vid(s)))));
-
-    const [t1, t2] = await both((s) => T(s).createThread("paystack-role", { userId: "u", body: [], metadata: { m: 1 } }));
-    pair(t1.id, t2.id);
-    pair(t1.comments[0].id, t2.comments[0].id);
-    await expectSame("thread create", t1, t2);
-    const tid = (s: Side) => (s === v1 ? t1.id : t2.id);
-    const [r1, r2] = await both((s) => T(s).addComment("paystack-role", tid(s), { userId: "u", body: ["reply"] }));
-    pair(r1.comments[1].id, r2.comments[1].id);
-    await expectSame("thread reply", r1, r2);
-    const cid = (s: Side) => (s === v1 ? r1.comments[1].id : r2.comments[1].id);
-    await expectSame("thread edit", ...(await both((s) => T(s).updateComment("paystack-role", tid(s), cid(s), { body: ["edited"] }))));
-    await expectSame("thread resolve", ...(await both((s) => T(s).setThreadResolved("paystack-role", tid(s), true, "u"))));
-    await expectSame("thread reopen", ...(await both((s) => T(s).setThreadResolved("paystack-role", tid(s), false))));
-    await expectSame("thread delete comment", ...(await both((s) => T(s).deleteComment("paystack-role", tid(s), cid(s)))));
-    await expectSame("thread delete", ...(await both((s) => T(s).deleteThread("paystack-role", tid(s)))));
-  });
-
-  test("trashing and restoring a project brings back exactly its contents", async () => {
-    await expectSame("trash", ...(await both((s) => P(s).deleteProject("paystack-role"))));
-    const [[a], [b]] = await both((s) => P(s).listTrashedProjects());
-    expect(b.dirName).toBe(a.dirName);
-    // a new project takes the slug in the meantime
-    const [n1, n2] = await both((s) => P(s).createProject({ title: "Paystack role" }));
-    pair(n1.id, n2.id);
-    await expectSame("slug retaken", n1, n2);
-    await expectSame("restore", ...(await both((s) => P(s).restoreProject(a.dirName))));
-  });
-});
-
-describe("where the new code deliberately differs", () => {
-  test("duplicating a project gives every copied thing a new id and points it at the copy", async () => {
-    tick();
-    const source = (await P(v2).getProject("limits")) as { id: string };
-    const viewBefore = await N(v2).listNotesForProjectView("limits");
-    const copy = await P(v2).duplicateProject("limits");
-    expect(copy.slug).toBe("limits-copy");
-    const notes = await N(v2).listNotes("limits-copy");
-    const srcNotes = await N(v2).listNotes("limits");
-    expect(notes.length).toBe(srcNotes.length);
-    expect(notes.some((n: { id: string }) => srcNotes.some((m: { id: string }) => m.id === n.id))).toBe(false);
-    for (const n of notes) expect(n.links.projectIds).not.toContain(source.id);
-    const comments = await C(v2).listComments("limits-copy");
-    expect(comments.length).toBe((await C(v2).listComments("limits")).length);
-    expect(await D(v2).getDraft("limits-copy")).toEqual(await D(v2).getDraft("limits"));
-    // the source is untouched: its notes aren't cross-listed from the copy
-    expect(await N(v2).listNotesForProjectView("limits")).toEqual(viewBefore);
-  });
-
-  test("restoring a trashed note whose project is gone brings it back as a capture, not into nowhere", async () => {
-    tick();
-    const note = await N(v2).restoreNote("gone-project", "01M2PKTTHZJYFA0ZBP2WNHH6CQ");
-    expect(note?.id).toBe("01M2PKTTHZJYFA0ZBP2WNHH6CQ");
-    expect((await I(v2).listInboxItems()).map((i: { id: string }) => i.id)).toContain("01M2PKTTHZJYFA0ZBP2WNHH6CQ");
-  });
-
-  test("refuses to run on a v1 vault, and writes nothing into it", async () => {
-    const project = path.join(import.meta.dir, "project.ts");
-    const run = Bun.spawnSync(["bun", "-e", `await import(${JSON.stringify(project)}).then((m) => m.listProjects())`], {
-      cwd: path.join(tmp, "v1"),
+  test("a note's links are checked and relabelled", async () => {
+    const note = await N.createNote({
+      body: para("hello") as never,
+      links: [
+        { rel: "about", to: { id: a.id } },
+        { rel: "filed-under", to: { id: a.id, block: "s1" }, label: "Opening", place: "section" },
+        { rel: "about", to: { id: b.id }, label: "stale" },
+        { rel: "about", to: { id: a.id, block: "b1" }, place: "block" },
+      ],
     });
-    expect(run.exitCode).not.toBe(0);
-    expect(run.stderr.toString()).toContain("is a v1 vault");
-    expect(existsSync(path.join(tmp, "v1", "vault", "VERSION"))).toBe(false);
-    expect(existsSync(path.join(tmp, "v1", "vault", "things"))).toBe(false);
+    noteId = note.id;
+    expect(note.links).toEqual([
+      { rel: "filed-under", to: { id: a.id, block: "s1" }, label: "Opening", place: "section" },
+      { rel: "about", to: { id: b.id }, label: "Beta" },
+      { rel: "about", to: { id: a.id, block: "b1" }, label: "First block text", place: "block" },
+    ]);
+    expect((await N.listNotes()).map((n) => n.id)).toEqual([noteId]);
+  });
+
+  test("bad links are refused", async () => {
+    const two = [
+      { rel: "filed-under", to: { id: a.id } },
+      { rel: "filed-under", to: { id: b.id } },
+    ];
+    await expect(N.createNote({ body: para("x") as never, links: two })).rejects.toBeInstanceOf(StoreError);
+    const missing = [{ rel: "filed-under", to: { id: "01M2M6B8E1K3K939PM8B4GREWF" } }];
+    await expect(N.createNote({ body: para("x") as never, links: missing })).rejects.toBeInstanceOf(StoreError);
+    await expect(N.createNote({ body: para("x") as never, links: [{ rel: "comment-on", to: { id: a.id } }] })).rejects.toBeInstanceOf(StoreError);
+  });
+
+  test("an inbox capture is a note with no filed-under", async () => {
+    const capture = await N.createNote({ body: para("capture") as never });
+    expect(capture.links).toEqual([]);
+    const updated = await N.updateNote(capture.id, { links: [{ rel: "about", to: { id: b.id } }] });
+    expect(updated?.links).toEqual([{ rel: "about", to: { id: b.id }, label: "Beta" }]);
+  });
+
+  test("comments go on a block in a project, or on a note", async () => {
+    const onBlock = await C.createComment({ on: { id: a.id, block: "b1" }, text: "block comment" });
+    expect(onBlock.links).toEqual([{ rel: "comment-on", to: { id: a.id, block: "b1" }, label: "First block text" }]);
+    const onNote = await C.createComment({ on: { id: noteId }, text: "note comment" });
+    expect(onNote.links).toEqual([{ rel: "comment-on", to: { id: noteId } }]);
+    await expect(C.createComment({ on: { id: a.id }, text: "whole project" })).rejects.toBeInstanceOf(StoreError);
+    expect((await C.listComments()).length).toBe(2);
+  });
+
+  test("promoting an alt version re-points comments between the block and the alt", async () => {
+    const alt = await V.createVariant(a.slug, { block: "b1", content: para("alt")[0] as never, order: 0 });
+    expect(alt.links).toEqual([{ rel: "alternate-of", to: { id: a.id, block: "b1" } }]);
+    const [onBlock] = (await C.listComments()).filter((c) => c.text === "block comment");
+    const moved = await C.updateComment(onBlock.id, { on: { id: alt.id } });
+    expect(moved?.links).toEqual([{ rel: "comment-on", to: { id: alt.id } }]);
+    const back = await C.updateComment(onBlock.id, { on: { id: a.id, block: "b1" } });
+    expect(back?.links[0].to).toEqual({ id: a.id, block: "b1" });
+  });
+
+  test("a trashed note whose project is gone comes back as an inbox capture, tags kept", async () => {
+    expect(await N.trashNote(noteId)).toBe(true);
+    expect((await N.listTrashedNotes()).map((n) => n.id)).toEqual([noteId]);
+    expect(await P.deleteProject(a.slug)).toBe(true);
+    const restored = await N.restoreNote(noteId);
+    expect(restored?.links).toEqual([
+      { rel: "about", to: { id: a.id }, label: "Alpha" },
+      { rel: "about", to: { id: a.id, block: "s1" }, label: "Opening", place: "section" },
+      { rel: "about", to: { id: b.id }, label: "Beta" },
+      { rel: "about", to: { id: a.id, block: "b1" }, label: "First block text", place: "block" },
+    ]);
+    expect(await N.listTrashedNotes()).toEqual([]);
+  });
+
+  test("a project is trashed and restored by id with its contents", async () => {
+    const trashed = await P.listTrashedProjects();
+    expect(trashed.map((t) => [t.id, t.title])).toEqual([[a.id, "Alpha"]]);
+    // The block comment, the alt, and the comment on the note (filed under
+    // the project when the project was trashed) all went with it.
+    expect(await C.listComments()).toEqual([]);
+    expect(await V.listVariants(a.slug)).toEqual([]);
+    const back = await P.restoreProject(a.id);
+    expect(back?.id).toBe(a.id);
+    expect((await C.listComments()).map((c) => c.text).sort()).toEqual(["block comment", "note comment"]);
+    expect((await V.listVariants(a.slug)).length).toBe(1);
+  });
+
+  test("a trashed note filed under a live project is restored into it", async () => {
+    const note = await N.createNote({ body: para("filed") as never, links: [{ rel: "filed-under", to: { id: b.id } }] });
+    await N.trashNote(note.id);
+    const restored = await N.restoreNote(note.id);
+    expect(restored?.links).toEqual([{ rel: "filed-under", to: { id: b.id }, label: "Beta" }]);
+  });
+
+  test("a duplicate's comments and notes point at the copy", async () => {
+    await N.createNote({ body: para("in alpha") as never, links: [{ rel: "filed-under", to: { id: a.id, block: "s1" } }] });
+    const copy = await P.duplicateProject(a.slug);
+    expect(copy?.title).toBe("Alpha Copy");
+    const comments = await C.listComments();
+    const copyBlockComment = comments.find((c) => c.links[0].to.id === copy!.id);
+    expect(copyBlockComment?.links[0].to.block).toBe("b1");
+    const notes = await N.listNotes();
+    expect(notes.filter((n) => n.links[0]?.rel === "filed-under" && n.links[0].to.id === copy!.id).length).toBe(1);
   });
 });

@@ -4,28 +4,32 @@ import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useAllMentionTargets } from "@/app/lib/writing-os/useAllMentionTargets";
 import { NoteDetail } from "@/app/components/shared/NoteDetail";
 import { PanelShell } from "@/app/components/panel/PanelShell";
+import { filedUnder } from "@/lib/store/links";
 
 export function InboxItemExpanded({ id }: { id: string | number }) {
   const {
-    inboxItems,
-    enrichInboxItem,
+    notes,
+    enrichNote,
     closeExpanded,
-    toggleInboxResolved,
-    removeInboxTag,
-    addInboxTag,
-    deleteInboxItem,
-    updateInboxBody,
-    setInboxAttachmentTranscription,
-    inboxCommentsData,
+    toggleNoteResolved,
+    removeNoteTag,
+    addNoteTag,
+    deleteNote,
+    updateNoteBody,
+    setNoteAttachmentTranscription,
+    commentsData,
     replyDrafts,
     setReplyDraft,
-    addInboxReply,
-    resolveInboxComment,
+    addReply,
+    resolveComment,
+    projectsList,
   } = useWritingOS();
   const mentionTargets = useAllMentionTargets();
-  const raw = inboxItems.find((x) => x.id === id);
+  const raw = notes.find((x) => x.id === id);
   if (!raw) return null;
-  const it = enrichInboxItem(raw);
+  const it = enrichNote(raw);
+  // A capture filed under no project has no draft to "Insert" into.
+  const home = projectsList.find((p) => p.id === filedUnder(it.links)?.to.id);
 
   // Always fullscreen — no docked/right-panel state here either, so no
   // minimize control, just close.
@@ -38,20 +42,20 @@ export function InboxItemExpanded({ id }: { id: string | number }) {
         time={it.time}
         resolved={it.resolved}
         attachments={it.attachments}
-        onToggleResolved={() => toggleInboxResolved(it.id)}
-        onBlocksChange={(blocks) => updateInboxBody(it.id, blocks)}
-        onSetAttachmentTranscription={(url, t) => setInboxAttachmentTranscription(it.id, url, t)}
-        onRemoveTag={(t) => removeInboxTag(it.id, t.kind, t.tagId)}
-        onDelete={() => deleteInboxItem(it.id)}
+        onToggleResolved={() => toggleNoteResolved(it.id)}
+        onBlocksChange={(blocks) => updateNoteBody(it.id, blocks)}
+        onSetAttachmentTranscription={(url, t) => setNoteAttachmentTranscription(it.id, url, t)}
+        onRemoveTag={(t) => removeNoteTag(it.id, t.kind, t.tagId)}
+        onDelete={() => deleteNote(it.id)}
         isFullscreen
         mentionTargets={mentionTargets}
-        onAddTag={(target) => addInboxTag(it.id, target)}
-        comments={inboxCommentsData[it.id] || []}
+        onAddTag={(target) => addNoteTag(it.id, target)}
+        comments={commentsData[it.id] || []}
         replyDraft={replyDrafts[it.id]}
         onReplyChange={(v) => setReplyDraft(it.id, v)}
-        onReplySubmit={() => addInboxReply(it.id)}
-        onResolveComment={(id) => resolveInboxComment(it.id, id)}
-        activeProjectSlug={it.homeSlug}
+        onReplySubmit={() => addReply(it.id)}
+        onResolveComment={(id) => resolveComment(it.id, id)}
+        activeProjectSlug={home?.slug}
       />
     </PanelShell>
   );

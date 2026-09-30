@@ -4,27 +4,30 @@ import {
   createContext,
   useContext,
   useEffect,
+  useMemo,
   useRef,
   useState,
   type MouseEvent,
   type ReactNode,
 } from "react";
-import type {
-  Attachment,
-  AttachmentTranscription,
-  BlockVariant,
-  Comment,
-  DocMode,
-  ExpandedItem,
-  InboxItem,
-  Note,
-  NoteLinks,
-  Project,
-  SectionKey,
+import {
+  commentKey,
+  variantBlock,
+  type Attachment,
+  type AttachmentTranscription,
+  type BlockVariant,
+  type Comment,
+  type DocMode,
+  type ExpandedItem,
+  type Note,
+  type Project,
+  type Ref,
+  type SectionKey,
 } from "./types";
 import type { DraftBlock, DraftPartialBlock } from "./schema";
-import { type MentionTarget, type ProjectLookup, type ResolvedTag, resolveNoteLinks, resolveTags, sectionMentionTargets } from "./mentions";
+import { type MentionTarget, type ProjectLookup, type ResolvedTag, resolveTags, sectionMentionTargets } from "./mentions";
 import { parseMarkdownToBlocks } from "./parseMarkdown";
+import { commentOn, isListedIn, linksForNewNote, withTag, withoutTag } from "@/lib/store/links";
 
 export const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
 
@@ -44,25 +47,18 @@ export type EnrichedNote = Note & {
   tags: ResolvedTag[];
 };
 
-export type EnrichedInboxItem = InboxItem & {
-  tags: ResolvedTag[];
-};
-
 interface WritingOSState {
   // data
-  notesData: Note[];
+  /** Every live note — in a project or in the Inbox. Which screens show a
+   * note is read from its links (`isListedIn`, `sectionOf`). */
+  notes: Note[];
+  /** Comments on what's in view, grouped by `commentKey`: the active
+   * project's blocks by block id, and notes and alt versions by their own
+   * id. */
   commentsData: Record<string, Comment[]>;
-  /** Comments on raw Inbox captures — same `Comment` shape as `commentsData`,
-   * just backed by the global `/api/inbox/comments` store instead of a
-   * project's, since an inbox item may not be tagged to any project. Keyed
-   * by `targetId` the same way. */
-  inboxCommentsData: Record<string, Comment[]>;
-  resolveInboxComment: (targetId: string, id: string) => void;
-  addInboxReply: (targetId: string) => void;
   /** A block's alt versions, keyed by the *live* block id they're an
-   * alternate of (`BlockVariant.blockId`) — same grouping shape as
-   * `commentsData`. Never entered into the shared draft document; see
-   * `BlockExpanded`. */
+   * alternate of (`variantBlock`) — same grouping shape as `commentsData`.
+   * Never entered into the shared draft document; see `BlockExpanded`. */
   variantsData: Record<string, BlockVariant[]>;
   addVariant: (blockId: string, content: DraftPartialBlock) => void;
   updateVariantContent: (variant: BlockVariant, content: DraftPartialBlock) => void;
@@ -72,17 +68,16 @@ interface WritingOSState {
    * `idB` — the comment-half of promoting an alt to primary (its content
    * and the primary's trade places), so a comment stays attached to the
    * text it's about rather than a fixed slot. A true swap (not two
-   * sequential moves): both buckets exchange keys at once, so comments
+   * sequential moves): both groups exchange keys at once, so comments
    * already at the destination are never merged with the ones moving in.
    * Resolves once every PATCH has landed. */
   swapCommentBlocks: (idA: string, idB: string) => Promise<void>;
-  inboxItems: InboxItem[];
   activeProject: string;
   setActiveProject: (title: string) => void;
   activeProjectSlug: string | null;
   setActiveProjectSlug: (slug: string | null) => void;
   /** The active project's stable id — what a "@"/"#" tag created while
-   * viewing this project actually stores (see `MentionRef`/`NoteLinks`),
+   * viewing this project actually links to (see `lib/store/links.ts`),
    * never `activeProjectSlug`, so the tag survives a later rename. */
   activeProjectId: string | null;
   setActiveProjectId: (id: string | null) => void;
@@ -135,26 +130,21 @@ interface WritingOSState {
   openExpanded: (kind: ExpandedItem["kind"], key: string | number, backTo?: ExpandedItem | null) => void;
   closeExpanded: () => void;
   toggleNoteResolved: (id: string) => void;
-  toggleInboxResolved: (id: string) => void;
   deleteNote: (id: string) => void;
-  deleteInboxItem: (id: string) => void;
   updateNoteBody: (id: string, body: DraftPartialBlock[]) => void;
-  updateInboxBody: (id: string, body: DraftPartialBlock[]) => void;
   /** Persists (or clears, passing `null`) an OCR result onto one attachment
-   * of a note/inbox item — durable, unlike the old review-dialog flow, so
-   * reopening the item later still shows the transcript. */
+   * of a note — durable, unlike the old review-dialog flow, so reopening
+   * the note later still shows the transcript. */
   setNoteAttachmentTranscription: (id: string, attachmentUrl: string, transcription: AttachmentTranscription | null) => void;
-  setInboxAttachmentTranscription: (id: string, attachmentUrl: string, transcription: AttachmentTranscription | null) => void;
   removeNoteTag: (id: string, kind: ResolvedTag["kind"], tagId: string) => void;
-  removeInboxTag: (id: string, kind: ResolvedTag["kind"], tagId: string) => void;
   addNoteTag: (id: string, target: MentionTarget) => void;
-  addInboxTag: (id: string, target: MentionTarget) => void;
   setPanelMode: (m: PanelPresentation) => void;
-  resolveComment: (targetId: string, id: string) => void;
-  setReplyDraft: (targetId: string, v: string) => void;
-  addReply: (targetId: string) => void;
+  /** `key` is a `commentKey`: a block id, or a note's or alt version's id. */
+  resolveComment: (key: string, id: string) => void;
+  setReplyDraft: (key: string, v: string) => void;
+  addReply: (key: string) => void;
   setNewNoteDraft: (v: string) => void;
-  addItem: (draftDoc: DraftBlock[]) => void;
+  addItem: () => void;
   addNoteToSection: (
     sec: SectionKey,
     text: string,
@@ -162,33 +152,28 @@ interface WritingOSState {
     links?: MentionTarget[],
     attachments?: Attachment[]
   ) => void;
-  /** Pushes a note/inbox item created *outside* the normal composer flow
-   * (e.g. the `insert-content` agent filing one from the transcription
-   * panel) into whatever list state is currently showing it — same
-   * project-tab + global-feed mirroring `addItem` already does for a
-   * hand-typed note. */
-  registerCreatedNote: (note: Note | InboxItem, projectSlug?: string) => void;
+  /** Adds a note created or restored *outside* the composers (the
+   * `insert-content` agent filing one from the transcription panel, a
+   * restore from Trash) to the list, so every screen showing it updates. */
+  addNoteToList: (note: Note) => void;
   setNewInboxDraft: (v: string) => void;
   addInboxItem: () => void;
-  addRestoredNote: (n: Note) => void;
-  addRestoredInboxItem: (i: InboxItem) => void;
   setDocMode: (m: DocMode) => void;
 
   // derived
   enrichNote: (n: Note) => EnrichedNote;
-  enrichInboxItem: (i: InboxItem) => EnrichedInboxItem;
+  /** The active project's Notes tab, newest first. */
   notesDesc: EnrichedNote[];
-  inboxItemsDesc: EnrichedInboxItem[];
+  /** The Inbox feed — every note, newest first. */
+  feedDesc: EnrichedNote[];
 }
 
 const WritingOSContext = createContext<WritingOSState | null>(null);
 
 export function WritingOSProvider({ children }: { children: ReactNode }) {
-  const [notesData, setNotesData] = useState<Note[]>([]);
-  const [commentsData, setCommentsData] = useState<Record<string, Comment[]>>({});
-  const [inboxCommentsData, setInboxCommentsData] = useState<Record<string, Comment[]>>({});
+  const [notes, setNotes] = useState<Note[]>([]);
+  const [comments, setComments] = useState<Comment[]>([]);
   const [variantsData, setVariantsData] = useState<Record<string, BlockVariant[]>>({});
-  const [inboxItems, setInboxItems] = useState<InboxItem[]>([]);
   const [activeProject, setActiveProject] = useState("");
   const [activeProjectSlug, setActiveProjectSlug] = useState<string | null>(null);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
@@ -230,46 +215,35 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
   };
 
   useEffect(() => {
-    fetch("/api/inbox")
-      .then((res) => res.json())
-      .then(setInboxItems)
-      .catch(() => {});
-    fetch("/api/inbox/comments")
-      .then((res) => res.json())
-      .then((comments: Comment[]) => {
-        const grouped: Record<string, Comment[]> = {};
-        for (const c of comments) (grouped[c.targetId] ??= []).push(c);
-        setInboxCommentsData(grouped);
-      })
-      .catch(() => {});
     refreshProjects();
   }, []);
 
+  // Notes and comments are one list each, for the whole vault. Refetched
+  // on every project switch, so what a project shows is fresh when opened.
   useEffect(() => {
-    if (!activeProjectSlug) {
-      setNotesData([]);
-      return;
-    }
-    fetch(`/api/projects/${activeProjectSlug}/notes`)
+    fetch("/api/notes")
       .then((res) => res.json())
-      .then(setNotesData)
+      .then(setNotes)
+      .catch(() => {});
+    fetch("/api/comments")
+      .then((res) => res.json())
+      .then(setComments)
       .catch(() => {});
   }, [activeProjectSlug]);
 
-  useEffect(() => {
-    if (!activeProjectSlug) {
-      setCommentsData({});
-      return;
+  // Memoised so its identity only changes with the comments themselves —
+  // `useBlockCommentHighlight` re-runs whenever it does.
+  const commentsData = useMemo(() => {
+    const grouped: Record<string, Comment[]> = {};
+    for (const c of comments) {
+      const on = commentOn(c.links);
+      // A block comment shows only in its own project: a duplicated
+      // project's draft reuses its source's block ids.
+      if (!on || (on.block !== undefined && on.id !== activeProjectId)) continue;
+      (grouped[commentKey(c)] ??= []).push(c);
     }
-    fetch(`/api/projects/${activeProjectSlug}/comments`)
-      .then((res) => res.json())
-      .then((comments: Comment[]) => {
-        const grouped: Record<string, Comment[]> = {};
-        for (const c of comments) (grouped[c.targetId] ??= []).push(c);
-        setCommentsData(grouped);
-      })
-      .catch(() => {});
-  }, [activeProjectSlug]);
+    return grouped;
+  }, [comments, activeProjectId]);
 
   useEffect(() => {
     if (!activeProjectSlug) {
@@ -280,7 +254,7 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
       .then((res) => res.json())
       .then((variants: BlockVariant[]) => {
         const grouped: Record<string, BlockVariant[]> = {};
-        for (const v of variants) (grouped[v.blockId] ??= []).push(v);
+        for (const v of variants) (grouped[variantBlock(v)] ??= []).push(v);
         for (const list of Object.values(grouped)) list.sort((a, b) => a.order - b.order);
         setVariantsData(grouped);
       })
@@ -320,179 +294,64 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     else setExpandedItem(null);
   };
 
-  // A note surfaced into this project's panel from the Inbox (`fromInbox`,
-  // see `listInboxItemsForProject`) is physically an inbox capture, not a
-  // note filed under this project — act on it at `/api/inbox/<id>` instead,
-  // same as a cross-listed *note*'s `homeSlug` routes to its real project.
-  const noteActionUrl = (note: Pick<Note, "id" | "homeSlug" | "fromInbox">) =>
-    note.fromInbox ? `/api/inbox/${note.id}` : `/api/projects/${note.homeSlug ?? activeProjectSlug}/notes/${note.id}`;
+  // One set of note actions, whatever screen the note is on: optimistic
+  // local update, then a PATCH to the note itself. Links the server
+  // relabels (a project's current title) are taken back from its reply.
+  const patchNote = (id: string, patch: Partial<Pick<Note, "body" | "resolved" | "attachments" | "links">>) => {
+    setNotes((prev) => prev.map((n) => (n.id === id ? { ...n, ...patch } : n)));
+    fetch(`/api/notes/${id}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(patch),
+    })
+      .then((res) => (res.ok && patch.links ? res.json() : null))
+      .then((saved: Note | null) => {
+        if (saved) setNotes((prev) => prev.map((n) => (n.id === id ? { ...n, links: saved.links } : n)));
+      })
+      .catch(() => {});
+  };
+  const noteById = (id: string) => notes.find((n) => n.id === id);
 
   const toggleNoteResolved = (id: string) => {
-    if (!activeProjectSlug) return;
-    const note = notesData.find((n) => n.id === id);
-    if (!note) return;
-    const resolved = !note.resolved;
-    setNotesData((prev) => prev.map((n) => (n.id === id ? { ...n, resolved } : n)));
-    fetch(noteActionUrl(note), {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ resolved }),
-    }).catch(() => {});
-  };
-  // A global-feed entry is either a raw inbox capture (PATCH/DELETE
-  // /api/inbox/<id>) or a project note surfaced into the feed, which
-  // carries `homeSlug` and must be acted on at its real location.
-  const toggleInboxResolved = (id: string) => {
-    const item = inboxItems.find((i) => i.id === id);
-    if (!item) return;
-    const resolved = !item.resolved;
-    setInboxItems((prev) => prev.map((i) => (i.id === id ? { ...i, resolved } : i)));
-    const url = item.homeSlug ? `/api/projects/${item.homeSlug}/notes/${id}` : `/api/inbox/${id}`;
-    fetch(url, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ resolved }),
-    }).catch(() => {});
+    const note = noteById(id);
+    if (note) patchNote(id, { resolved: !note.resolved });
   };
   const deleteNote = (id: string) => {
-    if (!activeProjectSlug) return;
-    const note = notesData.find((n) => n.id === id);
-    setNotesData((prev) => prev.filter((n) => n.id !== id));
-    if (expandedItem?.kind === "note" && expandedItem.key === id) closeExpanded();
-    if (note) fetch(noteActionUrl(note), { method: "DELETE" }).catch(() => {});
-  };
-  const deleteInboxItem = (id: string) => {
-    const item = inboxItems.find((i) => i.id === id);
-    setInboxItems((prev) => prev.filter((i) => i.id !== id));
-    if (expandedItem?.kind === "inbox" && expandedItem.key === id) closeExpanded();
-    const url = item?.homeSlug ? `/api/projects/${item.homeSlug}/notes/${id}` : `/api/inbox/${id}`;
-    fetch(url, { method: "DELETE" }).catch(() => {});
+    setNotes((prev) => prev.filter((n) => n.id !== id));
+    if ((expandedItem?.kind === "note" || expandedItem?.kind === "inbox") && expandedItem.key === id) closeExpanded();
+    fetch(`/api/notes/${id}`, { method: "DELETE" }).catch(() => {});
   };
   const updateNoteBody = (id: string, body: DraftPartialBlock[]) => {
-    if (!activeProjectSlug) return;
-    const note = notesData.find((n) => n.id === id);
-    if (!note) return;
-    setNotesData((prev) => prev.map((n) => (n.id === id ? { ...n, body } : n)));
-    fetch(noteActionUrl(note), {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body }),
-    }).catch(() => {});
-  };
-  const updateInboxBody = (id: string, body: DraftPartialBlock[]) => {
-    const item = inboxItems.find((i) => i.id === id);
-    setInboxItems((prev) => prev.map((i) => (i.id === id ? { ...i, body } : i)));
-    const url = item?.homeSlug ? `/api/projects/${item.homeSlug}/notes/${id}` : `/api/inbox/${id}`;
-    fetch(url, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body }),
-    }).catch(() => {});
+    if (noteById(id)) patchNote(id, { body });
   };
   const setNoteAttachmentTranscription = (id: string, attachmentUrl: string, transcription: AttachmentTranscription | null) => {
-    if (!activeProjectSlug) return;
-    const note = notesData.find((n) => n.id === id);
+    const note = noteById(id);
     if (!note) return;
     const attachments = (note.attachments ?? []).map((a) =>
       a.url === attachmentUrl ? { ...a, transcription: transcription ?? undefined } : a
     );
-    setNotesData((prev) => prev.map((n) => (n.id === id ? { ...n, attachments } : n)));
-    fetch(noteActionUrl(note), {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ attachments }),
-    }).catch(() => {});
+    patchNote(id, { attachments });
   };
-  const setInboxAttachmentTranscription = (id: string, attachmentUrl: string, transcription: AttachmentTranscription | null) => {
-    const item = inboxItems.find((i) => i.id === id);
-    if (!item) return;
-    const attachments = (item.attachments ?? []).map((a) =>
-      a.url === attachmentUrl ? { ...a, transcription: transcription ?? undefined } : a
-    );
-    setInboxItems((prev) => prev.map((i) => (i.id === id ? { ...i, attachments } : i)));
-    const url = item.homeSlug ? `/api/projects/${item.homeSlug}/notes/${id}` : `/api/inbox/${id}`;
-    fetch(url, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ attachments }),
-    }).catch(() => {});
-  };
-  // A note's displayed tags are derived entirely from `links` (see
+  // A note's displayed tags are derived entirely from its links (see
   // `enrichNote`/`resolveTags`) — any number of "@" projects and "#"
-  // section/block refs can coexist, so adding/removing one tag always merges
-  // into (or filters out of) the existing arrays rather than replacing them
-  // wholesale.
-  const emptyLinks: NoteLinks = { projectIds: [], refs: [] };
-  const withoutTag = (links: NoteLinks, kind: "project" | "section" | "block", tagId: string): NoteLinks =>
-    kind === "project"
-      ? { ...links, projectIds: links.projectIds.filter((id) => id !== tagId) }
-      : { ...links, refs: links.refs.filter((r) => r.id !== tagId) };
-  const withTag = (links: NoteLinks, target: MentionTarget): NoteLinks =>
-    target.kind === "project"
-      ? { ...links, projectIds: links.projectIds.includes(target.id) ? links.projectIds : [...links.projectIds, target.id] }
-      : {
-          ...links,
-          refs: [
-            ...links.refs.filter((r) => r.id !== target.id),
-            { kind: target.kind, id: target.id, projectId: target.projectId as string, label: target.label },
-          ],
-        };
-  const removeNoteTag = (id: string, kind: "project" | "section" | "block", tagId: string) => {
-    if (!activeProjectSlug) return;
-    const note = notesData.find((n) => n.id === id);
-    if (!note) return;
-    const links = withoutTag(note.links ?? emptyLinks, kind, tagId);
-    const bucket = kind === "section" && note.bucket === tagId ? null : note.bucket;
-    setNotesData((prev) => prev.map((n) => (n.id === id ? { ...n, bucket, links } : n)));
-    fetch(noteActionUrl(note), {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bucket, links }),
-    }).catch(() => {});
+  // section/block tags can coexist, so adding/removing one tag only ever
+  // adds or removes that tag's links (`withTag`/`withoutTag`).
+  const removeNoteTag = (id: string, kind: ResolvedTag["kind"], tagId: string) => {
+    const note = noteById(id);
+    if (note) patchNote(id, { links: withoutTag(note.links, kind, tagId) });
   };
-  const removeInboxTag = (id: string, kind: "project" | "section" | "block", tagId: string) => {
-    const item = inboxItems.find((i) => i.id === id);
-    if (!item) return;
-    const links = withoutTag(item.links ?? emptyLinks, kind, tagId);
-    setInboxItems((prev) => prev.map((i) => (i.id === id ? { ...i, links } : i)));
-    const url = item.homeSlug ? `/api/projects/${item.homeSlug}/notes/${id}` : `/api/inbox/${id}`;
-    fetch(url, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ links }),
-    }).catch(() => {});
+  // The expanded note view's `TagPicker` — the same "@"/"#" tagging the
+  // composer offers, just for a note that's already been captured.
+  const addNoteTag = (id: string, target: MentionTarget) => {
+    const note = noteById(id);
+    if (note) patchNote(id, { links: withTag(note.links, target) });
   };
 
-  // The expanded note/inbox-item view's `TagPicker` — the same "@"/"#"
-  // tagging the composer offers, just for a note that's already been
-  // captured. Merges the newly picked target into whatever tags the note
-  // already carries, so tagging both a project and a section (in either
-  // order, or several of either) never drops an earlier one.
-  const addNoteTag = (id: string, target: MentionTarget) => {
-    if (!activeProjectSlug) return;
-    const note = notesData.find((n) => n.id === id);
-    if (!note) return;
-    const links = withTag(note.links ?? emptyLinks, target);
-    const bucket = target.kind === "section" && target.projectId === activeProjectId ? target.id : note.bucket;
-    setNotesData((prev) => prev.map((n) => (n.id === id ? { ...n, bucket, links } : n)));
-    fetch(noteActionUrl(note), {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ bucket, links }),
-    }).catch(() => {});
-  };
-  const addInboxTag = (id: string, target: MentionTarget) => {
-    const item = inboxItems.find((i) => i.id === id);
-    if (!item) return;
-    const links = withTag(item.links ?? emptyLinks, target);
-    setInboxItems((prev) => prev.map((i) => (i.id === id ? { ...i, links } : i)));
-    const url = item.homeSlug ? `/api/projects/${item.homeSlug}/notes/${id}` : `/api/inbox/${id}`;
-    const body = item.homeSlug ? { links, bucket: target.kind === "section" ? target.id : undefined } : { links };
-    fetch(url, {
-      method: "PATCH",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify(body),
-    }).catch(() => {});
+  // What a comment key names: a note or alt version as a whole, or else a
+  // block in the active project's draft.
+  const placeFor = (key: string): Ref | null => {
+    if (noteById(key) || Object.values(variantsData).some((list) => list.some((v) => v.id === key))) return { id: key };
+    return activeProjectId ? { id: activeProjectId, block: key } : null;
   };
 
   // Resolving a comment removes it outright — there's no unresolve/restore
@@ -501,87 +360,51 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
   // in it: a target with any entry in `commentsData` always renders its box
   // (see `DraftDocument`/`BlockVersionEditor`/`NoteDetail`), with no close
   // affordance, so resolving down to zero comments is what makes it
-  // disappear. `targetId` works identically whether it's a block, a
-  // section (= a heading block's id), or a note id — see `Comment` in
-  // `types.ts`.
-  const resolveComment = (targetId: string, id: string) => {
-    if (!activeProjectSlug) return;
-    setCommentsData((prev) => ({
-      ...prev,
-      [targetId]: (prev[targetId] || []).filter((c) => c.id !== id),
-    }));
-    fetch(`/api/projects/${activeProjectSlug}/comments/${id}`, { method: "DELETE" }).catch(() => {});
+  // disappear. Works the same whether `key` is a block, a section (= a
+  // heading block's id), a note or an alt version.
+  const resolveComment = (_key: string, id: string) => {
+    setComments((prev) => prev.filter((c) => c.id !== id));
+    fetch(`/api/comments/${id}`, { method: "DELETE" }).catch(() => {});
   };
 
-  const addReply = (targetId: string) => {
-    const raw = (replyDrafts[targetId] || "").trim();
-    if (!raw || !activeProjectSlug) return;
-    setReplyDraft(targetId, "");
-    fetch(`/api/projects/${activeProjectSlug}/comments`, {
+  const addReply = (key: string) => {
+    const raw = (replyDrafts[key] || "").trim();
+    const on = placeFor(key);
+    if (!raw || !on) return;
+    setReplyDraft(key, "");
+    fetch("/api/comments", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ targetId, text: raw }),
+      body: JSON.stringify({ on, text: raw }),
     })
       .then((res) => res.json())
       .then((comment: Comment) => {
-        setCommentsData((prev) => ({ ...prev, [targetId]: [...(prev[targetId] || []), comment] }));
-      })
-      .catch(() => {});
-  };
-
-  // Global counterparts of `resolveComment`/`addReply`, for raw Inbox
-  // captures — same optimistic-update/fire-and-forget shape, just against
-  // `/api/inbox/comments` instead of a project's own comments endpoint.
-  const resolveInboxComment = (targetId: string, id: string) => {
-    setInboxCommentsData((prev) => ({
-      ...prev,
-      [targetId]: (prev[targetId] || []).filter((c) => c.id !== id),
-    }));
-    fetch(`/api/inbox/comments/${id}`, { method: "DELETE" }).catch(() => {});
-  };
-
-  const addInboxReply = (targetId: string) => {
-    const raw = (replyDrafts[targetId] || "").trim();
-    if (!raw) return;
-    setReplyDraft(targetId, "");
-    fetch("/api/inbox/comments", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ targetId, text: raw }),
-    })
-      .then((res) => res.json())
-      .then((comment: Comment) => {
-        setInboxCommentsData((prev) => ({ ...prev, [targetId]: [...(prev[targetId] || []), comment] }));
+        if (comment?.id) setComments((prev) => [...prev, comment]);
       })
       .catch(() => {});
   };
 
   const swapCommentBlocks = async (idA: string, idB: string): Promise<void> => {
-    if (!activeProjectSlug) return;
+    const placeA = placeFor(idA);
+    const placeB = placeFor(idB);
+    if (!placeA || !placeB) return;
     const wasA = commentsData[idA] || [];
     const wasB = commentsData[idB] || [];
     if (wasA.length === 0 && wasB.length === 0) return;
-    setCommentsData((prev) => ({
-      ...prev,
-      [idA]: wasB.map((c) => ({ ...c, targetId: idA })),
-      [idB]: wasA.map((c) => ({ ...c, targetId: idB })),
-    }));
-    await Promise.all([
-      ...wasA.map((c) =>
-        fetch(`/api/projects/${activeProjectSlug}/comments/${c.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ targetId: idB }),
-        }).catch(() => {})
-      ),
-      ...wasB.map((c) =>
-        fetch(`/api/projects/${activeProjectSlug}/comments/${c.id}`, {
-          method: "PATCH",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ targetId: idA }),
-        }).catch(() => {})
-      ),
-    ]);
+    const moveTo = (c: Comment, on: Ref): Comment => ({
+      ...c,
+      links: [{ rel: "comment-on", to: on }, ...c.links.filter((l) => l.rel !== "comment-on")],
+    });
+    const aIds = new Set(wasA.map((c) => c.id));
+    const bIds = new Set(wasB.map((c) => c.id));
+    setComments((prev) => prev.map((c) => (aIds.has(c.id) ? moveTo(c, placeB) : bIds.has(c.id) ? moveTo(c, placeA) : c)));
+    const patch = (c: Comment, on: Ref) =>
+      fetch(`/api/comments/${c.id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ on }),
+      }).catch(() => {});
+    await Promise.all([...wasA.map((c) => patch(c, placeB)), ...wasB.map((c) => patch(c, placeA))]);
   };
 
   // A block's alt versions — side data, never entered into the shared draft
@@ -594,7 +417,7 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     fetch(`/api/projects/${activeProjectSlug}/variants`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ blockId, content, order }),
+      body: JSON.stringify({ block: blockId, content, order }),
     })
       .then((res) => res.json())
       .then((variant: BlockVariant) => {
@@ -605,9 +428,10 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
 
   const updateVariantContent = (variant: BlockVariant, content: DraftPartialBlock) => {
     if (!activeProjectSlug) return;
+    const blockId = variantBlock(variant);
     setVariantsData((prev) => ({
       ...prev,
-      [variant.blockId]: (prev[variant.blockId] || []).map((v) => (v.id === variant.id ? { ...v, content } : v)),
+      [blockId]: (prev[blockId] || []).map((v) => (v.id === variant.id ? { ...v, content } : v)),
     }));
     const timers = variantSaveTimers.current;
     const existing = timers.get(variant.id);
@@ -627,9 +451,10 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
 
   const deleteVariant = (variant: BlockVariant) => {
     if (!activeProjectSlug) return;
+    const blockId = variantBlock(variant);
     setVariantsData((prev) => ({
       ...prev,
-      [variant.blockId]: (prev[variant.blockId] || []).filter((v) => v.id !== variant.id),
+      [blockId]: (prev[blockId] || []).filter((v) => v.id !== variant.id),
     }));
     fetch(`/api/projects/${activeProjectSlug}/variants/${variant.id}`, { method: "DELETE" }).catch(() => {});
   };
@@ -655,71 +480,43 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     });
   };
 
-  // A note composed while a section's own Notes tab is open, with no
-  // explicit "#" tag typed, still files under that section — resolve its
-  // label from the live document so the implicit tag displays correctly
-  // too (see `resolveNoteLinks`), not just when picked explicitly.
-  const withImplicitTags = (targets: MentionTarget[], draftDoc: DraftBlock[], sec: SectionKey | null): MentionTarget[] => {
-    const next = [...targets];
-    if (sec && !next.some((t) => t.kind === "section" || t.kind === "block")) {
-      const section = sectionMentionTargets(draftDoc, activeProjectId as string).find((s) => s.id === sec);
-      if (section) next.push(section);
-    }
-    // A note is always filed under the project you're currently in — if it
-    // wasn't explicitly "@"-tagged elsewhere, tag it here too, so the tag
-    // always shows and cross-listing stays consistent either way.
-    if (!next.some((t) => t.kind === "project")) {
-      next.push({ kind: "project", id: activeProjectId as string, label: activeProject });
-    }
-    return next;
+  // A note captured into a section with no "#" tag typed still gets that
+  // section as its tag — resolve its label from the live document so the
+  // implicit tag displays correctly too, not just when picked explicitly.
+  const withImplicitSection = (targets: MentionTarget[], draftDoc: DraftBlock[], sec: SectionKey): MentionTarget[] => {
+    if (targets.some((t) => t.kind === "section" || t.kind === "block")) return targets;
+    const section = sectionMentionTargets(draftDoc, activeProjectId as string).find((s) => s.id === sec);
+    return section ? [...targets, section] : targets;
   };
 
-  // Every project note also lives in the global Inbox feed (`listGlobalFeed`
-  // includes every project's notes, not just explicitly "@"-tagged ones) —
-  // but `inboxItems` is only ever fetched once, at provider mount, so a note
-  // created after that would otherwise stay invisible on /inbox until a full
-  // reload. Mirroring it into local state here keeps the two in sync without
-  // a refetch.
-  const asInboxFeedItem = (note: Note, homeSlug: string): InboxItem => ({
-    id: note.id,
-    body: note.body,
-    time: note.time,
-    resolved: note.resolved,
-    attachments: note.attachments,
-    links: note.links,
-    homeSlug,
-  });
+  const addNoteToList = (note: Note) => setNotes((prev) => [...prev, note]);
 
-  const registerCreatedNote = (note: Note | InboxItem, projectSlug?: string) => {
-    if (projectSlug) {
-      if (projectSlug === activeProjectSlug) setNotesData((prev) => [...prev, note as Note]);
-      setInboxItems((prev) => [...prev, asInboxFeedItem(note as Note, projectSlug)]);
-    } else {
-      setInboxItems((prev) => [...prev, note as InboxItem]);
-    }
+  const postNote = (body: DraftPartialBlock[], links: Note["links"], attachments: Attachment[]) => {
+    fetch("/api/notes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ body, links, attachments }),
+    })
+      .then((res) => res.json())
+      .then((note: Note) => {
+        if (note?.id) addNoteToList(note);
+      })
+      .catch(() => {});
   };
 
-  const addItem = (draftDoc: DraftBlock[]) => {
+  // The project panel's composer: a note is always filed under the project
+  // in view, and under the first "#" section of it that was tagged.
+  const addItem = () => {
     const raw = newNoteDraft.trim();
-    if (!raw || !activeProjectSlug) return;
-    const targets = withImplicitTags(newNoteLinks, draftDoc, null);
-    const bucket = targets.find((t) => t.kind === "section" && t.projectId === activeProjectId)?.id ?? null;
-    const links = resolveNoteLinks(targets);
+    if (!raw || !activeProjectId) return;
+    const targets = newNoteLinks;
+    const section = targets.find((t) => t.kind === "section" && t.projectId === activeProjectId)?.id ?? null;
+    const links = linksForNewNote(targets, { id: activeProjectId, label: activeProject, section });
     const attachments = newNoteAttachments;
     setNewNoteDraft("");
     setNewNoteLinks([]);
     setNewNoteAttachments([]);
-    fetch(`/api/projects/${activeProjectSlug}/notes`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body: parseMarkdownToBlocks(raw), bucket, links, attachments }),
-    })
-      .then((res) => res.json())
-      .then((note: Note) => {
-        setNotesData((prev) => [...prev, note]);
-        setInboxItems((prev) => [...prev, asInboxFeedItem(note, activeProjectSlug)]);
-      })
-      .catch(() => {});
+    postNote(parseMarkdownToBlocks(raw), links, attachments);
   };
 
   // For capturing a note straight from a block's expanded view — filed
@@ -729,71 +526,50 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     sec: SectionKey,
     text: string,
     draftDoc: DraftBlock[],
-    links: MentionTarget[] = [],
+    targets: MentionTarget[] = [],
     attachments: Attachment[] = []
   ) => {
     const raw = text.trim();
-    if (!raw || !activeProjectSlug) return;
-    const targets = withImplicitTags(links, draftDoc, sec);
-    fetch(`/api/projects/${activeProjectSlug}/notes`, {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body: parseMarkdownToBlocks(raw), bucket: sec, links: resolveNoteLinks(targets), attachments }),
-    })
-      .then((res) => res.json())
-      .then((note: Note) => {
-        setNotesData((prev) => [...prev, note]);
-        setInboxItems((prev) => [...prev, asInboxFeedItem(note, activeProjectSlug)]);
-      })
-      .catch(() => {});
+    if (!raw || !activeProjectId) return;
+    const links = linksForNewNote(withImplicitSection(targets, draftDoc, sec), { id: activeProjectId, label: activeProject, section: sec });
+    postNote(parseMarkdownToBlocks(raw), links, attachments);
   };
 
+  // The Inbox composer: a capture is filed nowhere; its tags are all
+  // `about` links.
   const addInboxItem = () => {
     const raw = newInboxDraft.trim();
     if (!raw) return;
-    const links = resolveNoteLinks(newInboxLinks);
+    const links = linksForNewNote(newInboxLinks, null);
     const attachments = newInboxAttachments;
     setNewInboxDraft("");
     setNewInboxLinks([]);
     setNewInboxAttachments([]);
-    fetch("/api/inbox", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ body: parseMarkdownToBlocks(raw), links, attachments }),
-    })
-      .then((res) => res.json())
-      .then((item: InboxItem) => setInboxItems((prev) => [...prev, item]))
-      .catch(() => {});
+    postNote(parseMarkdownToBlocks(raw), links, attachments);
   };
-
-  const addRestoredNote = (n: Note) => setNotesData((prev) => [...prev, n]);
-  const addRestoredInboxItem = (i: InboxItem) => setInboxItems((prev) => [...prev, i]);
 
   const projectFor = (id: string): ProjectLookup | undefined => {
     const p = projectsList.find((p) => p.id === id);
     return p ? { slug: p.slug, title: p.title } : undefined;
   };
   const enrichNote = (n: Note): EnrichedNote => ({ ...n, tags: resolveTags(n.links, projectFor) });
-  const enrichInboxItem = (i: InboxItem): EnrichedInboxItem => ({ ...i, tags: resolveTags(i.links, projectFor) });
 
-  // Newest-first: new notes are appended to notesData, so reverse it for display.
-  const notesDesc = [...notesData].reverse().map(enrichNote);
-
-  const inboxItemsDesc = [...inboxItems].reverse().map(enrichInboxItem);
+  // Newest-first: notes are kept oldest-first (new ones are appended), so
+  // reverse for display.
+  const notesDesc = activeProjectId
+    ? notes.filter((n) => isListedIn(n.links, activeProjectId)).reverse().map(enrichNote)
+    : [];
+  const feedDesc = [...notes].reverse().map(enrichNote);
 
   const value: WritingOSState = {
-    notesData,
+    notes,
     commentsData,
-    inboxCommentsData,
-    resolveInboxComment,
-    addInboxReply,
     variantsData,
     addVariant,
     updateVariantContent,
     deleteVariant,
     reorderVariants,
     swapCommentBlocks,
-    inboxItems,
     activeProject,
     setActiveProject,
     activeProjectSlug,
@@ -832,17 +608,11 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     openExpanded,
     closeExpanded,
     toggleNoteResolved,
-    toggleInboxResolved,
     deleteNote,
-    deleteInboxItem,
     updateNoteBody,
-    updateInboxBody,
     setNoteAttachmentTranscription,
-    setInboxAttachmentTranscription,
     removeNoteTag,
-    removeInboxTag,
     addNoteTag,
-    addInboxTag,
     setPanelMode,
     resolveComment,
     setReplyDraft,
@@ -850,16 +620,13 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     setNewNoteDraft,
     addItem,
     addNoteToSection,
-    registerCreatedNote,
+    addNoteToList,
     setNewInboxDraft,
     addInboxItem,
-    addRestoredNote,
-    addRestoredInboxItem,
     setDocMode,
     enrichNote,
-    enrichInboxItem,
     notesDesc,
-    inboxItemsDesc,
+    feedDesc,
   };
 
   return <WritingOSContext.Provider value={value}>{children}</WritingOSContext.Provider>;

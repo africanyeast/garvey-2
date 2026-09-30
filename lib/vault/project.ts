@@ -1,5 +1,6 @@
-import { SHARED_FIELDS, newId, toProject, type Link, type Thing } from "@/lib/store";
-import { liveProjectBySlug, projectContents, setLegacy, vault } from "./store";
+import { SHARED_FIELDS, newId, type Link, type Thing } from "@/lib/store";
+import { liveProjectBySlug, projectContents, vault } from "./store";
+import { toProject } from "./shapes";
 import { slugify } from "./slug";
 import type { Project, TrashedProject } from "@/app/lib/writing-os/types";
 import { projectDisplayTitle } from "@/app/lib/writing-os/types";
@@ -33,7 +34,7 @@ function writeProject(t: Thing, p: Project): Thing {
 }
 
 async function liveSlugs(): Promise<Set<string>> {
-  const { store } = await vault();
+  const store = await vault();
   return new Set((await store.list({ kind: "project" })).map((p) => p.header.slug as string));
 }
 
@@ -48,29 +49,22 @@ function uniqueSlug(base: string, taken: Set<string>, except?: string): string {
   return slug;
 }
 
-/** A project's stable id never changes, but a note's stored `NoteLinks`
- * still has to translate id ↔ slug both ways — into a slug to build a
- * link/URL, and (for legacy notes tagged before ids existed) from a slug
- * back to whatever id that project now has. One map, built fresh per call
- * so a rename that happened moments ago is always reflected. */
-export async function projectSlugToIdMap(): Promise<Map<string, string>> {
-  const projects = await listProjects();
-  return new Map(projects.map((p) => [p.slug, p.id]));
-}
-
-export async function listProjectSlugs(): Promise<string[]> {
-  const { views } = await vault();
-  return views.listProjectSlugs();
+/** Sidebar order: a manual `order` if the project has been dragged,
+ * otherwise its creation time; higher first. */
+function orderKey(p: Project): number {
+  return p.order ?? Date.parse(p.createdAt) ?? 0;
 }
 
 export async function listProjects(): Promise<Project[]> {
-  const { views } = await vault();
-  return views.listProjects();
+  const store = await vault();
+  return (await store.list({ kind: "project" }))
+    .map(toProject)
+    .sort((a, b) => orderKey(b) - orderKey(a) || a.slug.localeCompare(b.slug));
 }
 
 export async function getProject(slug: string): Promise<Project | null> {
-  const { views } = await vault();
-  return views.getProject(slug);
+  const p = await liveProjectBySlug(await vault(), slug);
+  return p ? toProject(p) : null;
 }
 
 export async function createProject(input: {
@@ -79,7 +73,7 @@ export async function createProject(input: {
   agenda?: string;
   goal?: string;
 }): Promise<Project> {
-  const { store } = await vault();
+  const store = await vault();
   // A brand-new project stays untitled (no fake "Untitled" title stored)
   // until the user actually sets one, or closes the brief without doing so
   // (see `finalizeUntitledProject`). Its slug still needs *something*, so it
@@ -103,25 +97,14 @@ export async function createProject(input: {
   return toProject(t);
 }
 
-// Trashes the project together with everything that used to live in its
-// folder (its notes, comments, alt versions, threads), each marked
-// `trashed_with` it so restore brings back exactly that set. Nothing is
-// destroyed. `legacy.dir_name` is the trash list's key for restore, unique
-// among trashed projects the way the old trash folder names were.
+// Trashes the project together with its contents (its notes, alt
+// versions, threads, and the comments on them and on its draft), each
+// marked `trashed_with` it so restore brings back exactly that set.
+// Nothing is destroyed.
 export async function deleteProject(slug: string): Promise<boolean> {
-  const { store } = await vault();
+  const store = await vault();
   const p = await liveProjectBySlug(store, slug);
   if (!p) return false;
-
-  const taken = new Set(
-    (await store.list({ kind: "project", trashed: true })).map((t) => (t.header.legacy as { dir_name?: string })?.dir_name)
-  );
-  let dirName = `project-${slug}`;
-  let n = 2;
-  while (taken.has(dirName)) {
-    dirName = `project-${slug}-${n}`;
-    n += 1;
-  }
 
   const at = new Date().toISOString();
   for (const t of await projectContents(store, p.header.id)) {
@@ -139,7 +122,6 @@ export async function deleteProject(slug: string): Promise<boolean> {
     p.header.id,
     (x) => {
       x.header.trashed_at = at;
-      setLegacy(x, "dir_name", dirName);
       return x;
     },
     { touch: false }
@@ -150,12 +132,10 @@ export async function deleteProject(slug: string): Promise<boolean> {
 /** Brings a trashed project and everything trashed with it back. If its
  * slug has been taken by a new project in the meantime, the restored one is
  * uniquified the same way `createProject` uniquifies a brand-new one. */
-export async function restoreProject(dirName: string): Promise<Project | null> {
-  const { store } = await vault();
-  const p = (await store.list({ kind: "project", trashed: true })).find(
-    (t) => (t.header.legacy as { dir_name?: string })?.dir_name === dirName
-  );
-  if (!p) return null;
+export async function restoreProject(id: string): Promise<Project | null> {
+  const store = await vault();
+  const p = await store.get(id);
+  if (!p || p.header.kind !== "project" || p.header.trashed_at === null) return null;
   const slug = uniqueSlug(p.header.slug as string, await liveSlugs());
 
   for (const t of await projectContents(store, p.header.id, { trashedWith: true })) {
@@ -167,7 +147,6 @@ export async function restoreProject(dirName: string): Promise<Project | null> {
       x.header.trashed_at = null;
       x.header.trashed_with = null;
       x.header.slug = slug;
-      setLegacy(x, "dir_name", undefined);
       return x;
     },
     { touch: false }
@@ -175,9 +154,16 @@ export async function restoreProject(dirName: string): Promise<Project | null> {
   return restored ? toProject(restored) : null;
 }
 
+/** Most recently trashed first. */
 export async function listTrashedProjects(): Promise<TrashedProject[]> {
-  const { views } = await vault();
-  return views.listTrashedProjects();
+  const store = await vault();
+  return (await store.list({ kind: "project", trashed: true }))
+    .map((p) => ({
+      id: p.header.id,
+      title: projectDisplayTitle(toProject(p)),
+      trashedAt: p.header.trashed_at as string,
+    }))
+    .sort((a, b) => b.trashedAt.localeCompare(a.trashedAt));
 }
 
 /** Persists a drag-and-drop reorder of the sidebar project list. `slugs` is
@@ -185,7 +171,7 @@ export async function listTrashedProjects(): Promise<TrashedProject[]> {
  * `order` value so newest drag-drop position sorts first, without touching
  * `updatedAt` (reordering isn't an edit). */
 export async function reorderProjects(slugs: string[]): Promise<void> {
-  const { store } = await vault();
+  const store = await vault();
   const base = Date.now();
   const projects = await store.list({ kind: "project" });
   await Promise.all(
@@ -205,7 +191,7 @@ export async function reorderProjects(slugs: string[]): Promise<void> {
 }
 
 export async function updateProject(slug: string, patch: Partial<Omit<Project, "slug">>): Promise<Project | null> {
-  const { store } = await vault();
+  const store = await vault();
   const p = await liveProjectBySlug(store, slug);
   if (!p) return null;
   const current = toProject(p);
@@ -231,7 +217,7 @@ export async function updateProject(slug: string, patch: Partial<Omit<Project, "
  * `projectDisplayTitle`) so a blank title never lingers once they've moved
  * on. A no-op if the project already has a real title. */
 export async function finalizeUntitledProject(slug: string): Promise<Project | null> {
-  const { store } = await vault();
+  const store = await vault();
   const p = await liveProjectBySlug(store, slug);
   if (!p) return null;
   const current = toProject(p);
@@ -250,7 +236,7 @@ export async function finalizeUntitledProject(slug: string): Promise<Project | n
  * copy, so the duplicate points only at itself. Copied things keep their
  * own timestamps. */
 export async function duplicateProject(slug: string): Promise<Project | null> {
-  const { store } = await vault();
+  const store = await vault();
   const src = await liveProjectBySlug(store, slug);
   if (!src) return null;
   const source = toProject(src);
@@ -319,7 +305,7 @@ export async function duplicateProject(slug: string): Promise<Project | null> {
  * project too. Returns the new timestamp, or null if the project doesn't
  * exist (e.g. it was just trashed). */
 export async function touchProject(slug: string): Promise<string | null> {
-  const { store } = await vault();
+  const store = await vault();
   const p = await liveProjectBySlug(store, slug);
   if (!p) return null;
   const t = await store.update(p.header.id, (x) => x);

@@ -1,5 +1,6 @@
-import { newId, linkOf, type Store, type Thing } from "@/lib/store";
+import { alternateOf, newId, type Store, type Thing } from "@/lib/store";
 import { liveProjectBySlug, vault } from "./store";
+import { toVariant } from "./shapes";
 import type { BlockVariant } from "@/app/lib/writing-os/types";
 import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 
@@ -14,28 +15,25 @@ async function variantIn(store: Store, slug: string, id: string): Promise<Thing 
   const project = await liveProjectBySlug(store, slug);
   const t = await store.get(id);
   if (!project || !t || t.header.kind !== "variant" || t.header.trashed_at !== null) return null;
-  return linkOf(t, "alternate-of")?.to.id === project.header.id ? t : null;
+  return alternateOf(t.header.links)?.id === project.header.id ? t : null;
 }
 
-function toVariant(t: Thing): BlockVariant {
-  return {
-    id: t.header.id,
-    blockId: linkOf(t, "alternate-of")!.to.block as string,
-    order: t.header.order as number,
-    content: JSON.parse(t.body) as DraftPartialBlock,
-  };
-}
-
+/** A project's alt versions, in order. */
 export async function listVariants(slug: string): Promise<BlockVariant[]> {
-  const { views } = await vault();
-  return views.listVariants(slug);
+  const store = await vault();
+  const p = await liveProjectBySlug(store, slug);
+  if (!p) return [];
+  return (await store.list({ kind: "variant" }))
+    .filter((v) => alternateOf(v.header.links)?.id === p.header.id)
+    .map(toVariant)
+    .sort((a, b) => a.order - b.order || a.id.localeCompare(b.id));
 }
 
 export async function createVariant(
   slug: string,
-  input: { blockId: string; content: DraftPartialBlock; order: number }
+  input: { block: string; content: DraftPartialBlock; order: number }
 ): Promise<BlockVariant> {
-  const { store } = await vault();
+  const store = await vault();
   const project = await liveProjectBySlug(store, slug);
   if (!project) throw new Error(`no project ${slug}`);
   const id = newId();
@@ -43,7 +41,7 @@ export async function createVariant(
     kind: "variant",
     id,
     body: JSON.stringify({ ...input.content, id }, null, 2),
-    links: [{ rel: "alternate-of", to: { id: project.header.id, block: input.blockId } }],
+    links: [{ rel: "alternate-of", to: { id: project.header.id, block: input.block } }],
     fields: { order: input.order },
   });
   return toVariant(t);
@@ -52,28 +50,20 @@ export async function createVariant(
 export async function updateVariant(
   slug: string,
   id: string,
-  patch: { content?: DraftPartialBlock; order?: number; blockId?: string }
+  patch: { content?: DraftPartialBlock; order?: number }
 ): Promise<BlockVariant | null> {
-  const { store } = await vault();
-  const current = await variantIn(store, slug, id);
-  if (!current) return null;
-  const projectId = linkOf(current, "alternate-of")!.to.id;
+  const store = await vault();
+  if (!(await variantIn(store, slug, id))) return null;
   const t = await store.update(id, (t) => {
     if (patch.content !== undefined) t.body = JSON.stringify(patch.content, null, 2);
     if (patch.order !== undefined) t.header.order = patch.order;
-    if (patch.blockId !== undefined) {
-      t.header.links = [
-        { rel: "alternate-of", to: { id: projectId, block: patch.blockId } },
-        ...t.header.links.filter((l) => l.rel !== "alternate-of"),
-      ];
-    }
     return t;
   });
   return t ? toVariant(t) : null;
 }
 
 export async function deleteVariant(slug: string, id: string): Promise<boolean> {
-  const { store } = await vault();
+  const store = await vault();
   if (!(await variantIn(store, slug, id))) return false;
   return store.delete(id);
 }

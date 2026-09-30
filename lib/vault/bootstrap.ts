@@ -27,8 +27,8 @@ let bootstrapped = false;
  *
  * A vault with content but no VERSION file is a v1 vault (one folder per
  * project). This code must never write into one — that would scatter
- * `things/` into the old tree — so it refuses until the migration has been
- * run and swapped in (artifacts/V2_SPEC.md, Phase 3).
+ * `things/` into the old tree — so it refuses until it has been migrated
+ * (artifacts/V2_SPEC.md, Phase 3).
  */
 export async function ensureVault() {
   if (bootstrapped) return;
@@ -41,7 +41,7 @@ export async function ensureVault() {
     const entries = (await readdir(VAULT_DIR)).filter((n) => !n.startsWith("."));
     if (entries.length > 0) {
       throw new Error(
-        `${VAULT_DIR} is a v1 vault (no VERSION file). Run scripts/migrate-vault.ts and swap vault.next/ in first (artifacts/V2_SPEC.md, Phase 3).`
+        `${VAULT_DIR} is a v1 vault (no VERSION file). Migrate it first: scripts/migrate-vault.ts, in git history at commit 3b73a35 (artifacts/V2_SPEC.md, Phase 3).`
       );
     }
     await writeFile(VERSION_PATH, "2\n", "utf-8");

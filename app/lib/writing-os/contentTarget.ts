@@ -1,5 +1,5 @@
 import type { DraftPartialBlock } from "./schema";
-import type { NoteLinks } from "./types";
+import type { Link } from "./types";
 
 /**
  * Where AI-produced content should land. Three kinds — "current" (wherever
@@ -23,11 +23,13 @@ export type ContentTarget =
     }
   | {
       kind: "note";
-      /** Omitted files the note as a standalone Inbox capture rather than
-       * under a project. */
+      /** The project the note will be filed under, for display; the
+       * filing itself is its `filed-under` link. Omitted for an Inbox
+       * capture. */
       projectId?: string;
       projectSlug?: string;
-      links?: NoteLinks;
+      /** The new note's links (see `linksForNewNote`). */
+      links?: Link[];
     };
 
 /** One candidate placement the agent proposed: the formatted content itself,

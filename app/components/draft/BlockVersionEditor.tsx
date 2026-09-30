@@ -48,7 +48,8 @@ const createEnterSplitExtension = (onSplit: (before: string, after: string) => v
  * which content it's seeded from and which id its comments key against.
  * Comments work identically for an alt as for the primary because nothing
  * about the comment system cares whether `blockId` is a live BlockNote id
- * or a `BlockVariant` id — see `types.ts`.
+ * or a `BlockVariant` id — see `commentKey` in `types.ts` (the context
+ * works out which one a key names when it posts a comment).
  *
  * Whole-block comments only, not selection comments: those are BlockNote's
  * own native comment marks now (see `editor-context.tsx`'s

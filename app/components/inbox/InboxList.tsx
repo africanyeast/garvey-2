@@ -7,10 +7,10 @@ import { IntentComposer } from "@/app/components/shared/IntentComposer";
 
 export function InboxList() {
   const {
-    inboxItemsDesc,
+    feedDesc,
     openExpanded,
-    toggleInboxResolved,
-    removeInboxTag,
+    toggleNoteResolved,
+    removeNoteTag,
     newInboxDraft,
     setNewInboxDraft,
     newInboxLinks,
@@ -18,9 +18,9 @@ export function InboxList() {
     newInboxAttachments,
     setNewInboxAttachments,
     addInboxItem,
-    deleteInboxItem,
-    inboxCommentsData,
-    setInboxAttachmentTranscription,
+    deleteNote,
+    commentsData,
+    setNoteAttachmentTranscription,
   } = useWritingOS();
 
   // The Inbox isn't scoped to one project, so "#" here searches sections and
@@ -34,7 +34,7 @@ export function InboxList() {
       </div>
 
       <div className="flex-1 overflow-y-auto overscroll-contain pt-[16px] flex flex-col divide-y divide-[var(--border-default)]">
-        {inboxItemsDesc.map((item) => (
+        {feedDesc.map((item) => (
           <NoteRow
             key={item.id}
             blocks={item.body}
@@ -43,11 +43,11 @@ export function InboxList() {
             resolved={item.resolved}
             attachments={item.attachments}
             onOpen={() => openExpanded("inbox", item.id)}
-            onToggleResolved={() => toggleInboxResolved(item.id)}
-            onRemoveTag={(t) => removeInboxTag(item.id, t.kind, t.tagId)}
-            onDelete={() => deleteInboxItem(item.id)}
-            commentCount={item.homeSlug ? undefined : (inboxCommentsData[item.id] || []).length}
-            onSetTranscription={(url, t) => setInboxAttachmentTranscription(item.id, url, t)}
+            onToggleResolved={() => toggleNoteResolved(item.id)}
+            onRemoveTag={(t) => removeNoteTag(item.id, t.kind, t.tagId)}
+            onDelete={() => deleteNote(item.id)}
+            commentCount={(commentsData[item.id] || []).length}
+            onSetTranscription={(url, t) => setNoteAttachmentTranscription(item.id, url, t)}
           />
         ))}
       </div>

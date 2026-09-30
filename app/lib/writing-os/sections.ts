@@ -33,10 +33,10 @@ export function nearestSectionId(document: DraftBlock[], blockId: string): strin
  * affordance, expressed as the same two primitives (`removeBlocks` +
  * `insertBlocks`) BlockNote's own internal `moveBlocks` command composes,
  * since the public editor API doesn't expose a move-by-id method directly. */
-export function moveBlockTo(editor: DraftEditor, dragId: string, targetId: string, placement: "before" | "after" = "before") {
-  if (dragId === targetId) return;
+export function moveBlockTo(editor: DraftEditor, dragId: string, anchorId: string, placement: "before" | "after" = "before") {
+  if (dragId === anchorId) return;
   const block = editor.getBlock(dragId);
   if (!block) return;
   editor.removeBlocks([dragId]);
-  editor.insertBlocks([block], targetId, placement);
+  editor.insertBlocks([block], anchorId, placement);
 }

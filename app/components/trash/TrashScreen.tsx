@@ -2,20 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { RotateCcw, Trash2 } from "lucide-react";
-import type { Project, TrashedProject, TrashedNote, TrashedInboxItem, Attachment } from "@/app/lib/writing-os/types";
-import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
+import type { Note, Project, TrashedProject, TrashedNote } from "@/app/lib/writing-os/types";
 import { AttachmentList } from "@/app/components/shared/AttachmentPreview";
 import { BlockTextPreview } from "@/app/components/shared/BlockTextPreview";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 
 type TrashTab = "projects" | "inbox";
-
-// Notes and inbox items are the same idea everywhere else in this app (see
-// `types.ts`), so trash treats them as one list too — a deleted note isn't
-// a different kind of thing just because it used to live under a project.
-type TrashedCapture =
-  | { origin: "note"; id: string; projectSlug: string; body: DraftPartialBlock[]; attachments?: Attachment[]; trashedAt: string }
-  | { origin: "inbox"; id: string; body: DraftPartialBlock[]; attachments?: Attachment[]; trashedAt: string };
 
 function formatDate(iso: string) {
   if (!iso) return "";
@@ -23,50 +15,34 @@ function formatDate(iso: string) {
 }
 
 export function TrashScreen() {
-  const { addProjectToList, activeProjectSlug, addRestoredNote, addRestoredInboxItem } = useWritingOS();
+  const { addProjectToList, addNoteToList } = useWritingOS();
   const [tab, setTab] = useState<TrashTab>("projects");
   const [projects, setProjects] = useState<TrashedProject[]>([]);
-  const [captures, setCaptures] = useState<TrashedCapture[]>([]);
+  // A trashed note is one kind of thing, whether it was filed under a
+  // project or was an inbox capture: restoring it puts it back where its
+  // links say.
+  const [captures, setCaptures] = useState<TrashedNote[]>([]);
 
   useEffect(() => {
     fetch("/api/trash").then((res) => res.json()).then(setProjects).catch(() => {});
-    Promise.all([
-      fetch("/api/trash/notes").then((res) => res.json()) as Promise<TrashedNote[]>,
-      fetch("/api/trash/inbox").then((res) => res.json()) as Promise<TrashedInboxItem[]>,
-    ])
-      .then(([notes, inboxItems]) => {
-        const merged: TrashedCapture[] = [
-          ...notes.map((n): TrashedCapture => ({ origin: "note", id: n.id, projectSlug: n.projectSlug, body: n.body, attachments: n.attachments, trashedAt: n.trashedAt })),
-          ...inboxItems.map((i): TrashedCapture => ({ origin: "inbox", id: i.id, body: i.body, attachments: i.attachments, trashedAt: i.trashedAt })),
-        ];
-        merged.sort((a, b) => b.trashedAt.localeCompare(a.trashedAt));
-        setCaptures(merged);
-      })
-      .catch(() => {});
+    fetch("/api/trash/notes").then((res) => res.json()).then(setCaptures).catch(() => {});
   }, []);
 
   const restoreProject = (project: TrashedProject) => {
-    setProjects((prev) => prev.filter((p) => p.dirName !== project.dirName));
-    fetch(`/api/trash/projects/${project.dirName}`, { method: "POST" })
+    setProjects((prev) => prev.filter((p) => p.id !== project.id));
+    fetch(`/api/trash/projects/${project.id}`, { method: "POST" })
       .then((res) => res.json())
       .then((restored: Project) => addProjectToList(restored))
       .catch(() => {});
   };
-  const restoreCapture = (capture: TrashedCapture) => {
-    setCaptures((prev) => prev.filter((c) => !(c.origin === capture.origin && c.id === capture.id)));
-    if (capture.origin === "note") {
-      fetch(`/api/trash/notes/${capture.projectSlug}/${capture.id}`, { method: "POST" })
-        .then((res) => res.json())
-        .then((note) => {
-          if (capture.projectSlug === activeProjectSlug) addRestoredNote(note);
-        })
-        .catch(() => {});
-    } else {
-      fetch(`/api/trash/inbox/${capture.id}`, { method: "POST" })
-        .then((res) => res.json())
-        .then(addRestoredInboxItem)
-        .catch(() => {});
-    }
+  const restoreCapture = (capture: TrashedNote) => {
+    setCaptures((prev) => prev.filter((c) => c.id !== capture.id));
+    fetch(`/api/trash/notes/${capture.id}`, { method: "POST" })
+      .then((res) => res.json())
+      .then((note: Note) => {
+        if (note?.id) addNoteToList(note);
+      })
+      .catch(() => {});
   };
 
   const tabs: { key: TrashTab; label: string; count: number }[] = [
@@ -100,7 +76,7 @@ export function TrashScreen() {
           <>
             {projects.length === 0 && <div className="text-xs font-medium text-[var(--text-muted)] py-[16px]">No trashed projects.</div>}
             {projects.map((project) => (
-              <div key={project.dirName} className="flex items-center gap-[10px] py-[13px]">
+              <div key={project.id} className="flex items-center gap-[10px] py-[13px]">
                 <Trash2 size={15} className="shrink-0 text-[var(--text-muted)]" />
                 <span className="text-[13px] font-semibold text-[var(--text-primary)] flex-1 truncate">{project.title}</span>
                 {project.trashedAt && <span className="text-xs font-medium text-[var(--text-muted)] shrink-0">{formatDate(project.trashedAt)}</span>}
@@ -120,7 +96,7 @@ export function TrashScreen() {
           <>
             {captures.length === 0 && <div className="text-xs font-medium text-[var(--text-muted)] py-[16px]">No trashed inbox items.</div>}
             {captures.map((capture) => (
-              <div key={`${capture.origin}-${capture.id}`} className="flex items-start gap-[10px] py-[13px]">
+              <div key={capture.id} className="flex items-start gap-[10px] py-[13px]">
                 <Trash2 size={15} className="shrink-0 mt-[2px] text-[var(--text-muted)]" />
                 <div className="min-w-0 flex-1">
                   <p className="font-serif text-[15px] leading-[1.6] text-[var(--text-primary)] break-words m-[0] line-clamp-2">

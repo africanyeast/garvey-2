@@ -39,7 +39,7 @@ export function PanelComposer() {
         onLinksChange={setNewNoteLinks}
         attachments={newNoteAttachments}
         onAttachmentsChange={setNewNoteAttachments}
-        onSubmit={() => addItem(draftDoc)}
+        onSubmit={addItem}
         placeholder="Add a note... @ a project, # a section or block"
         mentionTargets={mentionTargets}
       />
