@@ -1,8 +1,9 @@
 "use client";
 
-import { createContext, useContext, useRef, useState, type ReactNode } from "react";
+import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useCreateBlockNote } from "@blocknote/react";
 import { draftSchema, type DraftBlock, type DraftEditor, type DraftPartialBlock } from "./schema";
+import { WritingAssistExtension } from "./writingAssist";
 
 /**
  * The single BlockNote editor instance for the whole draft — one document,
@@ -44,12 +45,15 @@ function seedSectionsOpen(document: DraftBlock[]) {
 export function DraftEditorProvider({
   children,
   projectSlug,
+  projectId,
   initialDocument,
 }: {
   children: ReactNode;
   projectSlug: string;
+  projectId: string;
   initialDocument: DraftPartialBlock[];
 }) {
+
   // The native BlockNote CommentsExtension (selection-anchored comments via
   // ThreadStore) is disabled for now — it's the suspected source of a
   // browser-freezing crash even after removing its toolbar entry, and the
@@ -61,9 +65,16 @@ export function DraftEditorProvider({
     {
       schema: draftSchema,
       initialContent: initialDocument,
+      // Ghost text and next block — the draft's editor only, not notes or
+      // transcripts.
+      extensions: [WritingAssistExtension({ projectId })],
     },
     [],
   );
+  // The editor is created once; keep the assist pointed at the project.
+  useEffect(() => {
+    editor.getExtension(WritingAssistExtension)?.setProjectId(projectId);
+  }, [editor, projectId]);
   seedSectionsOpen(editor.document);
   const [doc, setDoc] = useState<DraftBlock[]>(editor.document);
   const [savedAt, setSavedAt] = useState<string | null>(null);

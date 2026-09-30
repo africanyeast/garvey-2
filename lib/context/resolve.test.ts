@@ -20,6 +20,7 @@ const draftP = [
     children: [
       { id: "bA1", type: "paragraph", content: text("Alpha one. More of alpha one."), children: [] },
       { id: "bA2", type: "paragraph", content: text("Alpha two."), children: [] },
+      { id: "sA3", type: "section", content: text("Nested"), children: [{ id: "bA3", type: "paragraph", content: text("Deep."), children: [] }] },
     ],
   },
   { id: "sB", type: "section", content: text("Section B"), children: [{ id: "bB1", type: "paragraph", content: text("Beta one."), children: [] }] },
@@ -66,6 +67,7 @@ const N = {
   resolved: note("resolved", [fu({ id: P, block: "sA" })], { resolved: true }),
   trashed: note("trashed", [fu({ id: P, block: "sA" })], { trashed_at: "2026-09-30T01:00:00.000Z" }),
   gone: note("its section was deleted", [fu({ id: P, block: "deleted-section" })]),
+  nested: note("nested section note", [about({ id: P, block: "sA3" })]),
   capture: note("inbox capture", []),
 };
 const C = {
@@ -95,7 +97,7 @@ describe("bundle for a cursor in a section", () => {
     expect(b.items.map((x) => x.step)).toEqual([...b.items.map((x) => x.step)].sort());
     expect(b.items[0]).toMatchObject({ step: 1, kind: "style", text: "STYLE" });
     expect(idsAt(b, 2)).toEqual([P]);
-    expect(b.items.find((x) => x.step === 3)?.text).toBe("- Section A\n- Section B");
+    expect(b.items.find((x) => x.step === 3)?.text).toBe("- Section A\n- Nested\n- Section B");
     expect(idsAt(b, 4)).toEqual([N.project.header.id, N.aboutP.header.id]);
     expect(idsAt(b, 5)).toEqual([N.secA.header.id, N.secA2.header.id]);
     expect(idsAt(b, 6)).toEqual([N.blkA1.header.id, C.onA.header.id, C.onA1.header.id]);
@@ -111,7 +113,7 @@ describe("bundle for a cursor in a section", () => {
 
   test("never includes trashed or resolved things, variants, or other places", () => {
     const got = allIds(b);
-    for (const t of [N.trashed, N.resolved, C.resolved, variant, N.secB, C.onB, N.inQ, N.capture, N.gone]) {
+    for (const t of [N.trashed, N.resolved, C.resolved, variant, N.secB, C.onB, N.inQ, N.capture, N.gone, N.nested]) {
       expect(got.has(t.header.id)).toBe(false);
     }
   });
@@ -148,6 +150,15 @@ describe("isolation", () => {
     for (const x of pNotes) expect(allIds(q).has(x)).toBe(false);
     // Q's own filed note, and nothing it isn't linked to.
     expect(idsAt(q, 4)).toEqual([N.aboutP.header.id, N.inQ.header.id]);
+  });
+
+  test("a nested section gets its own material and what is linked to the section it sits in", () => {
+    const b = resolve({ thing: P, block: "bA3" });
+    expect(b.manifest.section).toEqual({ id: "sA3", title: "Nested" });
+    expect(idsAt(b, 5)).toEqual([N.secA.header.id, N.secA2.header.id, N.nested.header.id]);
+    expect(b.items.find((x) => x.id === N.secA.header.id)?.why).toBe('linked to the enclosing section "Section A"');
+    expect(idsAt(b, 6)).toEqual([C.onA.header.id]);
+    expect(documentText(b)).toBe("## Nested\n\nDeep.");
   });
 
   test("before the first section, only project-level material and the block itself", () => {

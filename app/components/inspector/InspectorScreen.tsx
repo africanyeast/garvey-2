@@ -189,7 +189,11 @@ function Runs({ openId }: { openId: string | null }) {
       {runs.map((run) => (
         <div key={run.id} className="py-[10px]">
           <div onClick={() => setOpen((o) => (o === run.id ? null : run.id))} className="flex items-baseline gap-[10px] cursor-pointer">
-            <span className="text-[13px] font-semibold text-[var(--text-primary)] flex-1">{run.plugin}</span>
+            <span className="text-[13px] font-semibold text-[var(--text-primary)] flex-1">
+              {run.plugin}
+              {run.task ? <span className="font-medium text-[var(--text-muted)]"> · {run.task}</span> : null}
+            </span>
+            {run.ms && <span className="text-xs text-[var(--text-muted)] tabular-nums">{(run.ms.run / 1000).toFixed(1)}s</span>}
             <span className="text-xs text-[var(--text-muted)]">
               {run.context ? `${run.context.items.length} item${run.context.items.length === 1 ? "" : "s"}` : "no context"}
               {run.ok ? "" : " · failed"}
@@ -199,6 +203,12 @@ function Runs({ openId }: { openId: string | null }) {
           {open === run.id && (
             <div className="pt-[10px] pl-[12px]">
               {run.error && <div className="text-xs text-[var(--text-muted)] mb-[8px]">{run.error}</div>}
+              {run.suggestion !== undefined && (
+                <div className="mb-[12px]">
+                  <div className="font-sans text-xs font-bold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-[4px]">Suggested</div>
+                  <div className="font-serif text-[15px] leading-[1.6] text-[var(--text-primary)] whitespace-pre-wrap">{run.suggestion || "(nothing)"}</div>
+                </div>
+              )}
               {run.context ? <ManifestView manifest={run.context} /> : <div className="text-xs text-[var(--text-muted)]">This plugin declares no context: it saw only its own input.</div>}
             </div>
           )}

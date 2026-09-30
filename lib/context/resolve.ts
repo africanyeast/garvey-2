@@ -101,21 +101,26 @@ export interface ContextBundle {
 
 export class ContextError extends Error {}
 
+/** Where the cursor is, in whole-document text ("draft" scope): on its
+ * own line right after the cursor's block. */
+export const CURSOR_MARK = "⟦cursor⟧";
+
 type Block = DraftPartialBlock & { id?: string; type?: string; children?: Block[] };
 
-/** Every block in document order, with the section it belongs to: the last
- * `section` block seen, as `nearestSectionId` decides on the client. */
-function walk(doc: Block[]): Array<{ block: Block; section: string | null }> {
-  const out: Array<{ block: Block; section: string | null }> = [];
+/** Every block in document order, with the section it belongs to (the
+ * last `section` block seen, as `nearestSectionId` decides on the client)
+ * and the sections it is nested inside. */
+function walk(doc: Block[]): Array<{ block: Block; section: string | null; within: string[] }> {
+  const out: Array<{ block: Block; section: string | null; within: string[] }> = [];
   let section: string | null = null;
-  const visit = (blocks: Block[]) => {
+  const visit = (blocks: Block[], within: string[]) => {
     for (const b of blocks) {
       if (b.type === "section") section = b.id ?? null;
-      out.push({ block: b, section });
-      if (b.children?.length) visit(b.children);
+      out.push({ block: b, section, within });
+      if (b.children?.length) visit(b.children, b.type === "section" && b.id ? [b.id, ...within] : within);
     }
   };
-  visit(doc);
+  visit(doc, []);
   return out;
 }
 
@@ -201,7 +206,16 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
   const blocks = walk(doc);
   const at = cursor ? blocks.find((b) => b.block.id === cursor.block) : undefined;
   const sectionId = at?.section ?? null;
-  const sectionBlock = sectionId ? blocks.find((b) => b.block.id === sectionId)?.block : undefined;
+  const sectionEntry = sectionId ? blocks.find((b) => b.block.id === sectionId) : undefined;
+  const sectionBlock = sectionEntry?.block;
+  // The cursor's section and every section it sits inside: what contains
+  // the cursor, so their material reaches it too (a nested section's
+  // parent is still where the writer is).
+  const sections = sectionId ? [sectionId, ...(sectionEntry?.within ?? [])] : [];
+  const sectionTitle = (id: string) => {
+    const b = blocks.find((x) => x.block.id === id)?.block;
+    return (b && blockPlainText(b).trim()) || id;
+  };
   const inDraft = new Set(blocks.map((b) => b.block.id).filter((id): id is string => !!id));
 
   const items: BundleItem[] = [];
@@ -246,9 +260,12 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
         continue;
       }
       const onBlock = cursor && places.find((l) => l.to.block === cursor.block);
-      const onSection = sectionId && places.find((l) => l.to.block === sectionId);
+      const onSection = places.find((l) => sections.includes(l.to.block as string));
       if (onBlock && wants.has("block-material")) items.push(make(6, `linked to this block${onBlock.label ? ` (${onBlock.label})` : ""}`));
-      else if (onSection && wants.has("section-material")) items.push(make(5, `linked to this section${onSection.label ? ` (${onSection.label})` : ""}`));
+      else if (onSection && wants.has("section-material")) {
+        const own = onSection.to.block === sectionId;
+        items.push(make(5, own ? `linked to this section (${sectionTitle(sectionId as string)})` : `linked to the enclosing section "${sectionTitle(onSection.to.block as string)}"`));
+      }
       else if (!onBlock && !onSection) {
         const gone = places.filter((l) => !inDraft.has(l.to.block as string));
         // Only when every place it is linked to is gone: a note also linked
@@ -265,7 +282,7 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
 
     // 6. Unresolved comments on this block or its section.
     if (wants.has("comments") && cursor) {
-      const here = new Set([cursor.block, ...(sectionId ? [sectionId] : [])]);
+      const here = new Set([cursor.block, ...sections]);
       for (const c of live
         .filter((t) => t.header.kind === "comment" && !(t.header.resolved as boolean | undefined))
         .sort((a, b) => a.header.id.localeCompare(b.header.id))) {
@@ -276,7 +293,7 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
           kind: "comment",
           id: c.header.id,
           title: c.body.trim().slice(0, 60),
-          why: on.block === cursor.block ? "comment on this block" : "comment on this section",
+          why: on.block === cursor.block ? "comment on this block" : on.block === sectionId ? "comment on this section" : "comment on an enclosing section",
           text: c.body.trim(),
         });
       }
@@ -293,8 +310,13 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
       text = blockPlainText(at.block);
       why = "the block the cursor is in";
     } else if (decl.draft === "draft") {
-      text = blocks.map((b) => blockMarkdown(b.block)).filter(Boolean).join("\n\n");
-      why = "the whole document";
+      // The cursor is marked, so a plugin writing "what comes next" knows
+      // where next is.
+      text = blocks
+        .map((b) => (b === at ? `${blockMarkdown(b.block)}\n\n${CURSOR_MARK}` : blockMarkdown(b.block)))
+        .filter(Boolean)
+        .join("\n\n");
+      why = "the whole document, with the cursor marked";
     } else {
       const upTo = blocks.indexOf(at);
       const parts = blocks.slice(0, upTo + 1).filter((b) => b.section === sectionId);
@@ -360,17 +382,26 @@ const HEADINGS: Partial<Record<Step, string>> = {
  * then the plugin's instruction, then brief, outline and linked material.
  * With only a style profile in the bundle this is exactly
  * `${style}\n\n${instruction}`, as before Phase 5. */
-export function renderSystem(instruction: string, bundle: ContextBundle | null): string {
+export function renderSystem(instruction: string, bundle: ContextBundle | null, steps: Step[] = [2, 3, 4, 5, 6]): string {
   const items = bundle?.items ?? [];
   const style = items.find((x) => x.kind === "style");
+  return [style?.text, instruction, renderSteps(bundle, steps)].filter((s): s is string => !!s).join("\n\n");
+}
+
+/** Steps 2–6 of a bundle as headed text, for a plugin that places some of
+ * them outside the system prompt (the writing assist puts what is linked
+ * to the cursor's place in the user message, next to the text it writes
+ * from). */
+export function renderSteps(bundle: ContextBundle | null, steps: Step[]): string {
+  const items = bundle?.items ?? [];
   const sections: string[] = [];
-  for (const step of [2, 3, 4, 5, 6] as Step[]) {
+  for (const step of steps) {
     const here = items.filter((x) => x.step === step);
-    if (!here.length) continue;
+    if (!here.length || !HEADINGS[step]) continue;
     const body = here.map((x) => (x.kind === "note" || x.kind === "comment" ? `[${x.kind}] ${x.text}` : x.text)).join("\n\n");
     sections.push(`${HEADINGS[step]}:\n${body}`);
   }
-  return [style?.text, instruction, ...sections].filter((s): s is string => !!s).join("\n\n");
+  return sections.join("\n\n");
 }
 
 /** Step 7: the document text the plugin declared, or "" if none. */

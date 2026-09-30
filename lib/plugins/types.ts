@@ -40,6 +40,17 @@ export interface PluginManifest {
    * Every part needs its permission in `permissions`, or the harness
    * refuses to run it. */
   context?: ContextDeclaration;
+  /** For a plugin that does more than one job: each task's own context,
+   * model and effort, chosen by the caller's `task` (see `runPlugin`). The
+   * top-level fields are unused for a task listed here. */
+  tasks?: Record<string, PluginTask>;
+}
+
+export interface PluginTask {
+  context: ContextDeclaration;
+  model: PluginModel;
+  effort: PluginEffort;
+  thinking: boolean;
 }
 
 /** Built by the harness (`runPlugin`), never assembled by a plugin itself —
@@ -58,6 +69,9 @@ export interface PluginResult<TData = unknown> {
   error?: string;
   /** The inspector's record of this call (`/api/plugins/runs/<runId>`). */
   runId?: string;
+  /** What the writer is shown, when it's text — kept in the inspector's
+   * record beside what was sent. */
+  suggestion?: string;
 }
 
 export interface Plugin<TInput = unknown, TData = unknown> {

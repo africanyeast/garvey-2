@@ -84,6 +84,8 @@ function DraftSideMenu() {
  */
 function DraftSlashMenu() {
   const editor = useBlockNoteEditor(draftSchema);
+  // Only the draft's editor has the writing assist.
+  const assist = editor.getExtension("wosWritingAssist") as { requestNextBlock?: () => void } | undefined;
 
   return (
     <SuggestionMenuController
@@ -100,6 +102,19 @@ function DraftSlashMenu() {
               icon: <ChevronsUpDown size={18} />,
               onItemClick: () => insertOrUpdateBlockForSlashMenu(editor, { type: "section" }),
             },
+            ...(assist?.requestNextBlock
+              ? [
+                  {
+                    key: "continue-writing",
+                    title: "Continue writing",
+                    subtext: "Suggest the next paragraph (⌃J)",
+                    aliases: ["ai", "next", "paragraph", "suggest", "write"],
+                    group: "Writing assist",
+                    icon: <Sparkles size={18} />,
+                    onItemClick: () => assist.requestNextBlock!(),
+                  },
+                ]
+              : []),
             ...getDefaultReactSlashMenuItems(editor),
           ],
           query,

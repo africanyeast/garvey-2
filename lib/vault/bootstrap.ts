@@ -16,7 +16,7 @@ const DEFAULT_STYLE_FRONTMATTER = {
   register: ["conversational", "professional", "accessible"],
 };
 
-const DEFAULT_CONFIG_YAML = `active_style: default\nplugins:\n  - contextual-suggest\n  - ocr\n`;
+const DEFAULT_CONFIG_YAML = `active_style: default\nplugins:\n  - contextual-suggest\n  - ocr\n  - insert-content\n  - writing-assist\n`;
 
 let bootstrapped = false;
 

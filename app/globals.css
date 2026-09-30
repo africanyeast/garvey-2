@@ -463,3 +463,24 @@ input {
   content: attr(data-placeholder);
   color: var(--text-muted);
 }
+
+/* Writing assist ghost text (app/lib/writing-os/writingAssist.ts): a
+ * ProseMirror widget after the cursor, never document content. */
+.wos-ghost {
+  color: var(--text-muted);
+  opacity: 0.75;
+  pointer-events: none;
+  white-space: pre-wrap;
+}
+.wos-ghost-inspect {
+  pointer-events: auto;
+  margin-left: 4px;
+  font-size: 10px;
+  vertical-align: super;
+  color: var(--text-muted);
+  text-decoration: none;
+  cursor: pointer;
+}
+.wos-ghost-inspect:hover {
+  color: var(--text-secondary);
+}

@@ -5,6 +5,7 @@ import { Minimize2, MessageCircle } from "lucide-react";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useDraftEditor } from "@/app/lib/writing-os/editor-context";
 import { BlockNoteDocument } from "@/app/components/draft/BlockNoteDocument";
+import { NextBlockCard } from "@/app/components/draft/NextBlockCard";
 import { RowIconButton } from "@/app/components/shared/RowIconButton";
 import { useBlockCommentHighlight } from "@/app/lib/writing-os/commentHighlight";
 
@@ -143,6 +144,7 @@ export function DraftDocument() {
       onMouseLeave={() => setHoverBlockId(null)}
     >
       <BlockNoteDocument editor={editor} onChange={syncDocument} />
+      <NextBlockCard editor={editor} containerRef={containerRef} />
 
       {/* A block with an active comment gets a persistent margin indicator —
        * visible without hovering, Notion-style — instead of only the

@@ -9,9 +9,14 @@ import type { ContextManifest } from "./resolve";
 export interface PluginRun {
   id: string;
   plugin: string;
+  task?: string;
   at: string;
   ok: boolean;
   error?: string;
+  /** Resolving the context, and running the plugin (the AI call). */
+  ms: { resolve: number; run: number };
+  /** What the writer was shown, when it's text. */
+  suggestion?: string;
   /** Null for a plugin that declares no context (OCR). */
   context: ContextManifest | null;
 }

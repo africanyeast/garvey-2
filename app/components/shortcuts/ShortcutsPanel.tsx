@@ -21,6 +21,15 @@ const SHORTCUT_GROUPS = [
     ],
   },
   {
+    label: "Writing assist",
+    items: [
+      { label: "Accept the suggested words", keys: "Tab" },
+      { label: "Dismiss a suggestion", keys: "Esc" },
+      { label: "Suggest the next paragraph", keys: "⌃J" },
+      { label: "Accept the paragraph", keys: "⌘↩" },
+    ],
+  },
+  {
     label: "Document",
     items: [
       { label: "Preview / Edit", keys: "⌃P" },

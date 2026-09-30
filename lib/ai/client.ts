@@ -66,6 +66,13 @@ export async function complete({ system, prompt, images, model, effort, thinking
     // mode" — a plugin call is a scoped completion, not a coding session, and
     // has no business reading this project's own agent instructions.
     settingSources: [],
+    // `tools: []` and `settingSources: []` still leave the logged-in
+    // account's claude.ai connectors (Claude Docs, Notion, Figma…) attached
+    // as MCP tools. With a large enough prompt the model reached for one
+    // (a writing-assist call tried to read a Claude Doc and failed on
+    // maxTurns). Only the servers listed here — none.
+    strictMcpConfig: true,
+    mcpServers: {},
     // Plugin calls are fire-and-forget completions, not sessions a person
     // resumes — don't clutter ~/.claude/projects/ with one transcript per
     // synonym lookup.

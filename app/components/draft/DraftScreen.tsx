@@ -72,7 +72,7 @@ export function DraftScreen({
   // reads/writes it — the main document, the side panel's block list, the
   // expanded-block panel, the preview) lives behind this one provider.
   return (
-    <DraftEditorProvider projectSlug={project.slug} initialDocument={initialDocument}>
+    <DraftEditorProvider projectSlug={project.slug} projectId={project.id} initialDocument={initialDocument}>
       {/* `key` forces a remount on project switch so title/subtitle state
        * (and the "open brief by default" state) always starts fresh for the
        * new project, instead of needing an effect to resync it. */}
