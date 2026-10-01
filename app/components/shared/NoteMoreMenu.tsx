@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { MouseEvent } from "react";
-import { EllipsisVertical, Trash2 } from "lucide-react";
+import { EllipsisVertical, Can } from "lucide-react";
 import { RowIconButton } from "@/app/components/shared/RowIconButton";
 import { DropdownMenu } from "@/app/components/shared/DropdownMenu";
 import { MenuRow } from "@/app/components/shared/MenuRow";
@@ -48,7 +48,7 @@ export function NoteMoreMenu({
       {open && (
         <DropdownMenu className="right-[0] top-[24px]">
           <MenuRow
-            icon={Trash2}
+            icon={Can}
             label="Delete"
             onClick={(e) => {
               e.stopPropagation();

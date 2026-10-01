@@ -15,6 +15,7 @@ export async function planContentPlacement({
   instructions,
   hintedTargets,
   activeProjectSlug,
+  signal,
 }: {
   sourceText: string;
   instructions?: string;
@@ -23,12 +24,16 @@ export async function planContentPlacement({
    * `targetFromHints`). */
   hintedTargets?: MentionTarget[];
   activeProjectSlug?: string;
+  /** Stops the call, here and on the server. Aborting resolves to `null`
+   * too, so the caller checks the signal before falling back. */
+  signal?: AbortSignal;
 }): Promise<ContentPlacement[] | null> {
   try {
     const res = await fetch("/api/plugins/insert-content", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ sourceText, instructions, hintedTargets, activeProjectSlug }),
+      signal,
     });
     if (!res.ok) return null;
     const { placements } = (await res.json()) as { placements: ContentPlacement[] };

@@ -55,13 +55,17 @@ export function tagsOf(links: Link[]): Tag[] {
   return [...projects, ...places];
 }
 
-/** Whether a note shows on a project's Notes tab: it's filed under the
- * project, or "@"-tagged with it. */
-export function isListedIn(links: Link[], projectId: string): boolean {
+/** Whether a note is listed in a place. Lists aggregate upward: a note is
+ * in a project if it's filed under or tagged with the project or anything
+ * in it; given `blocks` (a section's or block's own id, plus every block
+ * inside it — `blockIdsIn`), only if it's filed under or tagged with one
+ * of those. */
+export function isListedIn(links: Link[], projectId: string, blocks?: Set<string>): boolean {
   return links.some(
     (l) =>
-      (l.rel === "filed-under" && l.to.id === projectId) ||
-      (l.rel === "about" && l.to.id === projectId && l.to.block === undefined)
+      (l.rel === "filed-under" || l.rel === "about") &&
+      l.to.id === projectId &&
+      (!blocks || (l.to.block !== undefined && blocks.has(l.to.block)))
   );
 }
 

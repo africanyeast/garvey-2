@@ -70,7 +70,7 @@ export async function searchVault(query: string): Promise<SearchResult[]> {
   await Promise.all(
     projects.map(async (project) => {
       const title = projectDisplayTitle(project);
-      const briefText = [title, project.subtitle, project.problem, project.agenda, project.goal].join(" ");
+      const briefText = [title, project.subtitle, project.brief].join(" ");
       if (briefText.toLowerCase().includes(qLower)) {
         results.push({
           kind: "project",

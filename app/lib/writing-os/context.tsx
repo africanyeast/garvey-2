@@ -11,7 +11,6 @@ import {
   type ReactNode,
 } from "react";
 import {
-  commentKey,
   variantBlock,
   type Attachment,
   type AttachmentTranscription,
@@ -22,10 +21,9 @@ import {
   type Note,
   type Project,
   type Ref,
-  type SectionKey,
 } from "./types";
-import type { DraftBlock, DraftPartialBlock } from "./schema";
-import { type MentionTarget, type ProjectLookup, type ResolvedTag, resolveTags, sectionMentionTargets } from "./mentions";
+import type { DraftPartialBlock } from "./schema";
+import { type MentionTarget, type ProjectLookup, type ResolvedTag, resolveTags } from "./mentions";
 import { parseMarkdownToBlocks } from "./parseMarkdown";
 import { commentOn, isListedIn, linksForNewNote, withTag, withoutTag } from "@/lib/store/links";
 
@@ -36,6 +34,26 @@ export const capitalize = (s: string) => s.charAt(0).toUpperCase() + s.slice(1);
  * right panel — the notes panel and every expanded block/note/inbox item —
  * shares this. Only the persistent notes panel ever goes "collapsed". */
 export type PanelPresentation = "collapsed" | "docked" | "fullscreen";
+
+/** Where a note composer sits. It decides which tag a fresh draft starts
+ * with (see `defaultNoteDraft`); where the note is filed follows the tags
+ * it carries when sent (see `addNote`). A place scope is a section or a
+ * block, and carries its own tag. */
+export type NoteScope = { kind: "inbox" } | { kind: "project" } | { kind: "place"; place: MentionTarget };
+
+export interface NoteDraft {
+  text: string;
+  links: MentionTarget[];
+  attachments: Attachment[];
+}
+
+const EMPTY_NOTE_DRAFT: NoteDraft = { text: "", links: [], attachments: [] };
+
+export function noteScopeKey(scope: NoteScope, activeProjectId: string | null): string {
+  if (scope.kind === "inbox") return "inbox";
+  if (scope.kind === "place") return `place:${scope.place.id}`;
+  return `project:${activeProjectId ?? ""}`;
+}
 
 /** A PDF attachment opens fullscreen, same as a note/inbox detail view —
  * no docked state, so just the attachment; closing it clears this entirely. */
@@ -50,11 +68,10 @@ export type EnrichedNote = Note & {
 interface WritingOSState {
   // data
   /** Every live note — in a project or in the Inbox. Which screens show a
-   * note is read from its links (`isListedIn`, `sectionOf`). */
+   * note is read from its links (`isListedIn`). */
   notes: Note[];
-  /** Comments on what's in view, grouped by `commentKey`: the active
-   * project's blocks by block id, and notes and alt versions by their own
-   * id. */
+  /** Comments on the active project's draft blocks, by block id. Comments
+   * exist on blocks only. */
   commentsData: Record<string, Comment[]>;
   /** A block's alt versions, keyed by the *live* block id they're an
    * alternate of (`variantBlock`) — same grouping shape as `commentsData`.
@@ -62,16 +79,9 @@ interface WritingOSState {
   variantsData: Record<string, BlockVariant[]>;
   addVariant: (blockId: string, content: DraftPartialBlock) => void;
   updateVariantContent: (variant: BlockVariant, content: DraftPartialBlock) => void;
+  /** New `order`s for some of a block's versions, by variant id. */
+  reorderVariants: (blockId: string, orders: Record<string, number>) => void;
   deleteVariant: (variant: BlockVariant) => void;
-  reorderVariants: (blockId: string, orderedIds: string[]) => void;
-  /** Swaps every comment filed under `idA` with every comment filed under
-   * `idB` — the comment-half of promoting an alt to primary (its content
-   * and the primary's trade places), so a comment stays attached to the
-   * text it's about rather than a fixed slot. A true swap (not two
-   * sequential moves): both groups exchange keys at once, so comments
-   * already at the destination are never merged with the ones moving in.
-   * Resolves once every PATCH has landed. */
-  swapCommentBlocks: (idA: string, idB: string) => Promise<void>;
   activeProject: string;
   setActiveProject: (title: string) => void;
   activeProjectSlug: string | null;
@@ -103,16 +113,11 @@ interface WritingOSState {
    * just brings the target into view inline where it already lives. */
   scrollToBlockId: string | null;
   setScrollToBlockId: (id: string | null) => void;
-  newNoteDraft: string;
-  newInboxDraft: string;
-  newNoteLinks: MentionTarget[];
-  setNewNoteLinks: (links: MentionTarget[]) => void;
-  newNoteAttachments: Attachment[];
-  setNewNoteAttachments: (a: Attachment[]) => void;
-  newInboxLinks: MentionTarget[];
-  setNewInboxLinks: (links: MentionTarget[]) => void;
-  newInboxAttachments: Attachment[];
-  setNewInboxAttachments: (a: Attachment[]) => void;
+  /** A note composer's unsent text/tags/files, kept here per scope so a
+   * draft survives the panel closing or the view changing. A scope with no
+   * draft yet starts auto-tagged with where it sits. */
+  noteDraft: (scope: NoteScope) => NoteDraft;
+  setNoteDraft: (scope: NoteScope, patch: Partial<NoteDraft>) => void;
   docMode: DocMode;
   /** Keyed by block id — several comment boxes (a commented block's box is
    * always shown; see `resolveComment`'s doc comment) can be on screen at
@@ -127,7 +132,7 @@ interface WritingOSState {
   stop: (e?: MouseEvent) => void;
   toggleMenu: (id: string | number) => void;
   closeMenu: () => void;
-  openExpanded: (kind: ExpandedItem["kind"], key: string | number, backTo?: ExpandedItem | null) => void;
+  openExpanded: (kind: ExpandedItem["kind"], key: string | number) => void;
   closeExpanded: () => void;
   toggleNoteResolved: (id: string) => void;
   deleteNote: (id: string) => void;
@@ -139,25 +144,15 @@ interface WritingOSState {
   removeNoteTag: (id: string, kind: ResolvedTag["kind"], tagId: string) => void;
   addNoteTag: (id: string, target: MentionTarget) => void;
   setPanelMode: (m: PanelPresentation) => void;
-  /** `key` is a `commentKey`: a block id, or a note's or alt version's id. */
   resolveComment: (key: string, id: string) => void;
   setReplyDraft: (key: string, v: string) => void;
   addReply: (key: string) => void;
-  setNewNoteDraft: (v: string) => void;
-  addItem: () => void;
-  addNoteToSection: (
-    sec: SectionKey,
-    text: string,
-    draftDoc: DraftBlock[],
-    links?: MentionTarget[],
-    attachments?: Attachment[]
-  ) => void;
+  /** Submits the composer draft for `scope` as a new note. */
+  addNote: (scope: NoteScope) => void;
   /** Adds a note created or restored *outside* the composers (the
    * `insert-content` agent filing one from the transcription panel, a
    * restore from Trash) to the list, so every screen showing it updates. */
   addNoteToList: (note: Note) => void;
-  setNewInboxDraft: (v: string) => void;
-  addInboxItem: () => void;
   setDocMode: (m: DocMode) => void;
 
   // derived
@@ -239,8 +234,8 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
       const on = commentOn(c.links);
       // A block comment shows only in its own project: a duplicated
       // project's draft reuses its source's block ids.
-      if (!on || (on.block !== undefined && on.id !== activeProjectId)) continue;
-      (grouped[commentKey(c)] ??= []).push(c);
+      if (!on?.block || on.id !== activeProjectId) continue;
+      (grouped[on.block] ??= []).push(c);
     }
     return grouped;
   }, [comments, activeProjectId]);
@@ -265,12 +260,7 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
   const [openMenu, setOpenMenu] = useState<string | number | null>(null);
   const [expandedItem, setExpandedItem] = useState<ExpandedItem | null>(null);
   const [scrollToBlockId, setScrollToBlockId] = useState<string | null>(null);
-  const [newNoteDraft, setNewNoteDraft] = useState("");
-  const [newInboxDraft, setNewInboxDraft] = useState("");
-  const [newNoteLinks, setNewNoteLinks] = useState<MentionTarget[]>([]);
-  const [newNoteAttachments, setNewNoteAttachments] = useState<Attachment[]>([]);
-  const [newInboxLinks, setNewInboxLinks] = useState<MentionTarget[]>([]);
-  const [newInboxAttachments, setNewInboxAttachments] = useState<Attachment[]>([]);
+  const [noteDrafts, setNoteDrafts] = useState<Record<string, NoteDraft>>({});
   const [docMode, setDocMode] = useState<DocMode>("edit");
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
   const setReplyDraft = (blockId: string, v: string) => setReplyDrafts((prev) => ({ ...prev, [blockId]: v }));
@@ -283,16 +273,14 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
   const toggleMenu = (id: string | number) => setOpenMenu((m) => (m === id ? null : id));
   const closeMenu = () => setOpenMenu(null);
 
-  // Every expanded item (block, note, or inbox item) is fullscreen-only —
-  // no docked state, no minimize control, just open and close.
-  const openExpanded = (kind: ExpandedItem["kind"], key: string | number, backTo: ExpandedItem | null = null) => {
-    setExpandedItem({ kind, key, backTo });
+  // Every expanded item renders through `ExpandedView`. Opening one from
+  // inside another stacks it, so closing always goes back to the screen it
+  // was opened from: the previous expanded view, or the page.
+  const openExpanded = (kind: ExpandedItem["kind"], key: string | number) => {
+    setExpandedItem((cur) => (cur?.kind === kind && cur.key === key ? cur : { kind, key, backTo: cur }));
     setOpenMenu(null);
   };
-  const closeExpanded = () => {
-    if (expandedItem?.backTo) setExpandedItem(expandedItem.backTo);
-    else setExpandedItem(null);
-  };
+  const closeExpanded = () => setExpandedItem((cur) => cur?.backTo ?? null);
 
   // One set of note actions, whatever screen the note is on: optimistic
   // local update, then a PATCH to the note itself. Links the server
@@ -318,7 +306,7 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
   };
   const deleteNote = (id: string) => {
     setNotes((prev) => prev.filter((n) => n.id !== id));
-    if ((expandedItem?.kind === "note" || expandedItem?.kind === "inbox") && expandedItem.key === id) closeExpanded();
+    if (expandedItem?.kind === "note" && expandedItem.key === id) closeExpanded();
     fetch(`/api/notes/${id}`, { method: "DELETE" }).catch(() => {});
   };
   const updateNoteBody = (id: string, body: DraftPartialBlock[]) => {
@@ -347,12 +335,8 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     if (note) patchNote(id, { links: withTag(note.links, target) });
   };
 
-  // What a comment key names: a note or alt version as a whole, or else a
-  // block in the active project's draft.
-  const placeFor = (key: string): Ref | null => {
-    if (noteById(key) || Object.values(variantsData).some((list) => list.some((v) => v.id === key))) return { id: key };
-    return activeProjectId ? { id: activeProjectId, block: key } : null;
-  };
+  // A comment is always on a block in the active project's draft.
+  const placeFor = (blockId: string): Ref | null => (activeProjectId ? { id: activeProjectId, block: blockId } : null);
 
   // Resolving a comment removes it outright — there's no unresolve/restore
   // path, so this deletes rather than toggling a `resolved` flag. This is
@@ -384,36 +368,15 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
       .catch(() => {});
   };
 
-  const swapCommentBlocks = async (idA: string, idB: string): Promise<void> => {
-    const placeA = placeFor(idA);
-    const placeB = placeFor(idB);
-    if (!placeA || !placeB) return;
-    const wasA = commentsData[idA] || [];
-    const wasB = commentsData[idB] || [];
-    if (wasA.length === 0 && wasB.length === 0) return;
-    const moveTo = (c: Comment, on: Ref): Comment => ({
-      ...c,
-      links: [{ rel: "comment-on", to: on }, ...c.links.filter((l) => l.rel !== "comment-on")],
-    });
-    const aIds = new Set(wasA.map((c) => c.id));
-    const bIds = new Set(wasB.map((c) => c.id));
-    setComments((prev) => prev.map((c) => (aIds.has(c.id) ? moveTo(c, placeB) : bIds.has(c.id) ? moveTo(c, placeA) : c)));
-    const patch = (c: Comment, on: Ref) =>
-      fetch(`/api/comments/${c.id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ on }),
-      }).catch(() => {});
-    await Promise.all([...wasA.map((c) => patch(c, placeB)), ...wasB.map((c) => patch(c, placeA))]);
-  };
-
   // A block's alt versions — side data, never entered into the shared draft
   // document (see `BlockVariant` in `types.ts` for why). Mirrors the
   // comments actions above: optimistic local update, fire-and-forget
   // persistence.
   const addVariant = (blockId: string, content: DraftPartialBlock) => {
     if (!activeProjectSlug) return;
-    const order = (variantsData[blockId]?.length ?? 0);
+    // Always last: orders can be negative (see `BlockExpanded`), so the
+    // count alone could land in the middle or collide.
+    const order = Math.max(-1, ...(variantsData[blockId] || []).map((v) => v.order)) + 1;
     fetch(`/api/projects/${activeProjectSlug}/variants`, {
       method: "POST",
       headers: { "Content-Type": "application/json" },
@@ -449,6 +412,21 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     );
   };
 
+  const reorderVariants = (blockId: string, orders: Record<string, number>) => {
+    if (!activeProjectSlug) return;
+    setVariantsData((prev) => ({
+      ...prev,
+      [blockId]: (prev[blockId] || []).map((v) => (v.id in orders ? { ...v, order: orders[v.id] } : v)),
+    }));
+    for (const [id, order] of Object.entries(orders)) {
+      fetch(`/api/projects/${activeProjectSlug}/variants/${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ order }),
+      }).catch(() => {});
+    }
+  };
+
   const deleteVariant = (variant: BlockVariant) => {
     if (!activeProjectSlug) return;
     const blockId = variantBlock(variant);
@@ -457,36 +435,6 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
       [blockId]: (prev[blockId] || []).filter((v) => v.id !== variant.id),
     }));
     fetch(`/api/projects/${activeProjectSlug}/variants/${variant.id}`, { method: "DELETE" }).catch(() => {});
-  };
-
-  const reorderVariants = (blockId: string, orderedIds: string[]) => {
-    if (!activeProjectSlug) return;
-    setVariantsData((prev) => {
-      const byId = new Map((prev[blockId] || []).map((v) => [v.id, v]));
-      const reordered = orderedIds
-        .map((id, order) => {
-          const v = byId.get(id);
-          return v ? { ...v, order } : null;
-        })
-        .filter((v): v is BlockVariant => !!v);
-      return { ...prev, [blockId]: reordered };
-    });
-    orderedIds.forEach((id, order) => {
-      fetch(`/api/projects/${activeProjectSlug}/variants/${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ order }),
-      }).catch(() => {});
-    });
-  };
-
-  // A note captured into a section with no "#" tag typed still gets that
-  // section as its tag — resolve its label from the live document so the
-  // implicit tag displays correctly too, not just when picked explicitly.
-  const withImplicitSection = (targets: MentionTarget[], draftDoc: DraftBlock[], sec: SectionKey): MentionTarget[] => {
-    if (targets.some((t) => t.kind === "section" || t.kind === "block")) return targets;
-    const section = sectionMentionTargets(draftDoc, activeProjectId as string).find((s) => s.id === sec);
-    return section ? [...targets, section] : targets;
   };
 
   const addNoteToList = (note: Note) => setNotes((prev) => [...prev, note]);
@@ -504,48 +452,46 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
       .catch(() => {});
   };
 
-  // The project panel's composer: a note is always filed under the project
-  // in view, and under the first "#" section of it that was tagged.
-  const addItem = () => {
-    const raw = newNoteDraft.trim();
-    if (!raw || !activeProjectId) return;
-    const targets = newNoteLinks;
-    const section = targets.find((t) => t.kind === "section" && t.projectId === activeProjectId)?.id ?? null;
-    const links = linksForNewNote(targets, { id: activeProjectId, label: activeProject, section });
-    const attachments = newNoteAttachments;
-    setNewNoteDraft("");
-    setNewNoteLinks([]);
-    setNewNoteAttachments([]);
-    postNote(parseMarkdownToBlocks(raw), links, attachments);
+  // A fresh draft is tagged with where its composer sits — the project in
+  // the panel, the section or block in its own view. It's an ordinary,
+  // removable tag.
+  const defaultNoteDraft = (scope: NoteScope): NoteDraft => {
+    if (scope.kind === "place") return { ...EMPTY_NOTE_DRAFT, links: [scope.place] };
+    if (scope.kind === "project" && activeProjectId)
+      return { ...EMPTY_NOTE_DRAFT, links: [{ kind: "project", id: activeProjectId, label: activeProject }] };
+    return EMPTY_NOTE_DRAFT;
+  };
+  const noteDraft = (scope: NoteScope) => noteDrafts[noteScopeKey(scope, activeProjectId)] ?? defaultNoteDraft(scope);
+  const setNoteDraft = (scope: NoteScope, patch: Partial<NoteDraft>) => {
+    const key = noteScopeKey(scope, activeProjectId);
+    setNoteDrafts((prev) => ({ ...prev, [key]: { ...(prev[key] ?? defaultNoteDraft(scope)), ...patch } }));
   };
 
-  // For capturing a note straight from a block's expanded view — filed
-  // under that block's section, independent of whatever's in the shared
-  // notes-panel composer draft.
-  const addNoteToSection = (
-    sec: SectionKey,
-    text: string,
-    draftDoc: DraftBlock[],
-    targets: MentionTarget[] = [],
-    attachments: Attachment[] = []
-  ) => {
+  // Every note composer submits through here. Inbox captures are filed
+  // nowhere; every tag is an `about` link. Elsewhere, a note is filed under
+  // the project in view if it's still tagged with that project or anything
+  // in it, and under the first of its sections that's tagged; with those
+  // tags removed it's filed nowhere, like an Inbox capture.
+  const addNote = (scope: NoteScope) => {
+    const key = noteScopeKey(scope, activeProjectId);
+    const { text, links: targets, attachments } = noteDraft(scope);
     const raw = text.trim();
-    if (!raw || !activeProjectId) return;
-    const links = linksForNewNote(withImplicitSection(targets, draftDoc, sec), { id: activeProjectId, label: activeProject, section: sec });
-    postNote(parseMarkdownToBlocks(raw), links, attachments);
-  };
-
-  // The Inbox composer: a capture is filed nowhere; its tags are all
-  // `about` links.
-  const addInboxItem = () => {
-    const raw = newInboxDraft.trim();
     if (!raw) return;
-    const links = linksForNewNote(newInboxLinks, null);
-    const attachments = newInboxAttachments;
-    setNewInboxDraft("");
-    setNewInboxLinks([]);
-    setNewInboxAttachments([]);
-    postNote(parseMarkdownToBlocks(raw), links, attachments);
+    const inProject = (t: MentionTarget) => (t.kind === "project" ? t.id : t.projectId) === activeProjectId;
+    const home =
+      scope.kind !== "inbox" && activeProjectId && targets.some(inProject)
+        ? {
+            id: activeProjectId,
+            label: activeProject,
+            section: targets.find((t) => t.kind === "section" && inProject(t))?.id ?? null,
+          }
+        : null;
+    setNoteDrafts((prev) => {
+      const next = { ...prev };
+      delete next[key];
+      return next;
+    });
+    postNote(parseMarkdownToBlocks(raw), linksForNewNote(targets, home), attachments);
   };
 
   const projectFor = (id: string): ProjectLookup | undefined => {
@@ -567,9 +513,8 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     variantsData,
     addVariant,
     updateVariantContent,
-    deleteVariant,
     reorderVariants,
-    swapCommentBlocks,
+    deleteVariant,
     activeProject,
     setActiveProject,
     activeProjectSlug,
@@ -587,16 +532,8 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     expandedItem,
     scrollToBlockId,
     setScrollToBlockId,
-    newNoteDraft,
-    newInboxDraft,
-    newNoteLinks,
-    setNewNoteLinks,
-    newNoteAttachments,
-    setNewNoteAttachments,
-    newInboxLinks,
-    setNewInboxLinks,
-    newInboxAttachments,
-    setNewInboxAttachments,
+    noteDraft,
+    setNoteDraft,
     docMode,
     replyDrafts,
     pdfViewer,
@@ -617,12 +554,8 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     resolveComment,
     setReplyDraft,
     addReply,
-    setNewNoteDraft,
-    addItem,
-    addNoteToSection,
+    addNote,
     addNoteToList,
-    setNewInboxDraft,
-    addInboxItem,
     setDocMode,
     enrichNote,
     notesDesc,

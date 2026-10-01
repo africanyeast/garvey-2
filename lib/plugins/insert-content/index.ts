@@ -248,7 +248,7 @@ async function run(ctx: PluginContext<InsertContentInput>) {
   const hinted = input.hintedTargets?.length ? targetFromHints(input.hintedTargets, input) : null;
   const system = buildSystemPrompt(INSTRUCTION, ctx);
   const prompt = buildPrompt(input);
-  const text = await complete({ system, prompt, model: manifest.model, effort: manifest.effort, thinking: manifest.thinking });
+  const text = await complete({ system, prompt, ...ctx.settings, ...ctx.call });
   const placements = parsePlacements(text, input);
   if (hinted) {
     // An explicit "@"/"#" tag decides the destination deterministically —
@@ -259,4 +259,9 @@ async function run(ctx: PluginContext<InsertContentInput>) {
   return { ok: true, data: { placements } };
 }
 
-export const insertContentPlugin: Plugin<InsertContentInput, InsertContentResult> = { manifest, run };
+const describe = (input: InsertContentInput) => {
+  const source = input.sourceText.trim().replace(/\s+/g, " ");
+  return `Place: ${source.length > 80 ? `${source.slice(0, 79)}…` : source}`;
+};
+
+export const insertContentPlugin: Plugin<InsertContentInput, InsertContentResult> = { manifest, run, describe };

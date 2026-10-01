@@ -1,13 +1,12 @@
 "use client";
 
 import { useWritingOS } from "@/app/lib/writing-os/context";
-import { InboxItemExpanded } from "@/app/components/inbox/InboxItemExpanded";
+import { ExpandedView } from "@/app/components/expand/ExpandedView";
 import { InboxList } from "@/app/components/inbox/InboxList";
 import { PdfViewerPanel } from "@/app/components/shared/PdfViewerPanel";
 
 export function InboxScreen() {
   const { expandedItem, pdfViewer } = useWritingOS();
-  const inboxFull = expandedItem?.kind === "inbox" ? expandedItem : null;
 
   return (
     <div className="flex h-[100%]">
@@ -17,7 +16,7 @@ export function InboxScreen() {
       {/* A PDF takes over the right-hand slot — same as an expanded item —
        * so opening one from inside an expanded inbox item still leaves that
        * item right where it was once the PDF is closed. */}
-      {pdfViewer ? <PdfViewerPanel /> : inboxFull && <InboxItemExpanded id={inboxFull.key} />}
+      {pdfViewer ? <PdfViewerPanel /> : expandedItem && <ExpandedView item={expandedItem} />}
     </div>
   );
 }

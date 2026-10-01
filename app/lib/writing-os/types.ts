@@ -59,16 +59,8 @@ export interface Note {
   links: Link[];
 }
 
-/** A whole-item comment — made via a block/section/note's own comment icon,
- * not a text selection. A comment on a specific selected phrase is a
- * different, separate mechanism now: BlockNote's own native comment
- * marks/threads (see `editor-context.tsx`'s `CommentsExtension` and
- * `threadStore.ts`), not this type — see the `comment-freeze` memory for why
- * the two were split apart.
- *
- * One `comment-on` link says what it's on: a note or an alt version (by
- * id), or a block in a project's draft (a section is its heading block).
- * `commentKey` turns that into the key comments are grouped by on screen. */
+/** A comment on a block in a project's draft — the only thing that takes
+ * comments. Its one `comment-on` link is `{ project, block }`. */
 export interface Comment {
   id: string;
   links: Link[];
@@ -77,26 +69,13 @@ export interface Comment {
   resolved: boolean;
 }
 
-/** The key a comment is grouped under on screen: the block's id for a
- * comment on a block, otherwise the id of the thing it's on. */
-export function commentKey(c: Comment): string {
-  const on = c.links.find((l) => l.rel === "comment-on")?.to;
-  return on?.block ?? on?.id ?? "";
-}
-
-/** A block, replicated: an alternate draft of a block, visible and
- * reorderable only in the expanded-block view (`BlockExpanded`). Never a
- * live block in the shared draft document — see `writing-os/blocks` for why
- * (alts must never leak into the main draft/Preview/Copy). `id` doubles as
- * this alt's own comment-anchor id, so it can be commented on exactly like
- * the primary block it's an alternate of. Its `alternate-of` link is the
- * live block (in the shared draft document) it's an alternate of; comments
- * and content get re-keyed across that block and `id` on promotion — see
- * `promoteVariant` in `BlockExpanded`. */
+/** Another version of one block, shown only in the expanded block view
+ * (`BlockExpanded`), never in the draft. Picking it swaps its content with
+ * the block's; the block keeps its id, so the block's comments stay put. */
 export interface BlockVariant {
   id: string;
   links: Link[];
-  /** Rank among a block's alts — lower sorts first (closer to primary). */
+  /** Creation order among a block's versions. */
   order: number;
   content: DraftPartialBlock;
 }
@@ -110,7 +89,9 @@ export interface TrashedNote extends Note {
   trashedAt: string;
 }
 
-export type ExpandedKind = "block" | "note" | "inbox";
+/** What the expand shell can show: a block with its versions, a section
+ * in focus, or a note (a project note or an inbox capture). */
+export type ExpandedKind = "block" | "section" | "note";
 
 export interface ExpandedItem {
   kind: ExpandedKind;
@@ -134,13 +115,11 @@ export interface Project {
   slug: string;
   title: string;
   subtitle: string;
-  /** Freeform, e.g. "Essay", "Script", "Blog post", "Tweet reply" — a hint
-   * for future AI agents about the shape of the writing, not a fixed enum. */
-  writingType: string;
-  problem: string;
-  agenda: string;
-  arguments: string[];
-  goal: string;
+  /** Everything the writer knows about the piece outside the draft — what
+   * it is, the problem, who it's for, the argument, the goal — as one
+   * freeform text, the way an assistant's memory reads. See `briefFromHeader`. */
+  brief: string;
+  /** Always the current one first, then its alternatives in order. */
   titleCandidates: TitleCandidate[];
   subtitleCandidates: TitleCandidate[];
   status: string;
@@ -166,6 +145,25 @@ export function projectDisplayTitle(project: Pick<Project, "title" | "slug">): s
   const match = project.slug.match(/^untitled(?:-(\d+))?$/);
   if (!match) return "Untitled";
   return match[1] ? `Untitled ${match[1]}` : "Untitled";
+}
+
+/** A project's brief from its stored header. Projects written before the
+ * brief was one field kept it as separate writing type / problem / agenda /
+ * arguments / goal fields; until the brief is first saved, those are read
+ * as one text, so nothing the writer put there is lost. */
+export function briefFromHeader(h: Record<string, unknown>): string {
+  if (typeof h.brief === "string") return h.brief;
+  const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  const args = Array.isArray(h.arguments) ? h.arguments.map(str).filter(Boolean) : [];
+  return [
+    str(h.writing_type) && `Kind of writing: ${str(h.writing_type)}`,
+    str(h.problem) && `Problem: ${str(h.problem)}`,
+    str(h.agenda) && `Agenda: ${str(h.agenda)}`,
+    args.length > 0 && `Arguments:\n${args.map((a) => `- ${a}`).join("\n")}`,
+    str(h.goal) && `Goal: ${str(h.goal)}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
 }
 
 export interface TrashedProject {

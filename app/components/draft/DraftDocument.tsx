@@ -37,6 +37,10 @@ export function DraftDocument() {
   const { commentsData, openExpanded, scrollToBlockId, setScrollToBlockId } = useWritingOS();
   const { editor, syncDocument } = useDraftEditor();
   const containerRef = useRef<HTMLDivElement>(null);
+  // A section expands into focus on itself; any other block into its
+  // versions view. Sections never take comments.
+  const isSection = (id: string) => editor.getBlock(id)?.type === "section";
+  const expand = (id: string) => openExpanded(isSection(id) ? "section" : "block", id);
 
   // A "#" section tag's click-through lands here — scroll it into view
   // inline, right where it already lives in the document, rather than
@@ -78,7 +82,7 @@ export function DraftDocument() {
         let changed = commentedBlockIds.length !== Object.keys(prev).length;
         for (const id of commentedBlockIds) {
           const el = root.querySelector<HTMLElement>(`[data-id="${id}"]`);
-          if (!el) continue;
+          if (!el?.offsetParent) continue; // hidden, e.g. outside a focused section
           const top = el.getBoundingClientRect().top - containerTop;
           next[id] = top;
           if (prev[id] !== top) changed = true;
@@ -127,7 +131,9 @@ export function DraftDocument() {
     const container = containerRef.current;
     const el = hoverBlockId && root ? root.querySelector<HTMLElement>(`[data-id="${hoverBlockId}"]`) : null;
     const top = el && container ? el.getBoundingClientRect().top - container.getBoundingClientRect().top : null;
-    setHoverTop(top);
+    // Keep the last position when nothing is hovered, so the button fades
+    // out in place instead of jumping.
+    setHoverTop((prev) => top ?? prev);
   }, [editor, hoverBlockId]);
 
   return (
@@ -135,56 +141,50 @@ export function DraftDocument() {
       ref={containerRef}
       className="relative wos-doc-editor"
       onMouseMove={(e) => {
-        const el = (e.target as HTMLElement).closest<HTMLElement>("[data-id]");
-        // No match means the pointer is over the overlay itself (or the
-        // reserved gutter around it), not a different block — keep whichever
-        // block was last hovered instead of clearing it.
+        // The block is whichever row the pointer is level with, read at the
+        // right edge of the text column: so the right gutter (where the
+        // buttons are) counts as the block too, and a block nested in a
+        // section resolves to itself, not the section.
+        const group = editor.domElement?.querySelector(".bn-block-group");
+        if (!group) return;
+        const el = document.elementFromPoint(group.getBoundingClientRect().right - 2, e.clientY)?.closest<HTMLElement>("[data-id]");
         if (el) setHoverBlockId(el.getAttribute("data-id"));
       }}
       onMouseLeave={() => setHoverBlockId(null)}
     >
       <BlockNoteDocument editor={editor} onChange={syncDocument} />
-      <NextBlockCard editor={editor} containerRef={containerRef} />
+      <NextBlockCard editor={editor} />
 
-      {/* A block with an active comment gets a persistent margin indicator —
-       * visible without hovering, Notion-style — instead of only the
-       * hover-revealed Comments icon below. Skips whichever block is
-       * currently hovered: that row already renders its own Comments icon
-       * (styled to match, just below) in the same slot. Clicking either one
-       * does the same thing — opens the block's expanded view, the only
-       * place a comment's own text ever renders (see this component's own
-       * doc comment). */}
+      {/* Two fixed columns in the right gutter: the comment marker (always
+       * shown on a commented block, with its count), then the hover-only
+       * Expand button, shown while its block's row is hovered. Both open the block's expanded view, the only place
+       * comments are read and written. */}
       {commentedBlockIds
-        .filter((id) => id !== hoverBlockId && commentedTops[id] !== undefined)
+        .filter((id) => commentedTops[id] !== undefined)
         .map((id) => (
           <button
             key={id}
             onClick={() => openExpanded("block", id)}
-            title={`${commentsData[id].length} comment${commentsData[id].length > 1 ? "s" : ""}`}
-            className="absolute right-[0] z-[4] bg-transparent border-none cursor-pointer p-[3px] flex text-[var(--fill-highlight-rail)]"
+            title={`${commentsData[id].length} comment${commentsData[id].length > 1 ? "s" : ""} — open the block`}
+            className="absolute right-[28px] z-[4] mt-[8px] h-[20px] min-w-[24px] px-[5px] flex items-center justify-center gap-[3px] rounded-full border-none cursor-pointer bg-[var(--fill-highlight-subtle)] text-[var(--fill-highlight-rail)] font-sans text-[11px] font-semibold"
             style={{ top: commentedTops[id] }}
           >
-            <MessageCircle size={13} strokeWidth={1.8} fill="var(--fill-highlight-subtle)" />
+            <MessageCircle size={11} strokeWidth={2} />
+            {commentsData[id].length}
           </button>
         ))}
 
-      {hoverBlockId && hoverTop !== null && (
-        <div className="absolute right-[0] z-[5] flex items-center gap-[1px]" style={{ top: hoverTop }}>
-          <RowIconButton
-            icon={<Minimize2 size={13} strokeWidth={1.8} />}
-            label="Expand"
-            reveal={false}
-            onClick={() => openExpanded("block", hoverBlockId)}
-          />
-          <RowIconButton
-            icon={<MessageCircle size={14} strokeWidth={1.8} fill={commentsData[hoverBlockId]?.length ? "var(--fill-highlight-subtle)" : "none"} />}
-            label="Comments"
-            reveal={false}
-            className={commentsData[hoverBlockId]?.length ? "text-[var(--fill-highlight-rail)]" : ""}
-            onClick={() => openExpanded("block", hoverBlockId)}
-          />
-        </div>
-      )}
+      <div
+        className={`absolute right-[0] z-[5] mt-[6px] ${hoverBlockId && hoverTop !== null ? "opacity-100" : "opacity-0 pointer-events-none"}`}
+        style={{ top: hoverTop ?? 0 }}
+      >
+        <RowIconButton
+          icon={<Minimize2 size={13} strokeWidth={1.8} />}
+          label={hoverBlockId && isSection(hoverBlockId) ? "Focus on this section" : "Expand"}
+          reveal={false}
+          onClick={() => hoverBlockId && expand(hoverBlockId)}
+        />
+      </div>
     </div>
   );
 }

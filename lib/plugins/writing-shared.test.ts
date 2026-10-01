@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { cleanContinuation, cleanParagraph } from "./index";
+import { cleanContinuation, cleanParagraph } from "./writing-shared";
 
 describe("ghost text spacing", () => {
   test("adds a space after a word, not after a space", () => {

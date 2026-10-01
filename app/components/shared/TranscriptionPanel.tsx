@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useLayoutEffect, useRef, useState } from "react";
-import { Check, Copy, RotateCcw } from "lucide-react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { Check, ClipboardPaste, Copy } from "lucide-react";
 import { useCreateBlockNote } from "@blocknote/react";
 import { PanelShell } from "@/app/components/panel/PanelShell";
 import { IntentComposer } from "@/app/components/shared/IntentComposer";
@@ -9,13 +9,8 @@ import { BlockNoteDocument } from "@/app/components/draft/BlockNoteDocument";
 import { draftSchema, type DraftPartialBlock } from "@/app/lib/writing-os/schema";
 import { parseMarkdownToBlocks } from "@/app/lib/writing-os/parseMarkdown";
 import { flattenBlocksToMarkdown } from "@/app/lib/writing-os/blockText";
-import { planContentPlacement, commitContentPlacement } from "@/app/lib/writing-os/insertGeneratedContent";
-import type { ContentPlacement, ContentTarget } from "@/app/lib/writing-os/contentTarget";
-import { useWritingOS } from "@/app/lib/writing-os/context";
-import type { MentionTarget } from "@/app/lib/writing-os/mentions";
 import type { Attachment, AttachmentTranscription } from "@/app/lib/writing-os/types";
 
-const DEFAULT_SEED = "Transcribe this image";
 const EMPTY_BLOCKS: DraftPartialBlock[] = [{ type: "paragraph" }];
 // OCR feedback is meant to be a short steering note ("this is handwritten",
 // "ignore the letterhead") — capped defensively so pasting a large block of
@@ -24,12 +19,15 @@ const EMPTY_BLOCKS: DraftPartialBlock[] = [{ type: "paragraph" }];
 // cap existed.
 const OCR_INSTRUCTIONS_MAX = 300;
 
-function describeTarget(target: ContentTarget): string {
-  if (target.kind === "current") return "Insert here";
-  if (target.kind === "draft") return "Add to the draft (not wired up yet — will insert here instead)";
-  const tag = target.links?.find((l) => l.to.block !== undefined)?.label;
-  if (target.projectSlug) return tag ? `New note in this project, tagged "${tag}"` : "New note in this project";
-  return "New note in Inbox";
+function StopButton({ onClick }: { onClick: () => void }) {
+  return (
+    <button
+      onClick={onClick}
+      className="text-xs font-semibold text-[var(--text-secondary)] bg-transparent border border-[var(--border-default)] rounded-full py-[2px] px-[10px] cursor-pointer"
+    >
+      Stop
+    </button>
+  );
 }
 
 /**
@@ -37,8 +35,10 @@ function describeTarget(target: ContentTarget): string {
  * narrow to actually view an image, that's still the lightbox's job),
  * toggled via the lightbox's own toolbar rather than shown by default.
  * Same chrome as every other right panel (`PanelShell`) and the same
- * text-input surface every intent gets sent through (`IntentComposer`,
- * pinned to the bottom).
+ * composer as everywhere else (`IntentComposer`, pinned to the bottom) —
+ * here it only takes instructions for the transcription: submitting
+ * (re)runs OCR with them. No tags, no routing; "Insert into note" in the
+ * header puts the transcript into the note as-is.
  *
  * The transcript itself renders through the same block editor surface as a
  * note or the draft (`BlockNoteDocument`) rather than a plain `<textarea>` —
@@ -49,8 +49,7 @@ function describeTarget(target: ContentTarget): string {
  * One attachment's transcription is a durable property of that attachment,
  * not a one-shot dialog result: it's persisted via `onSetTranscription`, so
  * reopening the note later still shows it. A submission's text is folded
- * into the OCR prompt as feedback and saved alongside the result, so it's
- * remembered on the next retry too.
+ * into the OCR prompt and saved alongside the result.
  *
  * The caller must remount this (`key={attachment.url}`) when the viewed
  * image changes — paging to a different attachment is a different subject
@@ -62,13 +61,10 @@ export function TranscriptionPanel({
   onSetTranscription,
   onClose,
   autoFocus = true,
-  activeProjectSlug,
-  mentionTargets,
 }: {
   attachment: Attachment;
-  /** Commits agent-routed content "here" — omitted where there's no note
-   * body to insert into. What "here" means is entirely this callback's own
-   * business; the agent layer never sees it (see `insertGeneratedContent`). */
+  /** Puts the transcript into the note — omitted where there's no note
+   * body to insert into. */
   onInsertText?: (text: string) => void;
   onSetTranscription: (attachmentUrl: string, transcription: AttachmentTranscription | null) => void;
   onClose: () => void;
@@ -76,32 +72,9 @@ export function TranscriptionPanel({
    * already docked — only the mount that follows actually opening the panel
    * should steal focus into the composer (see AttachmentList). */
   autoFocus?: boolean;
-  /** Lets the "Insert" action's agent routing consider the current project's
-   * draft outline (sections/blocks) as a placement target — omitted when
-   * there's no project in view (e.g. a standalone Inbox capture), in which
-   * case the agent can still propose a note, just never a draft placement. */
-  activeProjectSlug?: string;
-  /** "@"/"#" targets offered by this composer's tag picker — same list a
-   * note's own composer gets. Omitted (no picker at all) where the caller
-   * has none to offer. */
-  mentionTargets?: MentionTarget[];
 }) {
-  const { addNoteToList } = useWritingOS();
-  const [draft, setDraft] = useState(attachment.transcription ? "" : DEFAULT_SEED);
-  // Whatever's tagged via "@"/"#" here — an explicit destination for the
-  // Insert action, distinct from `draft`'s free text. Cleared once acted on,
-  // same as `draft`; unlike `draft` it's never sent as OCR feedback.
-  const [links, setLinks] = useState<MentionTarget[]>([]);
+  const [draft, setDraft] = useState("");
   const [running, setRunning] = useState(false);
-  // Set once the agent has proposed where this should go — shown as a
-  // confirm/cancel strip rather than committed immediately, since unlike the
-  // old plain "insert into note" this can now create a whole new note
-  // somewhere else. `null` means either nothing pending, or the trivial
-  // empty-instructions case, which skips the agent (and this confirm step)
-  // entirely and just inserts.
-  const [pending, setPending] = useState<ContentPlacement | null>(null);
-  const [planning, setPlanning] = useState(false);
-  const [inserting, setInserting] = useState(false);
   const [error, setError] = useState(false);
   const [copied, setCopied] = useState(false);
   // The panel's own copy of the result — rendered straight from the fetch
@@ -152,6 +125,25 @@ export function TranscriptionPanel({
   // newer, already-applied transcription.
   const runningRef = useRef(false);
   const requestId = useRef(0);
+  // The transcription call in flight: Stop, or closing the
+  // panel, ends it here and on the server.
+  const abortRef = useRef<AbortController | null>(null);
+  const startCall = () => {
+    abortRef.current?.abort();
+    const abort = new AbortController();
+    abortRef.current = abort;
+    return abort.signal;
+  };
+  useEffect(() => () => abortRef.current?.abort(), []);
+
+  const stop = () => {
+    abortRef.current?.abort();
+    abortRef.current = null;
+    // A newer id makes the stopped call's ending a no-op.
+    requestId.current++;
+    runningRef.current = false;
+    setRunning(false);
+  };
 
   /** `override` lets a caller supply feedback text directly rather than
    * reading `draft` — needed because `setDraft` doesn't apply synchronously,
@@ -164,11 +156,13 @@ export function TranscriptionPanel({
     const instructions = (override ?? draft).trim().slice(0, OCR_INSTRUCTIONS_MAX) || undefined;
     setRunning(true);
     setError(false);
+    const signal = startCall();
     try {
       const res = await fetch("/api/plugins/ocr", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ storedName, instructions }),
+        signal,
       });
       if (!res.ok) throw new Error();
       const data = (await res.json()) as { text: string };
@@ -187,52 +181,6 @@ export function TranscriptionPanel({
     }
   }
 
-  const insertNow = async () => {
-    if (!transcription || !onInsertText) return;
-    const instructions = draft.trim();
-    const sourceText = flattenBlocksToMarkdown(transcription.blocks);
-    // Nothing typed AND nothing tagged → nothing for the agent to decide;
-    // insert as-is, with no API call and no confirm step. A tag alone (no
-    // typed text) still counts as a real decision to act on.
-    if (!instructions && links.length === 0) {
-      onInsertText(sourceText);
-      return;
-    }
-    setPlanning(true);
-    const placements = await planContentPlacement({
-      sourceText,
-      instructions: instructions || undefined,
-      hintedTargets: links,
-      activeProjectSlug,
-    });
-    setPlanning(false);
-    if (!placements) {
-      onInsertText(sourceText);
-      setDraft("");
-      setLinks([]);
-      return;
-    }
-    setPending(placements[0]);
-  };
-
-  // The composer's one submit path (Enter, or its own arrow button) — no
-  // separate "Insert" trigger, and no implicit "always re-runs OCR" either.
-  // Before a first transcription, OCR is the only thing submitting *can*
-  // mean. After that, submitting means "do something with what's typed/
-  // tagged" — which is the Insert flow, not a silent OCR retry; retrying OCR
-  // is now its own explicit action (the header's Retranscribe icon).
-  const handleSubmit = () => {
-    if (running || planning || inserting) return;
-    // No transcription yet, or no insert capability at this call site (e.g.
-    // a quick preview opened straight from a compact row) → submitting can
-    // only ever mean "transcribe."
-    if (!transcription || !onInsertText) {
-      run();
-      return;
-    }
-    insertNow();
-  };
-
   return (
     // A normal flex sibling of the (inline-rendered) lightbox — not an
     // independent fixed/portaled layer — so closing it (`onClose`, PanelShell's
@@ -248,14 +196,15 @@ export function TranscriptionPanel({
         transcription &&
         !running && (
           <>
-            <button
-              onClick={() => run()}
-              title="Retranscribe (uses whatever's typed below as feedback)"
-              disabled={planning || inserting}
-              className="bg-transparent border-none text-[var(--text-muted)] cursor-pointer p-[6px] rounded-[6px] hover:bg-neutral-100 flex items-center justify-center disabled:opacity-50"
-            >
-              <RotateCcw size={14} strokeWidth={1.8} />
-            </button>
+            {onInsertText && (
+              <button
+                onClick={() => onInsertText(flattenBlocksToMarkdown(transcription.blocks))}
+                title="Insert into note"
+                className="bg-transparent border-none text-[var(--text-muted)] cursor-pointer p-[6px] rounded-[6px] hover:bg-neutral-100 flex items-center justify-center"
+              >
+                <ClipboardPaste size={15} strokeWidth={1.8} />
+              </button>
+            )}
             <button
               onClick={() => {
                 navigator.clipboard.writeText(flattenBlocksToMarkdown(transcription.blocks)).catch(() => {});
@@ -279,7 +228,10 @@ export function TranscriptionPanel({
             </div>
           )}
           {running ? (
-            <div className="text-xs font-medium text-[var(--text-muted)]">Transcribing…</div>
+            <div className="text-xs font-medium text-[var(--text-muted)] flex items-center gap-[8px]">
+              Transcribing…
+              <StopButton onClick={stop} />
+            </div>
           ) : transcription ? (
             <div className="text-[13px] font-medium text-[var(--text-primary)] leading-[1.6]">
               <BlockNoteDocument editor={editor} onChange={handleBlocksChange} editable slashMenu />
@@ -289,61 +241,15 @@ export function TranscriptionPanel({
           )}
         </div>
 
-        {transcription && !running && onInsertText && pending && (
-          <div className="px-[20px] pb-[10px] flex items-center gap-[8px] shrink-0">
-            <span className="text-xs font-medium text-[var(--text-secondary)] flex-1 min-w-0 truncate" title={pending.rationale}>
-              {describeTarget(pending.target)}
-            </span>
-            <button
-              onClick={() => setPending(null)}
-              disabled={inserting}
-              className="text-xs font-semibold text-[var(--text-muted)] bg-transparent border-none py-[6px] px-[8px] cursor-pointer disabled:opacity-50"
-            >
-              Cancel
-            </button>
-            <button
-              onClick={async () => {
-                setInserting(true);
-                try {
-                  const result = await commitContentPlacement(pending, onInsertText);
-                  if (result.kind === "note" && result.note?.id) addNoteToList(result.note);
-                  setDraft("");
-                  setLinks([]);
-                } finally {
-                  setInserting(false);
-                  setPending(null);
-                }
-              }}
-              disabled={inserting}
-              className="text-xs font-semibold text-[var(--text-inverse)] bg-[var(--surface-inverse)] border-none rounded-md py-[6px] px-[10px] cursor-pointer disabled:opacity-50"
-            >
-              {inserting ? "Inserting…" : "Confirm"}
-            </button>
-          </div>
-        )}
-
-        {transcription && !running && planning && (
-          <div className="px-[20px] pb-[10px] text-xs font-medium text-[var(--text-muted)] shrink-0">Thinking…</div>
-        )}
-
         <div className="px-[20px] pb-[20px] pt-[14px] border-t border-t-[var(--border-default)] shrink-0">
           <IntentComposer
             value={draft}
             onChange={setDraft}
-            links={links}
-            onLinksChange={setLinks}
-            mentionTargets={mentionTargets}
-            onSubmit={handleSubmit}
-            placeholder={transcription ? "Say what to do with this — a tag, instructions, or leave blank" : undefined}
-            // The "@ocr" chip only makes sense while this box's one job is
-            // seeding the OCR call — once transcribed, submitting means
-            // "insert" by default (retrying OCR is the header's own explicit
-            // icon), so a fixed "@ocr" label would misdescribe what typing
-            // here now does.
-            fixedChip={transcription ? undefined : { label: "@ocr" }}
+            onSubmit={() => run()}
+            placeholder="Add instructions for the transcription (optional)"
             submitAlwaysEnabled
-            submitLabel={transcription && onInsertText ? "Insert" : "Transcribe"}
-            disabled={running || planning || inserting}
+            submitLabel={transcription ? "Retranscribe" : "Transcribe"}
+            disabled={running}
             autoFocus={autoFocus}
           />
         </div>

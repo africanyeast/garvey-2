@@ -22,28 +22,6 @@ export function findBlockEl(root: HTMLElement, blockId: string): HTMLElement | n
 }
 
 /**
- * The current browser selection's start offset within `blockEl`'s own
- * combined text — used by `BlockVersionEditor`'s Enter-to-split-into-a-new-
- * alt-version override to know where to split. Callers must read this from
- * a `mousedown`/`keydown` handler while the selection is still live (a
- * plain `click` handler on a *different* element can lose it first).
- */
-export function selectionOffsetIn(blockEl: HTMLElement): number | null {
-  const sel = typeof window !== "undefined" ? window.getSelection() : null;
-  if (!sel || sel.rangeCount === 0) return null;
-  const range = sel.getRangeAt(0);
-  if (!blockEl.contains(range.startContainer)) return null;
-  const walker = document.createTreeWalker(blockEl, NodeFilter.SHOW_TEXT);
-  let offset = 0;
-  let node: Node | null;
-  while ((node = walker.nextNode())) {
-    if (node === range.startContainer) return offset + range.startOffset;
-    offset += (node as Text).data.length;
-  }
-  return null;
-}
-
-/**
  * Toggles the whole-block-commented mark (an unresolved comment made via a
  * block's own comment icon, not a text selection — selection comments are
  * BlockNote's own native comment marks now, rendered by the editor itself;

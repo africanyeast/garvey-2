@@ -1,7 +1,7 @@
 import type { Thing } from "@/lib/store";
 import { formatRelative } from "./time";
 import { parseBody } from "./blocks";
-import type { Attachment, BlockVariant, Comment, Note, Project } from "@/app/lib/writing-os/types";
+import { briefFromHeader, type Attachment, type BlockVariant, type Comment, type Note, type Project } from "@/app/lib/writing-os/types";
 import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 
 // Things, in the shapes the API routes return. Relationships are passed
@@ -16,11 +16,7 @@ export function toProject(t: Thing): Project {
     slug: h.slug as string,
     title: (h.title as string) ?? "",
     subtitle: (h.subtitle as string) ?? "",
-    writingType: (h.writing_type as string) ?? "",
-    problem: (h.problem as string) ?? "",
-    agenda: (h.agenda as string) ?? "",
-    arguments: (h.arguments as string[]) ?? [],
-    goal: (h.goal as string) ?? "",
+    brief: briefFromHeader(h),
     titleCandidates: (h.title_candidates as Project["titleCandidates"]) ?? [],
     subtitleCandidates: (h.subtitle_candidates as Project["subtitleCandidates"]) ?? [],
     status: (h.status as string) ?? "active",

@@ -3,6 +3,7 @@
 import { createContext, useContext, useEffect, useRef, useState, type ReactNode } from "react";
 import { useCreateBlockNote } from "@blocknote/react";
 import { draftSchema, type DraftBlock, type DraftEditor, type DraftPartialBlock } from "./schema";
+import { SectionDropExtension } from "./sectionDrop";
 import { WritingAssistExtension } from "./writingAssist";
 
 /**
@@ -54,20 +55,15 @@ export function DraftEditorProvider({
   initialDocument: DraftPartialBlock[];
 }) {
 
-  // The native BlockNote CommentsExtension (selection-anchored comments via
-  // ThreadStore) is disabled for now — it's the suspected source of a
-  // browser-freezing crash even after removing its toolbar entry, and the
-  // plan is to replace it with a single block-level comment/thread system
-  // instead of running two comment mechanisms side by side. See the
-  // `comment-freeze` memory; `VaultThreadStore`/`lib/vault/threads.ts` stay
-  // in place for that future rebuild but are unused for now.
+  // Comments are whole-block only (`Comment`), outside the editor; the
+  // native CommentsExtension stays off (see the `comment-freeze` memory).
   const editor = useCreateBlockNote(
     {
       schema: draftSchema,
       initialContent: initialDocument,
       // Ghost text and next block — the draft's editor only, not notes or
       // transcripts.
-      extensions: [WritingAssistExtension({ projectId })],
+      extensions: [WritingAssistExtension({ projectId }), SectionDropExtension()],
     },
     [],
   );

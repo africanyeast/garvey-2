@@ -31,7 +31,7 @@ export async function POST(req: NextRequest) {
   const instructions =
     typeof body.instructions === "string" && body.instructions.trim() ? body.instructions.trim().slice(0, 300) : undefined;
   const input: OcrInput = { imageBase64: image.base64, mimeType: image.mimeType, instructions };
-  const result = await runPlugin<OcrInput, OcrResult>("ocr", input);
+  const result = await runPlugin<OcrInput, OcrResult>("ocr", input, { signal: req.signal });
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 502 });
   return NextResponse.json(result.data);
 }

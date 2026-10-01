@@ -97,23 +97,17 @@ describe("notes, comments and trash on links", () => {
     expect(updated?.links).toEqual([{ rel: "about", to: { id: b.id }, label: "Beta" }]);
   });
 
-  test("comments go on a block in a project, or on a note", async () => {
+  test("comments go on a block in a project, nothing else", async () => {
     const onBlock = await C.createComment({ on: { id: a.id, block: "b1" }, text: "block comment" });
     expect(onBlock.links).toEqual([{ rel: "comment-on", to: { id: a.id, block: "b1" }, label: "First block text" }]);
-    const onNote = await C.createComment({ on: { id: noteId }, text: "note comment" });
-    expect(onNote.links).toEqual([{ rel: "comment-on", to: { id: noteId } }]);
+    await expect(C.createComment({ on: { id: noteId }, text: "note comment" })).rejects.toBeInstanceOf(StoreError);
     await expect(C.createComment({ on: { id: a.id }, text: "whole project" })).rejects.toBeInstanceOf(StoreError);
-    expect((await C.listComments()).length).toBe(2);
+    expect((await C.listComments()).length).toBe(1);
   });
 
-  test("promoting an alt version re-points comments between the block and the alt", async () => {
+  test("an alt version is alternate-of its block", async () => {
     const alt = await V.createVariant(a.slug, { block: "b1", content: para("alt")[0] as never, order: 0 });
     expect(alt.links).toEqual([{ rel: "alternate-of", to: { id: a.id, block: "b1" } }]);
-    const [onBlock] = (await C.listComments()).filter((c) => c.text === "block comment");
-    const moved = await C.updateComment(onBlock.id, { on: { id: alt.id } });
-    expect(moved?.links).toEqual([{ rel: "comment-on", to: { id: alt.id } }]);
-    const back = await C.updateComment(onBlock.id, { on: { id: a.id, block: "b1" } });
-    expect(back?.links[0].to).toEqual({ id: a.id, block: "b1" });
   });
 
   test("a trashed note whose project is gone comes back as an inbox capture, tags kept", async () => {

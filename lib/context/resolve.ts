@@ -1,7 +1,7 @@
 import { commentOn } from "@/lib/store/links";
 import type { Link, Thing } from "@/lib/store/types";
 import { blockPlainText, flattenBlocksToMarkdown } from "@/app/lib/writing-os/blockText";
-import { projectDisplayTitle, type Attachment } from "@/app/lib/writing-os/types";
+import { briefFromHeader, projectDisplayTitle, type Attachment } from "@/app/lib/writing-os/types";
 import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 
 // The AI rule (artifacts/MENTAL_MODEL.md, V2_SPEC.md Phase 5): what a
@@ -32,6 +32,9 @@ export interface ContextDeclaration {
   draft: DraftScope;
   /** Size budget in characters, over the whole bundle. */
   budget: number;
+  /** Keep only this many characters of the document text, the end of it
+   * (nearest the cursor), starting at a word. */
+  maxDraftChars?: number;
 }
 
 export const PART_PERMISSION: Record<ContextPart | "draft", "read:style" | "read:draft" | "read:notes"> = {
@@ -82,6 +85,9 @@ export interface ContextManifest {
    * vault (the last save). */
   documentSource: "editor" | "vault" | "none";
   section: { id: string; title: string } | null;
+  /** Where in the draft the cursor is: its block's number of the blocks,
+   * and its section's number of the sections (0 when outside any). */
+  where?: { block: number; blocks: number; section: number; sections: number };
   items: ManifestEntry[];
   /** Left out to fit the budget (step 4 first, then the oldest of step 5). */
   dropped: ManifestEntry[];
@@ -108,14 +114,15 @@ export const CURSOR_MARK = "⟦cursor⟧";
 type Block = DraftPartialBlock & { id?: string; type?: string; children?: Block[] };
 
 /** Every block in document order, with the section it belongs to (the
- * last `section` block seen, as `nearestSectionId` decides on the client)
- * and the sections it is nested inside. */
+ * innermost `section` it is nested in, or itself if it is one — as
+ * `nearestSectionId` decides on the client) and the sections it is nested
+ * inside. A block that sits beside a section rather than under it belongs
+ * to none. */
 function walk(doc: Block[]): Array<{ block: Block; section: string | null; within: string[] }> {
   const out: Array<{ block: Block; section: string | null; within: string[] }> = [];
-  let section: string | null = null;
   const visit = (blocks: Block[], within: string[]) => {
     for (const b of blocks) {
-      if (b.type === "section") section = b.id ?? null;
+      const section = b.type === "section" ? (b.id ?? null) : (within[0] ?? null);
       out.push({ block: b, section, within });
       if (b.children?.length) visit(b.children, b.type === "section" && b.id ? [b.id, ...within] : within);
     }
@@ -144,17 +151,9 @@ const titleOfProject = (p: Thing) =>
 
 function briefText(p: Thing): string {
   const h = p.header as Record<string, unknown>;
-  const line = (label: string, v: unknown) => (typeof v === "string" && v.trim() ? `${label}: ${v.trim()}` : null);
-  const args = Array.isArray(h.arguments) ? (h.arguments as string[]).filter((a) => a.trim()) : [];
-  return [
-    `Title: ${titleOfProject(p)}`,
-    line("Subtitle", h.subtitle),
-    line("Kind of writing", h.writing_type),
-    line("Problem", h.problem),
-    line("Agenda", h.agenda),
-    args.length ? `Arguments:\n${args.map((a) => `- ${a}`).join("\n")}` : null,
-    line("Goal", h.goal),
-  ]
+  const subtitle = typeof h.subtitle === "string" ? h.subtitle.trim() : "";
+  const brief = briefFromHeader(h).trim();
+  return [`Title: ${titleOfProject(p)}`, subtitle && `Subtitle: ${subtitle}`, brief]
     .filter(Boolean)
     .join("\n");
 }
@@ -329,6 +328,11 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
         .join("\n\n");
       why = sectionId ? "this section, up to the cursor" : "the text before the first section, up to the cursor";
     }
+    if (decl.maxDraftChars && text.length > decl.maxDraftChars) {
+      const tail = text.slice(-decl.maxDraftChars);
+      text = `…${tail.slice(tail.search(/\s/) + 1)}`;
+      why += ", its end only";
+    }
     items.push({ step: 7, kind: "draft", id: thing?.header.id, title: "Document text", why, text });
   }
 
@@ -360,6 +364,16 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
       cursor: cursor ?? { block: "" },
       documentSource,
       section: sectionId ? { id: sectionId, title: sectionBlock ? blockPlainText(sectionBlock).trim() : sectionId } : null,
+      ...(at
+        ? {
+            where: {
+              block: blocks.indexOf(at) + 1,
+              blocks: blocks.length,
+              section: sectionId ? blocks.filter((b) => b.block.type === "section").findIndex((b) => b.block.id === sectionId) + 1 : 0,
+              sections: blocks.filter((b) => b.block.type === "section").length,
+            },
+          }
+        : {}),
       items: kept.map(entry),
       dropped: dropped.map((x) => ({ ...entry(x), why: `${x.why}; dropped to fit the budget` })),
       unanchored,

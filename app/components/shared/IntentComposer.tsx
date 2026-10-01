@@ -418,7 +418,7 @@ export function IntentComposer({
               rows={1}
               autoFocus={autoFocus}
               placeholder={placeholder}
-              className="relative block font-sans text-[14px] font-normal w-full p-0 m-0 resize-none border-none outline-none bg-transparent caret-[var(--text-primary)] text-transparent placeholder:text-[var(--text-muted)] leading-[1.5] overflow-y-auto"
+              className="relative block font-sans text-[14px] font-medium w-full p-0 m-0 resize-none border-none outline-none bg-transparent caret-[var(--text-primary)] text-transparent placeholder:text-[var(--text-muted)] leading-[1.5] overflow-y-auto"
             />
           </div>
           <button

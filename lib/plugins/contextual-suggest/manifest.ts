@@ -3,11 +3,14 @@ import type { PluginManifest } from "../types";
 export const manifest: PluginManifest = {
   id: "contextual-suggest",
   name: "Contextual Suggest",
-  trigger: "selection",
+  description: "Suggests alternatives for the word or phrase you select, or finds the word, phrase or idiom you describe, in your own style.",
+  // Runs from the selection toolbar (synonyms) and from the slash menu
+  // (a described word or idiom, no selection).
+  trigger: "command",
   kind: "completion",
   permissions: ["read:style", "read:draft"],
-  // Cheapest tier — a bounded word-choice call has no need for a larger
-  // model's reasoning/writing quality.
+  // Cheapest tier — a bounded word-choice call, synonyms or a described
+  // word, has no need for a larger model's reasoning/writing quality.
   model: "claude-haiku-4-5",
   // A synonym swap is a small, bounded word-choice call — no benefit from
   // deeper reasoning, and adaptive thinking was measurably spending

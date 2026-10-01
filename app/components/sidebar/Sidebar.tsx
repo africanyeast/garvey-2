@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { EllipsisVertical, FileText, Inbox, Plus, Search, Trash2, Feather, GripVertical, ScanEye } from "lucide-react";
+import { EllipsisVertical, FileText, Inbox, Plus, Search, Can, GripVertical, Sparkles, UserPen } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -70,7 +70,7 @@ export function Sidebar() {
   const isInbox = pathname === "/inbox" || pathname === "/";
   const isStyle = pathname === "/style";
   const isTrash = pathname === "/trash";
-  const isInspector = pathname === "/inspector";
+  const isInspector = pathname === "/plugins" || pathname?.startsWith("/plugins/");
   const activeSlug =
     !isInbox && !isStyle && !isTrash && !isInspector ? pathname?.split("/").filter(Boolean)[0] : null;
 
@@ -166,21 +166,21 @@ export function Sidebar() {
           href="/style"
           className={`flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer ${isStyle ? "border border-[var(--border-default)]" : "bg-transparent"}`}
         >
-          <Feather size={16} className="text-[var(--text-secondary)]" />
+          <UserPen size={16} className="text-[var(--text-secondary)]" />
           <span className={`text-[12px] font-semibold text-[var(--text-secondary)]`}>Style</span>
         </Link>
         <Link
-          href="/inspector"
+          href="/plugins"
           className={`flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer ${isInspector ? "border border-[var(--border-default)]" : "bg-transparent"}`}
         >
-          <ScanEye size={16} className="text-[var(--text-secondary)]" />
-          <span className={`text-[12px] font-semibold text-[var(--text-secondary)]`}>Inspector</span>
+          <Sparkles size={16} className="text-[var(--text-secondary)]" />
+          <span className={`text-[12px] font-semibold text-[var(--text-secondary)]`}>Plugins</span>
         </Link>
         <Link
           href="/trash"
           className={`flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer ${isTrash ? "border border-[var(--border-default)]" : "bg-transparent"}`}
         >
-          <Trash2 size={16} className="text-[var(--text-secondary)]" />
+          <Can size={16} className="text-[var(--text-secondary)]" />
           <span className={`text-[12px] font-semibold text-[var(--text-secondary)]`}>Trash</span>
         </Link>
       </div>
@@ -254,7 +254,7 @@ function SortableProjectRow({
       {menuOpen && (
         <DropdownMenu className="right-[4px]">
           <MenuRow
-            icon={Trash2}
+            icon={Can}
             label="Delete"
             onClick={(e) => {
               e.preventDefault();

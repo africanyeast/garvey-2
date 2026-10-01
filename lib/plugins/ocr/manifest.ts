@@ -3,6 +3,8 @@ import type { PluginManifest } from "../types";
 export const manifest: PluginManifest = {
   id: "ocr",
   name: "OCR",
+  description: "Transcribes the text in images and scans you attach.",
+  data: [{ what: "The transcript", where: "saved on the attachment it came from" }],
   trigger: "command",
   kind: "completion",
   permissions: [],

@@ -3,7 +3,7 @@
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useAllMentionTargets } from "@/app/lib/writing-os/useAllMentionTargets";
 import { NoteRow } from "@/app/components/shared/NoteRow";
-import { IntentComposer } from "@/app/components/shared/IntentComposer";
+import { NoteComposer } from "@/app/components/shared/NoteComposer";
 
 export function InboxList() {
   const {
@@ -11,15 +11,7 @@ export function InboxList() {
     openExpanded,
     toggleNoteResolved,
     removeNoteTag,
-    newInboxDraft,
-    setNewInboxDraft,
-    newInboxLinks,
-    setNewInboxLinks,
-    newInboxAttachments,
-    setNewInboxAttachments,
-    addInboxItem,
     deleteNote,
-    commentsData,
     setNoteAttachmentTranscription,
   } = useWritingOS();
 
@@ -33,7 +25,7 @@ export function InboxList() {
         <h1 className={`font-sans text-3xl font-semibold leading-tight text-[var(--text-primary)] mt-[0] mx-[0] mb-[6px]`}>Inbox</h1>
       </div>
 
-      <div className="flex-1 overflow-y-auto overscroll-contain pt-[16px] flex flex-col divide-y divide-[var(--border-default)]">
+      <div className="flex-1 overflow-y-auto overscroll-contain pt-[12px] flex flex-col divide-y divide-[var(--border-default)]">
         {feedDesc.map((item) => (
           <NoteRow
             key={item.id}
@@ -42,28 +34,17 @@ export function InboxList() {
             time={item.time}
             resolved={item.resolved}
             attachments={item.attachments}
-            onOpen={() => openExpanded("inbox", item.id)}
+            onOpen={() => openExpanded("note", item.id)}
             onToggleResolved={() => toggleNoteResolved(item.id)}
             onRemoveTag={(t) => removeNoteTag(item.id, t.kind, t.tagId)}
             onDelete={() => deleteNote(item.id)}
-            commentCount={(commentsData[item.id] || []).length}
             onSetTranscription={(url, t) => setNoteAttachmentTranscription(item.id, url, t)}
           />
         ))}
       </div>
 
       <div className="pt-[14px] px-[0] pb-[24px] shrink-0">
-        <IntentComposer
-          value={newInboxDraft}
-          onChange={setNewInboxDraft}
-          links={newInboxLinks}
-          onLinksChange={setNewInboxLinks}
-          attachments={newInboxAttachments}
-          onAttachmentsChange={setNewInboxAttachments}
-          onSubmit={addInboxItem}
-          placeholder="Capture a thought, paste a link, or drop a file — @ a project, # a section or block"
-          mentionTargets={mentionTargets}
-        />
+        <NoteComposer scope={{ kind: "inbox" }} mentionTargets={mentionTargets} />
       </div>
     </div>
   );

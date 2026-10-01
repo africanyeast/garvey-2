@@ -10,16 +10,14 @@ import { projectDisplayTitle } from "@/app/lib/writing-os/types";
 // separate things linked to it.
 
 /** The header fields a project's brief is stored under. `order` is only
- * present once the project has been dragged in the sidebar. */
+ * present once the project has been dragged in the sidebar. The old
+ * separate brief fields (`problem`, `goal`…) are left as they are on disk;
+ * once `brief` is written they are no longer read (see `briefFromHeader`). */
 function briefFields(p: Omit<Project, "id" | "slug" | "createdAt" | "updatedAt">): Record<string, unknown> {
   return {
     title: p.title,
     subtitle: p.subtitle,
-    writing_type: p.writingType,
-    problem: p.problem,
-    agenda: p.agenda,
-    arguments: p.arguments,
-    goal: p.goal,
+    brief: p.brief,
     title_candidates: p.titleCandidates,
     subtitle_candidates: p.subtitleCandidates,
     status: p.status,
@@ -70,12 +68,7 @@ export async function getProject(slug: string): Promise<Project | null> {
   return p ? toProject(p) : null;
 }
 
-export async function createProject(input: {
-  title?: string;
-  problem?: string;
-  agenda?: string;
-  goal?: string;
-}): Promise<Project> {
+export async function createProject(input: { title?: string; brief?: string }): Promise<Project> {
   const store = await vault();
   // A brand-new project stays untitled (no fake "Untitled" title stored)
   // until the user actually sets one, or closes the brief without doing so
@@ -86,11 +79,7 @@ export async function createProject(input: {
   const brief = {
     title,
     subtitle: "",
-    writingType: "",
-    problem: input.problem ?? "",
-    agenda: input.agenda ?? "",
-    arguments: [],
-    goal: input.goal ?? "",
+    brief: input.brief ?? "",
     titleCandidates: title ? [{ text: title, current: true }] : [],
     subtitleCandidates: [],
     status: "active",

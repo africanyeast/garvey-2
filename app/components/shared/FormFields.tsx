@@ -4,9 +4,8 @@ import { Check, Loader2, Plus } from "lucide-react";
 import { useEffect, useRef, useState, type FocusEvent, type KeyboardEvent, type ReactNode } from "react";
 
 /**
- * The label + hint pair above every brief-style field — Problem, Agenda,
- * Goal, Writing type, and (now) the Style page's tag fields all use this so
- * a label can only ever look identical across pages, not "close."
+ * The label + hint pair above every form field on the Style page, so a
+ * label can only ever look identical across fields, not "close."
  */
 export function FieldLabel({ label, hint }: { label: string; hint?: string }) {
   return (
@@ -21,10 +20,10 @@ export function FieldLabel({ label, hint }: { label: string; hint?: string }) {
 // `editor-context.tsx`'s `syncDocument`) — one interval every autosaving
 // field in the app agrees on, so nothing feels faster or laggier than the
 // document itself.
-const AUTOSAVE_DELAY = 800;
+export const AUTOSAVE_DELAY = 800;
 
-/** A multi-line, contentEditable text field — Problem/Agenda/Goal on the
- * brief, Structural Habits on the Style page. Autosaves `AUTOSAVE_DELAY` ms
+/** A multi-line, contentEditable text field — Structural Habits on the
+ * Style page. Autosaves `AUTOSAVE_DELAY` ms
  * after the last keystroke (not just on blur), so leaving the field isn't
  * the only thing that commits it. */
 export function EditableField({
@@ -82,11 +81,11 @@ export function EditableField({
   );
 }
 
-/** A single-line text input — Writing type, Sentence Length, tag-add
- * inputs, and every "New X..." candidate/argument input all share this.
+/** A single-line text input — Sentence Length and the tag-add inputs
+ * share this.
  * `onCommit`, if given, autosaves `AUTOSAVE_DELAY` ms after the last
  * keystroke and immediately on blur — same behavior as `EditableField`, for
- * uncontrolled (`defaultValue`) fields like Writing type rather than a
+ * uncontrolled (`defaultValue`) fields rather than a
  * one-off "add on Enter" input. */
 export function TextField({
   defaultValue,
@@ -151,8 +150,8 @@ export function TextField({
 
 export type SaveStatus = "idle" | "saving" | "saved";
 
-/** Tracks however many autosaves are in flight across a whole form (Problem,
- * Agenda, Goal, Writing type, arguments — each fires its own PATCH
+/** Tracks however many autosaves are in flight across a whole form (the
+ * brief's title, subtitle and text each fire their own PATCH
  * independently) so the form can show one shared "Saving…"/"Saved" status
  * rather than a separate indicator per field. `track` wraps each save's
  * promise; the status only drops out of "saving" once every in-flight save
@@ -199,8 +198,7 @@ export function SaveStatusBadge({ status }: { status: SaveStatus }) {
   );
 }
 
-/** The "+ Add X" button — Add argument, Add title candidate, Add another
- * sample, all one look. */
+/** The "+ Add X" button — Add another sample and the like, all one look. */
 export function AddButton({ onClick, children }: { onClick: () => void; children: ReactNode }) {
   return (
     <button

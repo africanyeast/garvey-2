@@ -3,6 +3,7 @@ import type { PluginManifest } from "../types";
 export const manifest: PluginManifest = {
   id: "insert-content",
   name: "Insert content",
+  description: "Decides where captured content belongs in your projects and formats it to fit.",
   // Explicitly invoked by a composer submit, not a passive idle/selection
   // trigger.
   trigger: "command",

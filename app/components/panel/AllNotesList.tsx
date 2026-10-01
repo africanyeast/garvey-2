@@ -11,7 +11,6 @@ export function AllNotesList() {
     toggleNoteResolved,
     removeNoteTag,
     deleteNote,
-    commentsData,
     setNoteAttachmentTranscription,
   } = useWritingOS();
 
@@ -37,7 +36,6 @@ export function AllNotesList() {
           onToggleResolved={() => toggleNoteResolved(note.id)}
           onRemoveTag={(t) => removeNoteTag(note.id, t.kind, t.tagId)}
           onDelete={() => deleteNote(note.id)}
-          commentCount={(commentsData[note.id] || []).length}
           onSetTranscription={(url, t) => setNoteAttachmentTranscription(note.id, url, t)}
         />
       ))}

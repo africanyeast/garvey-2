@@ -6,7 +6,7 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const { id } = await params;
   const patch = await req.json();
   try {
-    const comment = await updateComment(id, { resolved: patch.resolved, text: patch.text, on: patch.on });
+    const comment = await updateComment(id, { resolved: patch.resolved, text: patch.text });
     if (!comment) return NextResponse.json({ error: "not found" }, { status: 404 });
     return NextResponse.json(comment);
   } catch (err) {

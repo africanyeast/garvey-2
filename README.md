@@ -16,7 +16,7 @@ AI features are small plugins, each with its own model and reasoning settings:
 - **Insert content**: decides where captured content belongs in your projects and formats it to fit.
 - **OCR**: transcribes text from images and scans you attach.
 
-The **Inspector** logs every AI call with its latency, token usage and cost.
+Each plugin has its own page under **Plugins**, with its settings and a history of its calls, including latency, token usage and cost.
 
 ## Requirements
 

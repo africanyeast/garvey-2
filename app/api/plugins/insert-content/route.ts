@@ -45,7 +45,7 @@ export async function POST(req: NextRequest) {
       .map((p) => ({ id: p.id, slug: p.slug, title: projectDisplayTitle(p) })),
   };
 
-  const result = await runPlugin<InsertContentInput, InsertContentResult>("insert-content", input);
+  const result = await runPlugin<InsertContentInput, InsertContentResult>("insert-content", input, { signal: req.signal });
   if (!result.ok) return NextResponse.json({ error: result.error }, { status: 502 });
   return NextResponse.json(result.data);
 }

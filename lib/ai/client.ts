@@ -7,9 +7,38 @@ export interface CompleteImage {
   mimeType: "image/jpeg" | "image/png" | "image/gif" | "image/webp";
 }
 
-export interface CompleteOptions {
+/** What one call cost and how its time was spent, for the run record. */
+export interface CallUsage {
+  /** Uncached input tokens, input written to the cache, input read from it. */
+  input: number;
+  cacheWrite: number;
+  cacheRead: number;
+  output: number;
+  usd: number;
+  /** From the start of the call to the first words, when they streamed. */
+  firstMs?: number;
+  /** Time spent waiting on the API; the rest of the call is the SDK's own
+   * process starting and stopping. */
+  apiMs: number;
+}
+
+/** What the harness hands every call, beside the plugin's settings: a
+ * signal that stops it (the writer moved on, or closed the request), a
+ * listener for its words as they arrive, and where its usage goes. Plugins
+ * pass it through unread (`...ctx.call`). */
+export interface CallControl {
+  signal?: AbortSignal;
+  /** Each new piece of text, in order, as the model writes it. */
+  onText?: (delta: string) => void;
+  onUsage?: (usage: CallUsage) => void;
+}
+
+export interface CompleteOptions extends CallControl {
   system: string;
-  prompt: string;
+  /** The user message. As a list, each part is sent as its own block, most
+   * stable first: the API can then read from its cache everything up to a
+   * part where an earlier call ended (see `prompt.ts`). */
+  prompt: string | string[];
   images?: CompleteImage[];
   /** No default on purpose — the caller (a plugin's `run()`, reading its own
    * manifest) always states these explicitly rather than inheriting a
@@ -17,6 +46,14 @@ export interface CompleteOptions {
   model: PluginModel;
   effort: PluginEffort;
   thinking: boolean;
+}
+
+/** Thrown when a call is stopped through its signal. */
+export class CallCancelled extends Error {
+  constructor() {
+    super("Cancelled");
+    this.name = "CallCancelled";
+  }
 }
 
 async function* singleUserTurn(content: ContentBlockParam[]): AsyncGenerator<SDKUserMessage> {
@@ -44,12 +81,21 @@ async function* singleUserTurn(content: ContentBlockParam[]): AsyncGenerator<SDK
  * unlike style injection, which stays uniform across every plugin on
  * purpose.
  */
-export async function complete({ system, prompt, images, model, effort, thinking }: CompleteOptions): Promise<string> {
+export async function complete({ system, prompt, images, model, effort, thinking, signal, onText, onUsage }: CompleteOptions): Promise<string> {
+  if (signal?.aborted) throw new CallCancelled();
+  // Stopping the query ends the SDK's process, so a call nobody is waiting
+  // for any more stops costing anything.
+  const abortController = new AbortController();
+  const stop = () => abortController.abort();
+  signal?.addEventListener("abort", stop, { once: true });
+  const started = performance.now();
+  let firstMs: number | undefined;
+
   const content: ContentBlockParam[] = [];
   for (const image of images ?? []) {
     content.push({ type: "image", source: { type: "base64", media_type: image.mimeType, data: image.base64 } });
   }
-  content.push({ type: "text", text: prompt });
+  for (const text of typeof prompt === "string" ? [prompt] : prompt.filter(Boolean)) content.push({ type: "text", text });
 
   const options: Options = {
     model,
@@ -77,24 +123,52 @@ export async function complete({ system, prompt, images, model, effort, thinking
     // resumes — don't clutter ~/.claude/projects/ with one transcript per
     // synonym lookup.
     persistSession: false,
+    abortController,
+    // The words as they are written: for whoever is listening, and for the
+    // time to the first of them.
+    includePartialMessages: true,
   };
 
   let result: string | null = null;
   let failure: string | null = null;
-  for await (const message of query({ prompt: singleUserTurn(content), options })) {
-    if (message.type === "result") {
-      if (message.subtype === "success") {
-        result = message.result;
-        console.log(
-          `[ai/complete] $${message.total_cost_usd.toFixed(4)} — ${message.usage.output_tokens} out / ` +
-            `${message.usage.cache_creation_input_tokens + message.usage.cache_read_input_tokens + message.usage.input_tokens} in`
-        );
-      } else {
-        failure = message.errors?.join("; ") || message.stop_reason || "Agent SDK query failed";
+  try {
+    for await (const message of query({ prompt: singleUserTurn(content), options })) {
+      if (message.type === "stream_event") {
+        const event = message.event;
+        if (event.type === "content_block_delta" && event.delta.type === "text_delta") {
+          firstMs ??= Math.round(performance.now() - started);
+          onText?.(event.delta.text);
+        }
+      } else if (message.type === "result") {
+        const usage: CallUsage = {
+          input: message.usage.input_tokens,
+          cacheWrite: message.usage.cache_creation_input_tokens,
+          cacheRead: message.usage.cache_read_input_tokens,
+          output: message.usage.output_tokens,
+          usd: message.total_cost_usd,
+          ...(firstMs !== undefined ? { firstMs } : {}),
+          apiMs: message.duration_api_ms,
+        };
+        onUsage?.(usage);
+        if (message.subtype === "success") {
+          result = message.result;
+          console.log(
+            `[ai/complete] ${model} $${usage.usd.toFixed(4)} — ${usage.output} out / ${usage.input} in, ` +
+              `${usage.cacheWrite} cache write, ${usage.cacheRead} cache read`
+          );
+        } else {
+          failure = message.errors?.join("; ") || message.stop_reason || "Agent SDK query failed";
+        }
       }
     }
+  } catch (err) {
+    if (signal?.aborted) throw new CallCancelled();
+    throw err;
+  } finally {
+    signal?.removeEventListener("abort", stop);
   }
 
+  if (signal?.aborted) throw new CallCancelled();
   if (failure) throw new Error(failure);
   if (result === null) throw new Error("Agent SDK query ended without a result");
   return result;

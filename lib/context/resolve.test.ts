@@ -24,6 +24,7 @@ const draftP = [
     ],
   },
   { id: "sB", type: "section", content: text("Section B"), children: [{ id: "bB1", type: "paragraph", content: text("Beta one."), children: [] }] },
+  { id: "bEnd", type: "paragraph", content: text("Beside the sections."), children: [] },
 ];
 
 let n = 10;
@@ -104,6 +105,13 @@ describe("bundle for a cursor in a section", () => {
     expect(b.manifest.section).toEqual({ id: "sA", title: "Section A" });
   });
 
+  test("the brief reads a project's old separate brief fields until it has one of its own", () => {
+    expect(b.items.find((x) => x.step === 2)?.text).toBe("Title: Paper\nProblem: Why it matters\n\nArguments:\n- one");
+    const withBrief: Thing = { ...projectP, header: { ...projectP.header, brief: "One freeform brief." } };
+    const own = resolveBundle({ things: [withBrief], style: "", cursor: { thing: P, block: "bA1" }, declaration: everything });
+    expect(own.items.find((x) => x.step === 2)?.text).toBe("Title: Paper\nOne freeform brief.");
+  });
+
   test("a linked note brings its text and its attachments' transcripts, not what links to it", () => {
     const secA = b.items.find((x) => x.id === N.secA.header.id)!;
     expect(secA.text).toContain("section A note");
@@ -166,6 +174,12 @@ describe("isolation", () => {
     expect(b.manifest.section).toBeNull();
     expect(idsAt(b, 5)).toEqual([]);
     expect(documentText(b)).toBe("Before any section.");
+  });
+
+  test("a block after a section but not under it is in no section", () => {
+    const b = resolve({ thing: P, block: "bEnd" });
+    expect(b.manifest.section).toBeNull();
+    expect(idsAt(b, 5)).toEqual([]);
   });
 });
 

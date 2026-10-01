@@ -3,7 +3,7 @@ import { getRun } from "@/lib/context";
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const run = getRun(id);
-  if (!run) return NextResponse.json({ error: "not found (runs are kept in memory, the last 50)" }, { status: 404 });
+  const run = await getRun(id);
+  if (!run) return NextResponse.json({ error: "not found" }, { status: 404 });
   return NextResponse.json(run);
 }

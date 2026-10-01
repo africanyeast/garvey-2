@@ -182,22 +182,48 @@ input {
 .wos-dragging {
   opacity: 0.4;
 }
-/* A section's own label (the `section` custom block, `writing-os/blocks/
-   section.ts`) stays almost invisible until you go looking for it — the
-   organization is there for whoever wants it, without competing with the
-   writing itself. Small/bold/muted rather than BlockNote's default
-   heading-sized type, since a section boundary here is organizational
-   scaffolding, not a headline. */
+/* A section's title (the `section` custom block, `writing-os/blocks/
+   section.ts`): organisation that stays out of the writing's way. Small,
+   muted sans, as typed, with a little more room above than a paragraph
+   break. The room is margin on the outer row, not padding, so the grip
+   still centres on the title's line. */
+.bn-block-outer:has(> .bn-block > .bn-block-content[data-content-type="section"]) {
+  margin-top: 18px;
+}
+.bn-editor > .bn-block-group > .bn-block-outer:first-child {
+  margin-top: 0;
+}
 .wos-section-label {
   font-family: var(--font-sans);
-  font-size: 12px;
-  font-weight: 700;
+  font-size: 12.5px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
   color: var(--text-muted);
-  opacity: 0.32;
-  transition: opacity 130ms ease-out;
+  opacity: 0.7;
+  transition: opacity 150ms ease-out;
 }
-.bn-block-outer:hover .wos-section-label {
-  opacity: 0.75;
+.bn-block-outer:hover > .bn-block > .bn-block-content .wos-section-label,
+.wos-section-drop > .bn-block > .bn-block-content .wos-section-label {
+  opacity: 1;
+}
+/* Holding a dragged block over a section's title: drop lands inside it. */
+.wos-section-drop > .bn-block > .bn-block-content[data-content-type="section"] {
+  background: var(--fill-highlight-subtle);
+  border-radius: var(--radius-xs, 4px);
+  transition: background 120ms ease-out;
+}
+/* ...and BlockNote's between-blocks drop line hides, since it would point
+   somewhere else. */
+body:has(.wos-section-drop) .prosemirror-dropcursor-block {
+  display: none;
+}
+/* BlockNote's "Empty toggle. Click to add a block." under an open, empty
+   section: keep it, but as quiet as the title. */
+.bn-block-content[data-content-type="section"] .bn-toggle-add-block-button {
+  font-family: var(--font-sans);
+  font-size: 12px;
+  color: var(--text-muted);
+  opacity: 0.5;
 }
 /* BlockNote's own toggle chevron defaults to a 18px icon sized for a
    heading-sized toggle — shrink it and mute its color to match the
@@ -222,6 +248,13 @@ input {
   font-size: 17px;
   line-height: 1.6;
 }
+/* The project brief is notes about the piece, not the piece — it shares
+   the brief page's sans with the title and subtitle above it. */
+.wos-brief-editor .bn-default-styles {
+  font-family: var(--font-sans);
+  font-size: 15px;
+  line-height: 1.7;
+}
 .bn-editor {
   padding-inline: 0 !important;
   /* Blocks blend into the page, same as every other surface here — not a
@@ -244,7 +277,7 @@ input {
    comment for why), so this only ever needs to fit these two small icons,
    not a whole comment box. */
 .wos-doc-editor .bn-editor {
-  padding-inline: 0 40px !important;
+  padding-inline: 0 64px !important;
 }
 /* BlockNote's default 3px top/bottom block padding reads as one continuous
    paragraph rather than a run of separate blocks — double it to match the
@@ -298,7 +331,6 @@ input {
   flex-direction: column;
   height: auto;
   gap: 2px;
-  margin-top: 12px;
 }
 /* Its buttons (ariakit already resets these to fit-content/no padding via
    `.bn-side-menu .bn-ak-button`) render our own 11px lucide icons

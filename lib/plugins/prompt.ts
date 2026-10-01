@@ -4,6 +4,18 @@ import type { PluginContext, PluginManifest } from "./types";
 // What a plugin's code may use to turn its harness-built context into a
 // prompt. Kept apart from harness.ts so plugins never import anything that
 // reads the vault.
+//
+// Order, for cost (V2_SPEC.md Phase 7): what repeats first, what varies
+// last. The system prompt holds only what is the same across calls (style,
+// the plugin's instruction, then brief, outline and project material);
+// anything per call goes in the user message, the writer's own instruction
+// last of all. The SDK caches the system prompt and the whole message up to
+// its last part, and the API reads a cache only up to where an earlier
+// call ended. So a user message given to `complete` as parts, stable first,
+// lets a call that repeats an earlier one plus more (a retry with an
+// instruction) read the repeated part from the cache. Prefixes under the
+// model's minimum (4096 tokens on Haiku 4.5, 1024 on Sonnet 5) are never
+// cached at all.
 
 /** The one function that assembles a plugin's system prompt — plugins supply
  * only the task-specific instruction fragment; the harness-resolved bundle

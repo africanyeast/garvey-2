@@ -1,7 +1,8 @@
 import { contextualSuggestPlugin } from "./contextual-suggest";
 import { ocrPlugin } from "./ocr";
 import { insertContentPlugin } from "./insert-content";
-import { writingAssistPlugin } from "./writing-assist";
+import { tabCompletionPlugin } from "./tab-completion";
+import { continueWritingPlugin } from "./continue-writing";
 import type { Plugin, PluginManifest } from "./types";
 
 /**
@@ -18,7 +19,8 @@ const PLUGINS: Record<string, Plugin<any, any>> = {
   [contextualSuggestPlugin.manifest.id]: contextualSuggestPlugin,
   [ocrPlugin.manifest.id]: ocrPlugin,
   [insertContentPlugin.manifest.id]: insertContentPlugin,
-  [writingAssistPlugin.manifest.id]: writingAssistPlugin,
+  [tabCompletionPlugin.manifest.id]: tabCompletionPlugin,
+  [continueWritingPlugin.manifest.id]: continueWritingPlugin,
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

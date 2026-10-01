@@ -17,7 +17,7 @@ import "./globals.css";
 // fetch or subset.
 
 export const metadata: Metadata = {
-  title: "Garvey",
+  title: { template: "%s - Garvey", default: "Garvey" },
   description: "A personal communication OS.",
 };
 

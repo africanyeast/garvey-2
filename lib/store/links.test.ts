@@ -59,10 +59,19 @@ describe("tags", () => {
     ]);
   });
 
-  test("list a note on its own project and on projects it's '@'-tagged with, not on a '#' alone", () => {
+  test("list a note on every project it's filed under or tagged with, a '#' alone included", () => {
     expect(isListedIn(filed, P)).toBe(true);
     expect(isListedIn(filed, Q)).toBe(true);
-    expect(isListedIn([{ rel: "about", to: { id: Q, block: "x" } }], Q)).toBe(false);
+    expect(isListedIn([{ rel: "about", to: { id: Q, block: "x" } }], Q)).toBe(true);
+  });
+
+  test("list a note in a section or block only when tagged with it or a block inside it", () => {
+    expect(isListedIn(filed, P, new Set(["s1"]))).toBe(true);
+    // A section lists notes tagged with a block inside it.
+    expect(isListedIn(filed, P, new Set(["s2", "b1"]))).toBe(true);
+    expect(isListedIn(filed, P, new Set(["s2", "b2"]))).toBe(false);
+    expect(isListedIn(filed, Q, new Set(["b1"]))).toBe(false);
+    expect(isListedIn([{ rel: "about", to: { id: P } }], P, new Set(["s1"]))).toBe(false);
   });
 
   test("a section of its own project re-files the note, keeping the old section as a tag", () => {
@@ -94,14 +103,14 @@ describe("tags", () => {
     expect(sectionOf(next, P)).toBeNull();
   });
 
-  test("removing its own project unfiles the note, keeping its section as a tag", () => {
+  test("removing its own project unfiles the note, keeping its section as a tag (still listed through it)", () => {
     const next = withoutTag(filed, "project", P);
     expect(next).toEqual([
       { rel: "about", to: { id: P, block: "s1" }, label: "Sec s1", place: "section" },
       { rel: "about", to: { id: P, block: "b1" }, label: "Blk b1", place: "block" },
       { rel: "about", to: { id: Q }, label: "Other" },
     ]);
-    expect(isListedIn(next, P)).toBe(false);
+    expect(isListedIn(next, P)).toBe(true);
   });
 
   test("removing another project or a block drops only that link", () => {

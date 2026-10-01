@@ -6,11 +6,12 @@ import { useRouter } from "next/navigation";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useDraftEditor } from "@/app/lib/writing-os/editor-context";
 import { ProjectBrief } from "@/app/components/brief/ProjectBrief";
+import { SaveStatusBadge, useSaveStatus } from "@/app/components/shared/FormFields";
 import { ShortcutsPanel } from "@/app/components/shortcuts/ShortcutsPanel";
 import { SidePanel } from "@/app/components/panel/SidePanel";
 import { PanelShell } from "@/app/components/panel/PanelShell";
 import { DraftEditor } from "@/app/components/draft/DraftEditor";
-import { NoteExpanded } from "@/app/components/draft/NoteExpanded";
+import { ExpandedView } from "@/app/components/expand/ExpandedView";
 import { PdfViewerPanel } from "@/app/components/shared/PdfViewerPanel";
 import type { Project, TitleCandidate } from "@/app/lib/writing-os/types";
 import { projectDisplayTitle } from "@/app/lib/writing-os/types";
@@ -27,22 +28,22 @@ function patchProject(slug: string, patch: Partial<Omit<Project, "slug">>): Prom
     .catch(() => undefined);
 }
 
-/** Typing straight into the editor's title/subtitle is also "adding a
- * candidate" — it moves (or inserts) that text to the top of the candidate
- * list, current, same as dragging one to the top in the brief — so the
- * brief always shows whatever's actually live on the page, not just
- * whatever candidates existed at project-creation time. */
-function withTextAtTop(candidates: TitleCandidate[], text: string): TitleCandidate[] {
+/** Typing straight into the editor's title/subtitle edits the current
+ * candidate in place — the same as editing it in the brief — so fixing a
+ * typo never leaves the old spelling behind as an alternative. It keeps
+ * its place in the list, like every candidate. */
+function withCurrentText(candidates: TitleCandidate[], text: string): TitleCandidate[] {
   const trimmed = text.trim();
-  if (!trimmed) return candidates.map((c) => ({ ...c, current: false }));
-  const rest = candidates.filter((c) => c.text !== trimmed);
-  return [{ text: trimmed, current: true }, ...rest.map((c) => ({ ...c, current: false }))];
+  const others = (c: TitleCandidate) => !c.current && c.text !== trimmed;
+  if (!trimmed) return candidates.filter(others);
+  const at = candidates.findIndex((c) => c.current);
+  if (at < 0) return [{ text: trimmed, current: true }, ...candidates.filter(others)];
+  return candidates.flatMap((c, i) => (i === at ? [{ text: trimmed, current: true }] : others(c) ? [c] : []));
 }
 
 // All three create/touch a BlockNote editor, which touches `window` — load
 // client-only.
 const DraftPreview = dynamic(() => import("@/app/components/draft/DraftPreview").then((m) => m.DraftPreview), { ssr: false });
-const BlockExpanded = dynamic(() => import("@/app/components/draft/BlockExpanded").then((m) => m.BlockExpanded), { ssr: false });
 const DraftEditorProvider = dynamic(
   () => import("@/app/lib/writing-os/editor-context").then((m) => m.DraftEditorProvider),
   { ssr: false }
@@ -68,17 +69,31 @@ export function DraftScreen({
    * its own. */
   scrollToSectionId?: string;
 }) {
+  // A rename re-slugs the project. The URL follows with a bare
+  // `history.replaceState`, not a router navigation: a new `[slug]` would
+  // remount the whole page — closing the brief mid-edit — so the live slug
+  // is tracked here instead, reset whenever a different project arrives.
+  const [slug, setSlug] = useState(project.slug);
+  const [prevId, setPrevId] = useState(project.id);
+  if (project.id !== prevId) {
+    setPrevId(project.id);
+    setSlug(project.slug);
+  }
+
   // The single draft-wide BlockNote editor (and everything downstream that
   // reads/writes it — the main document, the side panel's block list, the
   // expanded-block panel, the preview) lives behind this one provider.
   return (
-    <DraftEditorProvider projectSlug={project.slug} projectId={project.id} initialDocument={initialDocument}>
+    <DraftEditorProvider projectSlug={slug} projectId={project.id} initialDocument={initialDocument}>
       {/* `key` forces a remount on project switch so title/subtitle state
        * (and the "open brief by default" state) always starts fresh for the
-       * new project, instead of needing an effect to resync it. */}
+       * new project, instead of needing an effect to resync it. Keyed by id,
+       * which a rename never changes. */}
       <DraftScreenInner
-        key={project.slug}
+        key={project.id}
         project={project}
+        slug={slug}
+        onSlugChange={setSlug}
         openBriefByDefault={openBriefByDefault}
         openBlockId={openBlockId}
         scrollToSectionId={scrollToSectionId}
@@ -89,11 +104,16 @@ export function DraftScreen({
 
 function DraftScreenInner({
   project,
+  slug,
+  onSlugChange,
   openBriefByDefault,
   openBlockId,
   scrollToSectionId,
 }: {
   project: Project;
+  /** The project's live slug — `project.slug` until a rename moves it. */
+  slug: string;
+  onSlugChange: (slug: string) => void;
   openBriefByDefault: boolean;
   openBlockId?: string;
   scrollToSectionId?: string;
@@ -108,11 +128,7 @@ function DraftScreenInner({
   // only tracked in its own `useState` would reset to whatever `project` was
   // at the initial page load the next time it's reopened, discarding a save
   // that already made it to disk.
-  const [problem, setProblem] = useState(project.problem);
-  const [agenda, setAgenda] = useState(project.agenda);
-  const [goal, setGoal] = useState(project.goal);
-  const [writingType, setWritingType] = useState(project.writingType);
-  const [argumentsList, setArgumentsList] = useState(project.arguments);
+  const [brief, setBrief] = useState(project.brief);
   const [updatedAt, setUpdatedAt] = useState(project.updatedAt);
   const {
     docMode,
@@ -135,6 +151,9 @@ function DraftScreenInner({
   const [briefOpen, setBriefOpen] = useState(openBriefByDefault);
 
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  // One "Saving…/Saved" for everything the brief writes, shown in its
+  // panel's header so it stays in view however far down the brief runs.
+  const { status: briefSaveStatus, track: trackBriefSave } = useSaveStatus();
 
   useEffect(() => {
     if (openBriefByDefault) {
@@ -147,7 +166,7 @@ function DraftScreenInner({
 
   useEffect(() => {
     if (openBlockId) {
-      openExpanded("block", openBlockId);
+      openExpanded(draftDoc.some((b) => b.id === openBlockId && b.type === "section") ? "section" : "block", openBlockId);
       router.replace(`/${project.slug}`);
     } else if (scrollToSectionId) {
       setScrollToBlockId(scrollToSectionId);
@@ -160,13 +179,14 @@ function DraftScreenInner({
 
   useEffect(() => {
     setActiveProject(projectDisplayTitle(project));
-    setActiveProjectSlug(project.slug);
     setActiveProjectId(project.id);
-    return () => {
-      setActiveProjectSlug(null);
-      setActiveProjectId(null);
-    };
-  }, [project, setActiveProject, setActiveProjectSlug, setActiveProjectId]);
+    return () => setActiveProjectId(null);
+  }, [project, setActiveProject, setActiveProjectId]);
+
+  useEffect(() => {
+    setActiveProjectSlug(slug);
+    return () => setActiveProjectSlug(null);
+  }, [slug, setActiveProjectSlug]);
 
   // Adjusting state from a prop change during render (not in an effect) —
   // recommended pattern for "sync local state to an external value that
@@ -183,48 +203,60 @@ function DraftScreenInner({
   // project that was still living at an "untitled" slug gets moved to match
   // its new title (see `updateProject`'s re-slug logic). Always writes the
   // candidate list alongside the title so the brief — which seeds its own
-  // local copy fresh from `project` every time it's opened — reflects
+  // local copy fresh from these every time it's opened — reflects
   // whatever's actually live on the page.
   const applyTitle = (text: string, candidates: TitleCandidate[]) => {
     setTitle(text);
     setTitleCandidates(candidates);
-    patchProjectInList(project.slug, { title: text, titleCandidates: candidates });
+    patchProjectInList(slug, { title: text, titleCandidates: candidates });
     setActiveProject(text);
-    patchProject(project.slug, { title: text, titleCandidates: candidates }).then((updated) => {
+    return patchProject(slug, { title: text, titleCandidates: candidates }).then((updated) => {
       if (!updated) return;
       setUpdatedAt(updated.updatedAt);
-      if (updated.slug !== project.slug) {
-        patchProjectInList(project.slug, { slug: updated.slug });
-        router.replace(`/${updated.slug}`);
+      if (updated.slug !== slug) {
+        patchProjectInList(slug, { slug: updated.slug });
+        onSlugChange(updated.slug);
+        window.history.replaceState(null, "", `/${updated.slug}`);
       }
     });
   };
-  const saveTitle = (text: string) => applyTitle(text, withTextAtTop(titleCandidates, text));
+  const saveTitle = (text: string) => {
+    if (text.trim() !== title.trim()) applyTitle(text.trim(), withCurrentText(titleCandidates, text));
+  };
 
   const applySubtitle = (text: string, candidates: TitleCandidate[]) => {
     setSubtitle(text);
     setSubtitleCandidates(candidates);
-    patchProject(project.slug, { subtitle: text, subtitleCandidates: candidates }).then(
+    return patchProject(slug, { subtitle: text, subtitleCandidates: candidates }).then(
       (updated) => updated && setUpdatedAt(updated.updatedAt)
     );
   };
-  const saveSubtitle = (text: string) => applySubtitle(text, withTextAtTop(subtitleCandidates, text));
+  const saveSubtitle = (text: string) => {
+    if (text.trim() !== subtitle.trim()) applySubtitle(text.trim(), withCurrentText(subtitleCandidates, text));
+  };
+
+  const applyBrief = (text: string) => {
+    setBrief(text);
+    return patchProject(slug, { brief: text }).then((updated) => updated && setUpdatedAt(updated.updatedAt));
+  };
 
   // The main document always stays visible — an expanded block/note takes
   // over the right dock (in place of the notes panel) rather than replacing
   // the document, so it's only ever fully hidden if the user goes fullscreen.
-  const draftFull = expandedItem?.kind === "block" || expandedItem?.kind === "note" ? expandedItem : null;
-  const panelOpen = panelMode !== "collapsed" || !!draftFull;
+  const panelOpen = panelMode !== "collapsed" || !!expandedItem;
+  // A focused section mounts the draft's one editor inside the expand
+  // shell, so the page's copy steps aside while it's open.
+  const sectionFocus = expandedItem?.kind === "section";
 
   return (
     <div className="flex h-[100%]">
       <div className="flex-1 min-w-[0] overflow-y-auto overscroll-contain bg-[var(--color-neutral-0)]">
         <div
-          className={`my-[0] mx-[auto] pt-[36px] px-[40px] pb-[100px] transition-[max-width] duration-200 ${
+          className={`my-[0] mx-[auto] pt-[36px] px-[40px] pb-[40vh] transition-[max-width] duration-200 ${
             panelOpen ? "max-w-[820px]" : "max-w-[900px]"
           }`}
         >
-          <DraftEditor
+          {!sectionFocus && <DraftEditor
             title={title}
             subtitle={subtitle}
             updatedAt={updatedAt}
@@ -232,7 +264,7 @@ function DraftScreenInner({
             onSubtitleChange={saveSubtitle}
             onOpenBrief={() => setBriefOpen(true)}
             onOpenShortcuts={() => setShortcutsOpen(true)}
-          />
+          />}
         </div>
       </div>
 
@@ -241,12 +273,8 @@ function DraftScreenInner({
        * note still leaves that note right where it was once it's closed. */}
       {pdfViewer ? (
         <PdfViewerPanel />
-      ) : draftFull ? (
-        draftFull.kind === "block" ? (
-          <BlockExpanded item={draftFull} />
-        ) : (
-          <NoteExpanded item={draftFull} />
-        )
+      ) : expandedItem ? (
+        <ExpandedView item={expandedItem} />
       ) : (
         <SidePanel />
       )}
@@ -257,17 +285,22 @@ function DraftScreenInner({
       {briefOpen && (
         <PanelShell
           mode="fullscreen"
+          headerActions={
+            <span className="mr-[8px]">
+              <SaveStatusBadge status={briefSaveStatus} />
+            </span>
+          }
           onClose={() => {
             setBriefOpen(false);
             // Only backfill a real "Untitled"/"Untitled N" title once the
             // user is done with the brief and never set one — not eagerly
             // at creation (see `finalizeUntitledProject`).
             if (!title.trim()) {
-              fetch(`/api/projects/${project.slug}/finalize`, { method: "POST" })
+              fetch(`/api/projects/${slug}/finalize`, { method: "POST" })
                 .then((res) => res.json())
                 .then((p: Project) => {
                   setTitle(p.title);
-                  patchProjectInList(project.slug, { title: p.title });
+                  patchProjectInList(slug, { title: p.title });
                   setActiveProject(p.title);
                 })
                 .catch(() => {});
@@ -275,14 +308,14 @@ function DraftScreenInner({
           }}
         >
           <ProjectBrief
-            project={{ ...project, title, subtitle, titleCandidates, subtitleCandidates, problem, agenda, goal, writingType, arguments: argumentsList }}
-            onTitleChange={applyTitle}
-            onSubtitleChange={applySubtitle}
-            onProblemChange={setProblem}
-            onAgendaChange={setAgenda}
-            onGoalChange={setGoal}
-            onWritingTypeChange={setWritingType}
-            onArgumentsChange={setArgumentsList}
+            title={title}
+            subtitle={subtitle}
+            titleCandidates={titleCandidates}
+            subtitleCandidates={subtitleCandidates}
+            brief={brief}
+            onTitleChange={(text, candidates) => trackBriefSave(applyTitle(text, candidates))}
+            onSubtitleChange={(text, candidates) => trackBriefSave(applySubtitle(text, candidates))}
+            onBriefChange={(text) => trackBriefSave(applyBrief(text))}
           />
         </PanelShell>
       )}

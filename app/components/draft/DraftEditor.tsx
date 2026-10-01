@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Copy, CopyPlus, EllipsisVertical, Eye, FileText, Keyboard, Pencil, StickyNotes, Trash2 } from "lucide-react";
+import { Copy, CopyPlus, EllipsisVertical, Eye, FileText, Keyboard, Pencil, StickyNotes, Can } from "lucide-react";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useDraftEditor } from "@/app/lib/writing-os/editor-context";
 import { DraftDocument } from "@/app/components/draft/DraftDocument";
@@ -197,7 +197,7 @@ export function DraftEditor({
                 }}
               />
               <MenuRow
-                icon={Trash2}
+                icon={Can}
                 label="Delete"
                 onClick={() => {
                   setDeleteConfirmOpen(true);
