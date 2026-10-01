@@ -41,8 +41,8 @@ yarn-error.log*
 *.tsbuildinfo
 next-env.d.ts
 
-# artifacts
-/Artifacts
+# artifacts (specs and planning docs, kept local)
+/artifacts
 
 # writing os vault (user content, not app code)
 /vault
