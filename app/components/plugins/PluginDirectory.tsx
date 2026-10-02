@@ -33,7 +33,7 @@ export function PluginDirectory({ initial }: { initial: DirectoryEntry[] }) {
 
   return (
     <div className="max-w-[900px] my-[0] mx-[auto] pt-[44px] px-[48px] pb-[40px] flex flex-col">
-      <div className="flex items-end gap-[16px] mb-[20px]">
+      <div className="flex items-start gap-[16px] mb-[20px]">
         <div className="flex-1 min-w-0">
           <h1 className="font-sans text-3xl font-semibold leading-tight text-[var(--text-primary)] mt-[0] mx-[0] mb-[4px]">Plugins</h1>
           <div className="text-xs text-[var(--text-muted)]">

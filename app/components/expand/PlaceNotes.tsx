@@ -56,6 +56,7 @@ export function PlaceNotes({ kind, id }: { kind: "section" | "block"; id: string
               time={n.time}
               resolved={n.resolved}
               attachments={n.attachments}
+              hideProjectTag
               onOpen={() => openExpanded("note", n.id)}
               onToggleResolved={() => toggleNoteResolved(n.id)}
               onRemoveTag={(t) => removeNoteTag(n.id, t.kind, t.tagId)}

@@ -452,13 +452,11 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
       .catch(() => {});
   };
 
-  // A fresh draft is tagged with where its composer sits — the project in
-  // the panel, the section or block in its own view. It's an ordinary,
-  // removable tag.
+  // A fresh draft starts untagged everywhere a place is already implied —
+  // the panel (its project) and a section's or block's own view (that
+  // place). `addNote` tags the note with that place regardless, so a chip
+  // for it would only repeat what the view already says.
   const defaultNoteDraft = (scope: NoteScope): NoteDraft => {
-    if (scope.kind === "place") return { ...EMPTY_NOTE_DRAFT, links: [scope.place] };
-    if (scope.kind === "project" && activeProjectId)
-      return { ...EMPTY_NOTE_DRAFT, links: [{ kind: "project", id: activeProjectId, label: activeProject }] };
     return EMPTY_NOTE_DRAFT;
   };
   const noteDraft = (scope: NoteScope) => noteDrafts[noteScopeKey(scope, activeProjectId)] ?? defaultNoteDraft(scope);
@@ -471,15 +469,21 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
   // nowhere; every tag is an `about` link. Elsewhere, a note is filed under
   // the project in view if it's still tagged with that project or anything
   // in it, and under the first of its sections that's tagged; with those
-  // tags removed it's filed nowhere, like an Inbox capture.
+  // tags removed it's filed nowhere, like an Inbox capture. The panel's
+  // notes are always filed under the project.
   const addNote = (scope: NoteScope) => {
     const key = noteScopeKey(scope, activeProjectId);
-    const { text, links: targets, attachments } = noteDraft(scope);
+    const { text, links: picked, attachments } = noteDraft(scope);
+    // A place view's note is always about that place, whatever else is picked.
+    const targets =
+      scope.kind === "place" && !picked.some((t) => t.kind === scope.place.kind && t.id === scope.place.id)
+        ? [scope.place, ...picked]
+        : picked;
     const raw = text.trim();
     if (!raw) return;
     const inProject = (t: MentionTarget) => (t.kind === "project" ? t.id : t.projectId) === activeProjectId;
     const home =
-      scope.kind !== "inbox" && activeProjectId && targets.some(inProject)
+      scope.kind !== "inbox" && activeProjectId && (scope.kind === "project" || targets.some(inProject))
         ? {
             id: activeProjectId,
             label: activeProject,

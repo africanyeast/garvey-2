@@ -47,7 +47,7 @@ export function CommentsBody({
         <div key={c.id} className="flex items-start gap-[8px] mb-[10px]">
           <CheckSquare checked={false} onToggle={() => onResolve(c.id)} title="Resolve" className="mt-[1px]" />
           <div className="flex-1 min-w-0">
-            <div className="text-[13px] font-normal text-[var(--text-primary)] mb-[3px] whitespace-pre-wrap">{c.text}</div>
+            <div className="text-[14px] text-[var(--text-primary)] mb-[3px] whitespace-pre-wrap">{c.text}</div>
             <div className="text-xs font-medium text-[var(--text-muted)]">{c.time}</div>
           </div>
         </div>
@@ -58,8 +58,8 @@ export function CommentsBody({
           onChange={onReplyChange}
           onSubmit={onReplySubmit}
           minRows={1}
-          placeholder={comments.length ? "Reply… (Shift+Enter for a new line)" : "Add a comment… (Shift+Enter for a new line)"}
-          className="font-sans text-[13px] leading-[1.5] flex-1 min-w-0"
+          placeholder={comments.length ? "Reply" : "Add a comment"}
+          className="text-[14px] leading-[1.5] flex-1 min-w-0"
         />
         <button
           onClick={onReplySubmit}

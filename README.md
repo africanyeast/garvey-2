@@ -69,6 +69,21 @@ On the first request, Garvey creates two folders at the repo root:
 
 Both are gitignored, so your writing is never committed. Back them up yourself.
 
+### Run a production build in the background
+
+For everyday use, build once and run the production server in the background on port 3001, with its output in `/tmp/garvey.log`:
+
+```bash
+bun run build && (lsof -ti tcp:3001 | xargs kill; nohup bun run start -p 3001 > /tmp/garvey.log 2>&1 &)
+```
+
+Then open [http://localhost:3001](http://localhost:3001).
+
+```bash
+tail -f /tmp/garvey.log         # follow the server's output
+lsof -ti tcp:3001 | xargs kill  # stop it
+```
+
 ## Development
 
 ```bash

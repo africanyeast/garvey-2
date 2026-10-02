@@ -3,6 +3,7 @@ import { ocrPlugin } from "./ocr";
 import { insertContentPlugin } from "./insert-content";
 import { tabCompletionPlugin } from "./tab-completion";
 import { continueWritingPlugin } from "./continue-writing";
+import { refinePlugin } from "./refine";
 import type { Plugin, PluginManifest } from "./types";
 
 /**
@@ -21,6 +22,7 @@ const PLUGINS: Record<string, Plugin<any, any>> = {
   [insertContentPlugin.manifest.id]: insertContentPlugin,
   [tabCompletionPlugin.manifest.id]: tabCompletionPlugin,
   [continueWritingPlugin.manifest.id]: continueWritingPlugin,
+  [refinePlugin.manifest.id]: refinePlugin,
 };
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any

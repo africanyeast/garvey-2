@@ -20,12 +20,15 @@ export const CONTEXT_PARTS = [
   "section-material",
   "block-material",
   "comments",
+  /** The cursor block's other versions (alt versions, `alternate-of` it). */
+  "versions",
 ] as const;
 export type ContextPart = (typeof CONTEXT_PARTS)[number];
 
 /** How much of the document the plugin gets as its text: none, the block
- * the cursor is in, its section up to the cursor, or all of it. */
-export type DraftScope = "none" | "block" | "section-to-cursor" | "draft";
+ * the cursor is in, its section up to the cursor, its whole section split
+ * around the cursor's block (`documentParts`), or all of it. */
+export type DraftScope = "none" | "block" | "section-to-cursor" | "section" | "draft";
 
 export interface ContextDeclaration {
   include: ContextPart[];
@@ -33,7 +36,8 @@ export interface ContextDeclaration {
   /** Size budget in characters, over the whole bundle. */
   budget: number;
   /** Keep only this many characters of the document text, the end of it
-   * (nearest the cursor), starting at a word. */
+   * (nearest the cursor), starting at a word. Not applied to the parts of
+   * "section" scope. */
   maxDraftChars?: number;
 }
 
@@ -46,6 +50,7 @@ export const PART_PERMISSION: Record<ContextPart | "draft", "read:style" | "read
   "section-material": "read:notes",
   "block-material": "read:notes",
   comments: "read:notes",
+  versions: "read:draft",
 };
 
 /** Where the writer is: a thing (a project, or a note being edited) and a
@@ -60,14 +65,26 @@ export interface Cursor {
 /** Bundle order, V2_SPEC.md Phase 5. */
 export type Step = 1 | 2 | 3 | 4 | 5 | 6 | 7;
 
+/** The cursor's section, for "section" scope: its heading, the blocks
+ * before the cursor's block, that block, and the blocks after it. Each is
+ * markdown, "" when there is none. */
+export interface DraftParts {
+  heading: string;
+  before: string;
+  block: string;
+  after: string;
+}
+
 export interface BundleItem {
   step: Step;
-  kind: "style" | "brief" | "outline" | "note" | "comment" | "draft";
+  kind: "style" | "brief" | "outline" | "note" | "comment" | "version" | "draft";
   /** The thing this came from; absent for the style profile. */
   id?: string;
   title: string;
   why: string;
   text: string;
+  /** "section" scope only (step 7). */
+  parts?: DraftParts;
 }
 
 export interface ManifestEntry {
@@ -297,12 +314,32 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
         });
       }
     }
+
+    // 6. The cursor block's other versions, oldest first.
+    if (wants.has("versions") && cursor) {
+      for (const v of live
+        .filter((t) => t.header.kind === "variant")
+        .sort((a, b) => a.header.id.localeCompare(b.header.id))) {
+        const of = v.header.links.find((l) => l.rel === "alternate-of")?.to;
+        if (!of || of.id !== P || of.block !== cursor.block) continue;
+        let block: Block | null = null;
+        try {
+          block = JSON.parse(v.body) as Block;
+        } catch {
+          // An unreadable version is left out, not guessed at.
+        }
+        const text = block ? blockMarkdown(block).trim() : "";
+        if (!text) continue;
+        items.push({ step: 6, kind: "version", id: v.header.id, title: text.slice(0, 60), why: "another version of this block", text });
+      }
+    }
   }
 
   // 7. The document text the plugin declared.
   if (decl.draft !== "none" && cursor) {
     let text = "";
     let why = "";
+    let parts: DraftParts | undefined;
     if (!at) {
       why = "the cursor's block is not in the document";
     } else if (decl.draft === "block") {
@@ -316,6 +353,18 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
         .filter(Boolean)
         .join("\n\n");
       why = "the whole document, with the cursor marked";
+    } else if (decl.draft === "section") {
+      const inSection = blocks.filter((b) => b.section === sectionId && b.block.type !== "section");
+      const i = inSection.indexOf(at);
+      const md = (xs: typeof blocks) => xs.map((b) => blockMarkdown(b.block)).filter(Boolean).join("\n\n");
+      parts = {
+        heading: sectionBlock ? blockPlainText(sectionBlock).trim() : "",
+        before: md(inSection.slice(0, Math.max(i, 0))),
+        block: at.block.type === "section" ? "" : blockMarkdown(at.block),
+        after: md(inSection.slice(i + 1)),
+      };
+      text = [parts.heading && `## ${parts.heading}`, parts.before, parts.block, parts.after].filter(Boolean).join("\n\n");
+      why = sectionId ? "this section, around the cursor's block" : "the text before the first section, around the cursor's block";
     } else {
       const upTo = blocks.indexOf(at);
       const parts = blocks.slice(0, upTo + 1).filter((b) => b.section === sectionId);
@@ -333,7 +382,7 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
       text = `…${tail.slice(tail.search(/\s/) + 1)}`;
       why += ", its end only";
     }
-    items.push({ step: 7, kind: "draft", id: thing?.header.id, title: "Document text", why, text });
+    items.push({ step: 7, kind: "draft", id: thing?.header.id, title: "Document text", why, text, ...(parts ? { parts } : {}) });
   }
 
   items.sort((a, b) => a.step - b.step);
@@ -416,6 +465,12 @@ export function renderSteps(bundle: ContextBundle | null, steps: Step[]): string
     sections.push(`${HEADINGS[step]}:\n${body}`);
   }
   return sections.join("\n\n");
+}
+
+/** Step 7 split around the cursor's block, for "section" scope; null for
+ * any other scope. */
+export function documentParts(bundle: ContextBundle | null): DraftParts | null {
+  return bundle?.items.find((x) => x.step === 7)?.parts ?? null;
 }
 
 /** Step 7: the document text the plugin declared, or "" if none. */

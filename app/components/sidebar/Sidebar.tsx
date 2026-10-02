@@ -119,6 +119,13 @@ export function Sidebar() {
           <Search size={17} className="text-[var(--text-secondary)]" />
           <span className="text-[12px] font-semibold text-[var(--text-secondary)] flex-1">Search</span>
         </button>
+        <Link
+          href="/plugins"
+          className={`flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer ${isInspector ? "border border-[var(--border-default)]" : "bg-transparent"}`}
+        >
+          <Sparkles size={16} className="text-[var(--text-secondary)]" />
+          <span className={`text-[12px] font-semibold text-[var(--text-secondary)]`}>Plugins</span>
+        </Link>
       </div>
 
       <div className="flex flex-col gap-[2px]">
@@ -168,13 +175,6 @@ export function Sidebar() {
         >
           <UserPen size={16} className="text-[var(--text-secondary)]" />
           <span className={`text-[12px] font-semibold text-[var(--text-secondary)]`}>Style</span>
-        </Link>
-        <Link
-          href="/plugins"
-          className={`flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer ${isInspector ? "border border-[var(--border-default)]" : "bg-transparent"}`}
-        >
-          <Sparkles size={16} className="text-[var(--text-secondary)]" />
-          <span className={`text-[12px] font-semibold text-[var(--text-secondary)]`}>Plugins</span>
         </Link>
         <Link
           href="/trash"
@@ -228,17 +228,17 @@ function SortableProjectRow({
       style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }}
       href={`/${project.slug}`}
       onClickCapture={onClickCapture}
-      className={`wos-row group relative flex items-center gap-[6px] py-[9px] pr-[8px] pl-[6px] rounded-sm cursor-pointer ${active ? "border border-[var(--border-default)]" : "bg-transparent"}`}
+      className={`wos-row group relative flex items-center gap-[10px] py-[9px] pr-[8px] pl-[10px] rounded-sm cursor-pointer ${active ? "border border-[var(--border-default)]" : "bg-transparent"}`}
     >
       <span
         {...attributes}
         {...listeners}
-        className={`shrink-0 cursor-grab text-[var(--text-muted)] touch-none ${isDragging ? "" : "opacity-0 group-hover:opacity-100"}`}
+        className={`absolute left-[-3px] top-1/2 -translate-y-1/2 cursor-grab text-[var(--text-muted)] touch-none ${isDragging ? "" : "opacity-0 group-hover:opacity-100"}`}
         onClick={(e) => e.preventDefault()}
       >
         <GripVertical size={13} strokeWidth={1.8} />
       </span>
-      <FileText size={15} className="shrink-0 text-[var(--text-secondary)]" />
+      <FileText size={17} className="shrink-0 text-[var(--text-secondary)]" />
       <span className="text-xs font-medium flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--text-primary)]">
         {projectDisplayTitle(project)}
       </span>

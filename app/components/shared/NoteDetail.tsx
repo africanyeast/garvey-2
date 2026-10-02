@@ -106,7 +106,7 @@ export function NoteDetail({
            * should get the document editor's own between-block spacing
            * (`.bn-block-content`'s 10px padding, headings' 32px top gap),
            * not the mini-editor's zeroed-out one. */}
-          <div className={`font-serif text-lg font-normal w-full leading-[1.75] ${resolved ? "line-through opacity-50" : ""}`}>
+          <div className={`font-sans text-[17px] font-normal w-full leading-[1.75] ${resolved ? "line-through opacity-50" : ""}`}>
             <BlockNoteDocument editor={editor} onChange={handleBlocksChange} editable={!resolved} sideMenu commentable slashMenu />
           </div>
           <AttachmentList
@@ -120,11 +120,12 @@ export function NoteDetail({
             }}
             onSetTranscription={onSetAttachmentTranscription}
           />
-          <div className="mt-[14px] flex flex-wrap items-baseline gap-x-[10px] gap-y-[4px]">
+          <div className="mt-[14px] flex flex-wrap items-center gap-x-[8px] gap-y-[6px]">
             {tags.map((t) => (
               <NoteTag
                 key={`${t.kind}-${t.tagId}`}
                 tag={t.text}
+                kind={t.kind}
                 href={t.href}
                 onRemove={resolved ? undefined : () => onRemoveTag(t)}
                 size="md"

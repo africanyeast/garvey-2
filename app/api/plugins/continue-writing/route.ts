@@ -5,8 +5,9 @@ import type { ContinueWritingInput, ContinueWritingResult } from "@/lib/plugins/
 const TASKS = new Set(["next-block", "alternate"]);
 
 /** `cursor` is `{ thing, block, offset? }` in a project's draft; `document`
- * is the editor's live copy of that draft; `instruction` and `previous` are
- * optional. Everything else the plugin sees is resolved by the harness from
+ * is the editor's live copy of that draft; `instruction`, `revise` (the
+ * suggestion the instruction reshapes) and `rejected` (the last few the
+ * writer passed over) are optional. Everything else the plugin sees is resolved by the harness from
  * links (lib/context).
  *
  * With `stream: true` the answer comes back as newline-delimited JSON while
@@ -24,10 +25,15 @@ export async function POST(req: NextRequest) {
     block: body.cursor.block as string,
     ...(typeof body.cursor.offset === "number" ? { offset: body.cursor.offset } : {}),
   };
+  const rejected = (Array.isArray(body.rejected) ? body.rejected : [])
+    .filter((r: unknown): r is string => typeof r === "string" && !!r.trim())
+    .slice(-3)
+    .map((r: string) => r.slice(0, 8000));
   const input: ContinueWritingInput = {
     task: body.task,
     ...(typeof body.instruction === "string" && body.instruction.trim() ? { instruction: body.instruction.slice(0, 2000) } : {}),
-    ...(typeof body.previous === "string" && body.previous.trim() ? { previous: body.previous.slice(0, 8000) } : {}),
+    ...(typeof body.revise === "string" && body.revise.trim() ? { revise: body.revise.slice(0, 8000) } : {}),
+    ...(rejected.length ? { rejected } : {}),
   };
   const place = { task: body.task as string, cursor, document: body.document, signal: req.signal };
 

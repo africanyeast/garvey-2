@@ -1,7 +1,7 @@
 "use client";
 
 import { useLayoutEffect, useRef, useState, useMemo } from "react";
-import { Minimize2, MessageCircle } from "lucide-react";
+import { Minimize2, MessageCircle, StickyNotes } from "lucide-react";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useDraftEditor } from "@/app/lib/writing-os/editor-context";
 import { BlockNoteDocument } from "@/app/components/draft/BlockNoteDocument";
@@ -34,7 +34,7 @@ import { useBlockCommentHighlight } from "@/app/lib/writing-os/commentHighlight"
  * to work with — both icons below just take the reader there.
  */
 export function DraftDocument() {
-  const { commentsData, openExpanded, scrollToBlockId, setScrollToBlockId } = useWritingOS();
+  const { commentsData, notes, activeProjectId, openExpanded, scrollToBlockId, setScrollToBlockId } = useWritingOS();
   const { editor, syncDocument } = useDraftEditor();
   const containerRef = useRef<HTMLDivElement>(null);
   // A section expands into focus on itself; any other block into its
@@ -67,7 +67,26 @@ export function DraftDocument() {
     () => Object.keys(commentsData).filter((id) => (commentsData[id]?.length ?? 0) > 0),
     [commentsData]
   );
-  const commentedBlockIdsKey = commentedBlockIds.join(",");
+
+  // Active (unresolved) notes tagged to, or filed under, each block or
+  // section directly — not aggregated upward, so a section's marker never
+  // repeats the counts on the blocks inside it.
+  const noteCounts = useMemo(() => {
+    const counts: Record<string, number> = {};
+    if (!activeProjectId) return counts;
+    for (const n of notes) {
+      if (n.resolved) continue;
+      const ids = new Set<string>();
+      for (const l of n.links) {
+        if ((l.rel === "filed-under" || l.rel === "about") && l.to.id === activeProjectId && l.to.block !== undefined) ids.add(l.to.block);
+      }
+      for (const id of ids) counts[id] = (counts[id] ?? 0) + 1;
+    }
+    return counts;
+  }, [notes, activeProjectId]);
+  const notedBlockIds = useMemo(() => Object.keys(noteCounts), [noteCounts]);
+  const markedBlockIds = useMemo(() => [...new Set([...commentedBlockIds, ...notedBlockIds])], [commentedBlockIds, notedBlockIds]);
+  const commentedBlockIdsKey = markedBlockIds.join(",");
 
   const [commentedTops, setCommentedTops] = useState<Record<string, number>>({});
   useLayoutEffect(() => {
@@ -79,8 +98,8 @@ export function DraftDocument() {
       const containerTop = container.getBoundingClientRect().top;
       setCommentedTops((prev) => {
         const next: Record<string, number> = {};
-        let changed = commentedBlockIds.length !== Object.keys(prev).length;
-        for (const id of commentedBlockIds) {
+        let changed = markedBlockIds.length !== Object.keys(prev).length;
+        for (const id of markedBlockIds) {
           const el = root.querySelector<HTMLElement>(`[data-id="${id}"]`);
           if (!el?.offsetParent) continue; // hidden, e.g. outside a focused section
           const top = el.getBoundingClientRect().top - containerTop;
@@ -155,9 +174,10 @@ export function DraftDocument() {
       <BlockNoteDocument editor={editor} onChange={syncDocument} />
       <NextBlockCard editor={editor} />
 
-      {/* Two fixed columns in the right gutter: the comment marker (always
-       * shown on a commented block, with its count), then the hover-only
-       * Expand button, shown while its block's row is hovered. Both open the block's expanded view, the only place
+      {/* Two fixed columns in the right gutter: the block's markers (always
+       * shown; the count is in their tooltips), stacked notes first, then comments; and
+       * the hover-only Expand button, shown while its block's row is
+       * hovered. Both open the block's expanded view, the only place
        * comments are read and written. */}
       {commentedBlockIds
         .filter((id) => commentedTops[id] !== undefined)
@@ -166,11 +186,27 @@ export function DraftDocument() {
             key={id}
             onClick={() => openExpanded("block", id)}
             title={`${commentsData[id].length} comment${commentsData[id].length > 1 ? "s" : ""} — open the block`}
-            className="absolute right-[28px] z-[4] mt-[8px] h-[20px] min-w-[24px] px-[5px] flex items-center justify-center gap-[3px] rounded-full border-none cursor-pointer bg-[var(--fill-highlight-subtle)] text-[var(--fill-highlight-rail)] font-sans text-[11px] font-semibold"
-            style={{ top: commentedTops[id] }}
+            className="absolute right-[28px] z-[4] mt-[8px] h-[20px] w-[24px] flex items-center justify-center rounded-full border-none cursor-pointer bg-[var(--fill-highlight-subtle)] text-[var(--fill-highlight-rail)] font-sans text-[11px] font-semibold"
+            // Under the notes marker when the block has one: 20px tall, 4px apart.
+            style={{ top: commentedTops[id] + (noteCounts[id] ? 24 : 0) }}
           >
             <MessageCircle size={11} strokeWidth={2} />
-            {commentsData[id].length}
+          </button>
+        ))}
+
+      {/* The notes marker sits at the top of the stack, above any comment
+       * marker. */}
+      {notedBlockIds
+        .filter((id) => commentedTops[id] !== undefined)
+        .map((id) => (
+          <button
+            key={id}
+            onClick={() => expand(id)}
+            title={`${noteCounts[id]} active note${noteCounts[id] > 1 ? "s" : ""} — open ${isSection(id) ? "the section" : "the block"}`}
+            className="absolute right-[28px] z-[4] mt-[8px] h-[20px] w-[24px] flex items-center justify-center rounded-full border-none cursor-pointer bg-neutral-100 text-[var(--text-muted)] font-sans text-[11px] font-semibold"
+            style={{ top: commentedTops[id] }}
+          >
+            <StickyNotes size={11} strokeWidth={2} />
           </button>
         ))}
 

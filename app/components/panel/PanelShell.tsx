@@ -31,7 +31,7 @@ interface PanelShellProps {
   children: ReactNode;
 }
 
-const iconButton = "bg-transparent border-none text-[var(--text-muted)] cursor-pointer p-[6px] rounded-[6px] hover:bg-neutral-100 flex items-center justify-center";
+const iconButton = "bg-transparent border-none text-[var(--text-muted)] cursor-pointer p-[6px] rounded-[6px] hover:bg-[var(--surface-hover)] flex items-center justify-center";
 
 /**
  * The docked/fullscreen chrome shared by every right panel: the "Notes &

@@ -1,5 +1,5 @@
 import { describe, expect, test } from "bun:test";
-import { ContextError, documentText, renderSystem, resolveBundle, type ContextDeclaration, type Cursor } from "./resolve";
+import { ContextError, documentParts, documentText, renderSystem, resolveBundle, type ContextDeclaration, type Cursor } from "./resolve";
 import type { Link, Thing } from "@/lib/store/types";
 import { missingPermissions } from "@/lib/plugins/prompt";
 import { listPlugins } from "@/lib/plugins/registry";
@@ -248,5 +248,49 @@ describe("declarations and the harness", () => {
     // And in a draft, with the vault's copy ahead of nothing.
     const inDraft = resolveBundle({ things, style: "STYLE", cursor: { block: "bA1" }, declaration: decl, document: draftP as never });
     expect(documentText(inDraft)).toBe("Alpha one. More of alpha one.");
+  });
+});
+
+describe("the section around the block", () => {
+  const around = (block: string, include: ContextDeclaration["include"] = []) =>
+    resolve({ thing: P, block }, { include, draft: "section", budget: 1e6 });
+
+  test("splits the section into before, the block and after, without nested sections", () => {
+    expect(documentParts(around("bA1"))).toEqual({ heading: "Section A", before: "", block: "Alpha one. More of alpha one.", after: "Alpha two." });
+    expect(documentParts(around("bA2"))).toEqual({ heading: "Section A", before: "Alpha one. More of alpha one.", block: "Alpha two.", after: "" });
+    expect(documentText(around("bA2"))).toBe("## Section A\n\nAlpha one. More of alpha one.\n\nAlpha two.");
+  });
+
+  test("outside any section, the blocks beside the sections", () => {
+    expect(documentParts(around("b0"))).toEqual({ heading: "", before: "", block: "Before any section.", after: "Beside the sections." });
+  });
+
+  test("other scopes have no parts", () => {
+    expect(documentParts(resolve({ thing: P, block: "bA1" }))).toBeNull();
+  });
+
+  test("the block's other versions, only when declared and only its own", () => {
+    expect(around("bA1", ["versions"]).items.filter((x) => x.kind === "version").map((x) => [x.id, x.text])).toEqual([[variant.header.id, "alt"]]);
+    expect(around("bA2", ["versions"]).items.some((x) => x.kind === "version")).toBe(false);
+    expect(around("bA1").items.some((x) => x.kind === "version")).toBe(false);
+  });
+});
+
+describe("what the writing tasks see", () => {
+  const manifests = Object.fromEntries(listPlugins().map((m) => [m.id, m]));
+  const cw = manifests["continue-writing"].tasks!;
+
+  test("a next paragraph and another version see the same place, and a version its siblings too", () => {
+    expect(cw["next-block"].context.draft).toBe("section");
+    expect(cw.alternate.context.draft).toBe("section");
+    expect(cw.alternate.context.include.filter((p) => p !== "versions")).toEqual(cw["next-block"].context.include);
+    expect(cw.alternate.context.include).toContain("versions");
+    expect(cw["next-block"].context.include).not.toContain("project-material");
+  });
+
+  test("refine sees this place's material and the section around the block, not the outline or versions", () => {
+    const r = manifests.refine.context!;
+    expect(r.draft).toBe("section");
+    expect([...r.include].sort()).toEqual(["block-material", "brief", "comments", "section-material", "style"]);
   });
 });

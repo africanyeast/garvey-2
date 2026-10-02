@@ -77,6 +77,8 @@ export interface NextBlock {
   text: string;
   /** What the writer asked for, kept so a retry starts from it. */
   instruction?: string;
+  /** Suggestions passed over with "Try again" since the last reshape. */
+  rejected?: string[];
   runId?: string;
   error?: string;
 }
@@ -102,7 +104,7 @@ function afterBlock(state: EditorState, blockId: string): number | null {
 
 /** A run's page in the inspector: ghost text is tab completion's, anything
  * the writer asked for is continue writing's. */
-function inspectorHref(runId: string, plugin: "tab-completion" | "continue-writing" = "continue-writing") {
+function inspectorHref(runId: string, plugin: "tab-completion" | "continue-writing" | "refine" = "continue-writing") {
   return `/plugins/${plugin}?run=${encodeURIComponent(runId)}`;
 }
 
@@ -132,7 +134,10 @@ export async function askAssist(
     cursor: { thing: string; block: string };
     document: unknown;
     instruction?: string;
-    previous?: string;
+    /** The suggestion the instruction reshapes. */
+    revise?: string;
+    /** Suggestions passed over, so a fresh try differs. */
+    rejected?: string[];
   },
   signal?: AbortSignal,
   /** Continue writing only: called with the text so far as it is written.
@@ -229,36 +234,39 @@ export const WritingAssistExtension = createExtension(
       placeCard(blockId);
     };
 
-    /** Asks for the paragraph. Called again from a ready card, it is a
-     * retry: the last suggestion goes along so the new one differs. */
-    const requestNextBlock = (instruction = "") => {
+    /** Asks for the paragraph. Called again from a ready card it is either
+     * a reshape (`revise`: the suggestion, which the instruction applies
+     * to) or a fresh try, which differs from the ones passed over. */
+    const requestNextBlock = (instruction = "", revise?: string) => {
       const prev = store.state.nextBlock;
       const blockId = prev?.blockId ?? cursorBlock().block.id;
-      const previous = prev?.status === "ready" ? prev.text : undefined;
-      if (previous) reportOutcome(prev?.runId, "dismissed");
+      const shown = prev?.status === "ready" ? prev.text : undefined;
+      if (shown) reportOutcome(prev?.runId, "dismissed");
+      const rejected = revise ? [] : [...(prev?.rejected ?? []), ...(shown ? [shown] : [])].slice(-3);
       nextBlockAbort?.abort();
       const abort = new AbortController();
       nextBlockAbort = abort;
       const note = instruction.trim() || undefined;
-      store.setState({ nextBlock: { status: "loading", blockId, text: "", instruction: note } });
+      const base = { blockId, instruction: note, rejected };
+      store.setState({ nextBlock: { ...base, status: "loading", text: "" } });
       askAssist(
-        { task: "next-block", cursor: { thing: projectId, block: blockId }, document: editor.document, instruction: note, previous },
+        { task: "next-block", cursor: { thing: projectId, block: blockId }, document: editor.document, instruction: note, revise, rejected },
         abort.signal,
         (soFar) => {
-          if (!abort.signal.aborted) store.setState({ nextBlock: { status: "loading", blockId, text: soFar, instruction: note } });
+          if (!abort.signal.aborted) store.setState({ nextBlock: { ...base, status: "loading", text: soFar } });
         }
       )
         .then(({ text, runId }) => {
           if (abort.signal.aborted) return;
           store.setState({
             nextBlock: text
-              ? { status: "ready", blockId, text, runId, instruction: note }
-              : { status: "error", blockId, text: "", runId, instruction: note, error: "Nothing came back." },
+              ? { ...base, status: "ready", text, runId }
+              : { ...base, status: "error", text: "", runId, error: "Nothing came back." },
           });
         })
         .catch((err: Error) => {
           if (abort.signal.aborted) return;
-          store.setState({ nextBlock: { status: "error", blockId, text: "", instruction: note, error: err.message } });
+          store.setState({ nextBlock: { ...base, status: "error", text: "", error: err.message } });
         });
     };
 

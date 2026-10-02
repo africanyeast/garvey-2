@@ -59,10 +59,21 @@
 /* ---- Ominira Design System tokens (Writing OS) ---- */
 :root {
   /* Semantic aliases */
+
+  /* The draft's body text — the one place to tune it. `.bn-default-styles`
+     and the assist card's output both read these, so a suggestion looks
+     exactly like the block it would become. */
+  --block-font-size: 15px;
+  --block-line-height: 1.8;
   --surface-app: var(--color-neutral-0);
   --surface-raised: var(--color-neutral-0);
   --surface-sunken: var(--color-neutral-75);
   --surface-inverse: var(--color-neutral-900);
+  /* One neutral gray for every hover/active fill (menu rows, icon buttons,
+     picker results) and for quiet chips (note tags) — a translucent dark so
+     it reads as gray on any surface, not the warm cream of the neutrals. */
+  --surface-hover: rgba(20, 17, 14, 0.06);
+  --surface-chip: rgba(20, 17, 14, 0.06);
   --surface-overlay: rgba(20, 17, 14, 0.45);
 
   --border-default: var(--color-neutral-200);
@@ -240,20 +251,30 @@ body:has(.wos-section-drop) .prosemirror-dropcursor-block {
 /* BlockNote editor — inherit the app's own type/color instead of its
    built-in defaults, and drop its own inline gutter padding since our page
    layout already provides margins. Size/line-height match the Telegraph
-   reference: ~18px serif body with generous (1.6) leading for long-form
-   reading, rather than BlockNote's own 16px/1.5 UI-density defaults. */
-.bn-default-styles {
-  font-family: var(--font-serif);
+   reference: ~18px body with generous (1.6) leading for long-form
+   reading, rather than BlockNote's own 16px/1.5 UI-density defaults.
+   Scoped under `.bn-container` so it outranks BlockNote's own
+   `.bn-default-styles` rule whatever order the stylesheets load in — dev
+   and production builds order them differently. */
+.bn-container .bn-default-styles {
+  font-family: var(--font-sans);
   color: var(--text-primary);
-  font-size: 17px;
-  line-height: 1.6;
+  font-size: var(--block-font-size);
+  line-height: var(--block-line-height);
 }
 /* The project brief is notes about the piece, not the piece — it shares
    the brief page's sans with the title and subtitle above it. */
 .wos-brief-editor .bn-default-styles {
   font-family: var(--font-sans);
   font-size: 15px;
-  line-height: 1.7;
+  line-height: 1.8;
+}
+/* BlockNote's own stylesheet sets `line-height: 1.5` on every
+   `.bn-block-outer`, which sits between `.bn-default-styles` and the text —
+   so a line-height set on `.bn-default-styles` never reached the blocks.
+   Inherit instead, making `.bn-default-styles` the one place to tune it. */
+.bn-default-styles .bn-block-outer {
+  line-height: inherit;
 }
 .bn-editor {
   padding-inline: 0 !important;
@@ -459,7 +480,7 @@ body:has(.wos-section-drop) .prosemirror-dropcursor-block {
   display: none;
 }
 /* BlockNote's own empty-block placeholder (`Placeholder` extension) defaults
-   to italic and inherits the block's own (serif, body-sized) font — this
+   to italic and inherits the block's own (body-sized) font — this
    app's placeholder reads as an editing hint rather than actual writing, so
    flatten the italic and drop the size a step below the text it's standing
    in for. */
@@ -468,7 +489,7 @@ body:has(.wos-section-drop) .prosemirror-dropcursor-block {
   font-size: 16px;
 }
 
-/* Telegraph-style blockquote: italic serif (inherited from `.bn-default-
+/* Telegraph-style blockquote: italic (inherited from `.bn-default-
    styles`), a left rule instead of quotation marks. Text stays the app's
    default body color (BlockNote's own hardcoded gray read as a different,
    unrelated color from the rest of the document) — only the rule is muted. */
@@ -515,4 +536,24 @@ body:has(.wos-section-drop) .prosemirror-dropcursor-block {
 }
 .wos-ghost-inspect:hover {
   color: var(--text-secondary);
+}
+
+/* Refine: the selected words while a rewrite is asked for, then struck
+ * through beside the suggestion that would replace them (decorations, see
+ * app/lib/writing-os/refine.ts). */
+.wos-refine-target {
+  background: rgba(0, 0, 0, 0.06);
+  border-radius: 2px;
+}
+.wos-refine-old {
+  color: var(--text-muted);
+  text-decoration: line-through;
+  text-decoration-color: var(--text-muted);
+}
+.wos-refine-new {
+  color: var(--text-primary);
+  background: rgba(0, 0, 0, 0.05);
+  border-radius: 2px;
+  white-space: pre-wrap;
+  pointer-events: none;
 }

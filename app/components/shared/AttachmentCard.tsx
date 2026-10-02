@@ -76,7 +76,7 @@ function CardShell({
   onOpen?: () => void;
 }) {
   const className =
-    "flex items-center gap-[12px] w-full max-w-[520px] border border-[var(--border-default)] rounded-[10px] p-[8px] pr-[12px] bg-[var(--surface-raised)] text-left no-underline cursor-pointer transition-colors hover:bg-[var(--surface-sunken)]";
+    "flex items-center gap-[12px] w-full max-w-[520px] border border-[var(--border-default)] rounded-[10px] p-[8px] pr-[12px] bg-[var(--surface-raised)] text-left no-underline cursor-pointer transition-colors hover:bg-[var(--surface-hover)]";
   const body = (
     <>
       <span className="shrink-0 w-[48px] h-[48px] rounded-[6px] overflow-hidden bg-[var(--surface-sunken)] flex items-center justify-center text-[var(--text-muted)]">

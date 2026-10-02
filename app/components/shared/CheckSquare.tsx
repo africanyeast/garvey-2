@@ -31,8 +31,11 @@ export function CheckSquare({
   className?: string;
 }) {
   const box =
-    size === "md" ? "size-[22px] rounded-[5px]" : size === "xs" ? "size-[14px] rounded-[3px]" : "size-[18px] rounded-[4px]";
-  const tick = size === "md" ? 13 : size === "xs" ? 9 : 11;
+    size === "md" ? "size-[18px] rounded-[4px]" : size === "xs" ? "size-[12px] rounded-[3px]" : "size-[15px] rounded-[4px]";
+  // Picking one of several (a block's version, a title) just moves the
+  // check — no fade or press animation, which only distracts there.
+  const still = role === "radio";
+  const tick = size === "md" ? 11 : size === "xs" ? 8 : 9;
   return (
     <button
       type="button"
@@ -45,13 +48,13 @@ export function CheckSquare({
         e.stopPropagation();
         onToggle?.();
       }}
-      className={`relative shrink-0 ${box} border-[1.5px] flex items-center justify-center p-0 transition-[background-color,border-color,transform] duration-150 before:absolute before:inset-[-6px] before:content-[''] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--text-primary)] ${
+      className={`relative shrink-0 ${box} border-[1.5px] flex items-center justify-center p-0 ${still ? "" : "transition-[background-color,border-color,transform] duration-150"} before:absolute before:inset-[-6px] before:content-[''] focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-[var(--text-primary)] ${
         checked
           ? "bg-neutral-900 border-neutral-900 text-[var(--text-inverse)]"
           : `bg-[var(--color-neutral-0)] border-[var(--color-neutral-400)] text-transparent ${
               disabled ? "" : "hover:border-[var(--text-primary)] hover:text-[var(--color-neutral-400)] hover:bg-[var(--color-neutral-50)]"
             }`
-      } ${disabled ? "cursor-default" : "cursor-pointer active:scale-90"} ${className}`}
+      } ${disabled ? "cursor-default" : `cursor-pointer ${still ? "" : "active:scale-90"}`} ${className}`}
     >
       <Check size={tick} strokeWidth={3} />
     </button>

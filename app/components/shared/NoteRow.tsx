@@ -1,6 +1,9 @@
 "use client";
 
-import type { Attachment, AttachmentTranscription } from "@/app/lib/writing-os/types";
+import type {
+  Attachment,
+  AttachmentTranscription,
+} from "@/app/lib/writing-os/types";
 import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 import type { ResolvedTag } from "@/app/lib/writing-os/mentions";
 import { AttachmentList } from "@/app/components/shared/AttachmentPreview";
@@ -16,6 +19,8 @@ interface NoteRowProps {
   resolved: boolean;
   attachments?: Attachment[];
   onOpen: () => void;
+  /** Leave the project chip off — for a list already scoped to one project, where it only repeats itself. The expanded note still shows it. */
+  hideProjectTag?: boolean;
   onToggleResolved: () => void;
   onRemoveTag: (tag: ResolvedTag) => void;
   onDelete: () => void;
@@ -24,7 +29,10 @@ interface NoteRowProps {
    * beside its lightbox — a click on the thumbnail stops here rather than
    * reaching the row's own `onOpen`, so this can't just be `NoteDetail`'s
    * responsibility alone. */
-  onSetTranscription?: (attachmentUrl: string, transcription: AttachmentTranscription | null) => void;
+  onSetTranscription?: (
+    attachmentUrl: string,
+    transcription: AttachmentTranscription | null,
+  ) => void;
 }
 
 /**
@@ -45,39 +53,50 @@ export function NoteRow({
   resolved,
   attachments,
   onOpen,
+  hideProjectTag = false,
   onToggleResolved,
   onRemoveTag,
   onDelete,
   onSetTranscription,
 }: NoteRowProps) {
+  const shownTags = tags.filter((t) => !(hideProjectTag && t.kind === "project"));
   return (
-    <div onClick={onOpen} className="wos-row relative flex items-start gap-[12px] py-[18px] pr-[28px] cursor-pointer">
-      <NoteMoreMenu onDelete={onDelete} className="absolute top-[16px] right-[0]" />
-      <CheckSquare
-        checked={resolved}
-        onToggle={onToggleResolved}
-        title={resolved ? "Mark unresolved" : "Resolve"}
-        className="mt-[4px]"
-      />
-      <div className="min-w-0 flex-1">
-        <div
-          className={`font-serif text-[16px] leading-[1.65] break-words line-clamp-3 ${
-            resolved ? "text-[var(--text-muted)] line-through" : "text-[var(--text-primary)]"
-          }`}
-        >
-          <BlockTextPreview blocks={blocks} />
-        </div>
-        <AttachmentList attachments={attachments} maxWidth={260} onSetTranscription={onSetTranscription} />
-        {/* Tags live outside the `line-clamp-3` text — they're context, not
-         * the note's own content, so a long note never truncates them. */}
-        <div className="mt-[10px] flex flex-wrap items-baseline gap-x-[6px] gap-y-[2px] text-xs text-[var(--text-muted)]">
-          <span className="tabular-nums">{time}</span>
-          {tags.map((t) => (
-            <span key={`${t.kind}-${t.tagId}`} className="inline-flex items-baseline gap-[6px]">
-              <span aria-hidden>·</span>
-              <NoteTag tag={t.text} href={t.href} onRemove={resolved ? undefined : () => onRemoveTag(t)} />
-            </span>
-          ))}
+    <div onClick={onOpen} className="wos-row relative py-[10px] pr-[28px] cursor-pointer">
+      <NoteMoreMenu onDelete={onDelete} className="absolute top-[8px] right-[0]" />
+      {/* When it was captured: top right, ahead of the note itself. */}
+      <div className="text-right text-xs tabular-nums text-[var(--text-muted)] leading-[18px] mb-[2px]">{time}</div>
+      <div className="flex items-start gap-[10px]">
+        <CheckSquare
+          checked={resolved}
+          onToggle={onToggleResolved}
+          title={resolved ? "Mark unresolved" : "Resolve"}
+          className="mt-[4px]"
+        />
+        <div className="min-w-0 flex-1">
+          <div
+            className={`text-[14px] leading-[1.8] break-words line-clamp-3 ${
+              resolved ? "text-[var(--text-muted)] line-through" : "text-[var(--text-primary)]"
+            }`}
+          >
+            <BlockTextPreview blocks={blocks} />
+          </div>
+          <AttachmentList attachments={attachments} maxWidth={260} onSetTranscription={onSetTranscription} />
+          {/* Tags live outside the `line-clamp-3` text — they're context, not
+           * the note's own content, so a long note never truncates them. Each
+           * is a chip with its kind's icon. */}
+          {shownTags.length > 0 && (
+            <div className="mt-[6px] flex flex-wrap items-center gap-x-[6px] gap-y-[4px]">
+              {shownTags.map((t) => (
+                <NoteTag
+                  key={`${t.kind}-${t.tagId}`}
+                  tag={t.text}
+                  kind={t.kind}
+                  href={t.href}
+                  onRemove={resolved ? undefined : () => onRemoveTag(t)}
+                />
+              ))}
+            </div>
+          )}
         </div>
       </div>
     </div>

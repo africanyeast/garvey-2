@@ -56,6 +56,8 @@ import { useClickOutside } from "@/app/hooks/useClickOutside";
 import { blockPlainText } from "@/app/lib/writing-os/blockText";
 import { moveIntoSection, moveOutOfSection, sectionIdOf } from "@/app/lib/writing-os/sections";
 import { draftSchema, type DraftEditor } from "@/app/lib/writing-os/schema";
+import { RefineExtension } from "@/app/lib/writing-os/refine";
+import { RefinePopover } from "@/app/components/draft/RefinePopover";
 
 /**
  * Centres the grip on its block's first line of text, measured, so it lines
@@ -645,6 +647,11 @@ function SynonymMenuItem() {
   const editor = useBlockNoteEditor(draftSchema);
   const formattingToolbar = useExtension(FormattingToolbarExtension, { editor });
   const popover = useContext(SuggestPopoverContext)!;
+  // Synonyms are for one word; a longer selection is Refine's.
+  const oneWord = useEditorState({
+    editor,
+    selector: ({ editor }) => /^[\p{L}\p{N}][\p{L}\p{N}'’-]*$/u.test(editor.getSelectedText().trim()),
+  });
 
   async function open() {
     const selection = editor.getSelectedText();
@@ -661,7 +668,37 @@ function SynonymMenuItem() {
     await fetchSuggestions(editor, popover, { selection }, signal);
   }
 
+  if (!oneWord) return null;
   return <MenuRow icon={BookA} label="Suggest synonyms" onClick={open} />;
+}
+
+/**
+ * "Refine" — the `refine` plugin, for the selected words of one block. Only
+ * in an editor that has `RefineExtension` (the draft and its block
+ * versions), and only while the selection lies within one block's text.
+ * The toolbar closes so `RefinePopover` takes its place.
+ */
+function RefineMenuItem() {
+  const editor = useBlockNoteEditor(draftSchema);
+  const formattingToolbar = useExtension(FormattingToolbarExtension, { editor });
+  const refine = editor.getExtension(RefineExtension);
+  const inOneBlock = useEditorState({
+    editor,
+    selector: ({ editor }) => {
+      const { $from, $to, empty } = editor.prosemirrorState.selection;
+      return !empty && $from.sameParent($to);
+    },
+  });
+  if (!refine || !inOneBlock) return null;
+  return (
+    <MenuRow
+      icon={Sparkles}
+      label="Refine"
+      onClick={() => {
+        if (refine.open()) formattingToolbar.store.setState(false);
+      }}
+    />
+  );
 }
 
 /**
@@ -716,6 +753,7 @@ function CommentFormattingToolbar() {
         <LinkMenuItem />
         <ColorMenuItem />
         <div className="h-px bg-[var(--border-default)] my-[4px]" />
+        <RefineMenuItem />
         <SynonymMenuItem />
         {/* "Comment" row disabled for now — selection-anchored comments are
          * being simplified into a single block-level thread system. The
@@ -804,6 +842,7 @@ export function BlockNoteDocument({
         {sideMenu && <SideMenuController sideMenu={DraftSideMenu} floatingUIOptions={SIDE_MENU_POSITION} />}
         {commentable && <FormattingToolbarController formattingToolbar={CommentFormattingToolbar} />}
         {commentable && <SuggestPopoverHost />}
+        {editable && editor.getExtension(RefineExtension) && <RefinePopover />}
         {slashMenu !== false && <DraftSlashMenu findWord={commentable} />}
         {/* The floating "write a comment" composer and the floating thread
          * popover shown when a comment mark is clicked — both are BlockNote's

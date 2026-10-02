@@ -4,7 +4,7 @@ import { useWritingOS, type NoteScope } from "@/app/lib/writing-os/context";
 import type { MentionTarget } from "@/app/lib/writing-os/mentions";
 import { IntentComposer } from "@/app/components/shared/IntentComposer";
 
-const PLACEHOLDER = "Add a note or paste a link — @ a project, # a section or block";
+const PLACEHOLDER = "@ to tag a project, section or block";
 
 /**
  * The one composer for adding a note — Inbox, the notes panel, and a
@@ -13,7 +13,7 @@ const PLACEHOLDER = "Add a note or paste a link — @ a project, # a section or 
  * view closing.
  *
  * Outside the Inbox a fresh draft starts tagged with where it sits —
- * "@<project>" in the panel, "#<section>" or "#<block>" in its own view — as
+ * the project in the panel, its section or block in its own view — as
  * an ordinary tag that can be removed; where the note is filed follows the
  * tags it's sent with (`addNote`). `mentionTargets` comes from the caller,
  * since only views inside the draft can read its sections

@@ -3,7 +3,9 @@
 import { Fragment, useEffect, useMemo, useRef, useState, type ChangeEvent, type ClipboardEvent, type KeyboardEvent, type ReactNode } from "react";
 import { ArrowUp, Paperclip, X } from "lucide-react";
 import type { Attachment } from "@/app/lib/writing-os/types";
-import type { MentionTarget } from "@/app/lib/writing-os/mentions";
+import { searchMentionTargets, type MentionTarget } from "@/app/lib/writing-os/mentions";
+import { MentionResults } from "@/app/components/shared/MentionResults";
+import { NoteTag } from "@/app/components/shared/NoteTag";
 
 export type { MentionTarget };
 
@@ -115,14 +117,13 @@ function MarkdownHighlight({ text }: { text: string }) {
  * The one text-input surface for sending anything into the harness — a
  * note/inbox capture, or a plugin invocation like OCR's "transcribe this
  * image, optionally with feedback." Both are the same shape at the input
- * layer: type text, optionally point it at something ("@" a project, "#" a
- * section/block, or a fixed target like "@ocr"), submit. What the submission
+ * layer: type text, optionally point it at something ("@" a project, section or block, or a fixed target like "@ocr"), submit. What the submission
  * *does* is entirely the caller's business — this component only collects
  * the text (plus, where offered, links/attachments) and fires `onSubmit`.
  *
  * `links`/`attachments`/`mentionTargets` are only for the note-composing
  * case — omit them (as the OCR composer does) to get a bare text box with
- * no paperclip, no "@"/"#" picker. `fixedChip` renders a permanent,
+ * no paperclip, no "@" picker. `fixedChip` renders a permanent,
  * non-removable tag in their place — a intent already has a target, so
  * there's nothing to pick.
  */
@@ -144,7 +145,7 @@ export function IntentComposer({
 }: {
   value: string;
   onChange: (v: string) => void;
-  /** Omit together with `onLinksChange` for an intent with no "@"/"#"
+  /** Omit together with `onLinksChange` for an intent with no "@"
    * tagging (e.g. a plugin invocation, which targets something fixed). */
   links?: MentionTarget[];
   onLinksChange?: (links: MentionTarget[]) => void;
@@ -177,10 +178,6 @@ export function IntentComposer({
   const fileInputRef = useRef<HTMLInputElement>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionStart, setMentionStart] = useState<number | null>(null);
-  // "@" only ever offers projects; "#" offers both sections and blocks —
-  // stored as the trigger character rather than a `MentionTarget["kind"]`
-  // since "#" spans two kinds.
-  const [mentionTrigger, setMentionTrigger] = useState<"@" | "#" | null>(null);
   const [uploading, setUploading] = useState(false);
 
   const autoResize = () => {
@@ -202,21 +199,15 @@ export function IntentComposer({
 
   useEffect(syncHighlightScroll, [value]);
 
+  // "@" searches every project, section and block by its text.
   const filteredTargets = useMemo(() => {
-    if (mentionQuery === null || mentionTrigger === null || !mentionTargets) return [];
-    const q = mentionQuery.toLowerCase();
-    const alreadyLinked = new Set((links ?? []).map((l) => `${l.kind}:${l.id}`));
-    return mentionTargets
-      .filter((t) => (mentionTrigger === "@" ? t.kind === "project" : t.kind !== "project"))
-      .filter((t) => !alreadyLinked.has(`${t.kind}:${t.id}`))
-      .filter((t) => t.label.toLowerCase().includes(q))
-      .slice(0, 8);
-  }, [mentionQuery, mentionTrigger, mentionTargets, links]);
+    if (mentionQuery === null || !mentionTargets) return [];
+    return searchMentionTargets(mentionTargets, mentionQuery, links);
+  }, [mentionQuery, mentionTargets, links]);
 
   const closeMention = () => {
     setMentionQuery(null);
     setMentionStart(null);
-    setMentionTrigger(null);
   };
 
   const handleChange = (e: ChangeEvent<HTMLTextAreaElement>) => {
@@ -225,13 +216,12 @@ export function IntentComposer({
     if (!mentionTargets) return;
     const caret = e.target.selectionStart;
     const uptoCaret = v.slice(0, caret);
-    // "@" tags a project, "#" tags a section/block — each only offers its
-    // own kind of target.
-    const match = uptoCaret.match(/(?:^|\s)([@#])([\w-]*)$/);
+    // "@" followed by a short search; spaces are fine, so a block's words
+    // can be typed. The list simply hides when nothing matches.
+    const match = uptoCaret.match(/(?:^|\s)@([^@\n]{0,40})$/);
     if (match) {
-      setMentionQuery(match[2]);
-      setMentionStart(caret - match[2].length - 1);
-      setMentionTrigger(match[1] as "@" | "#");
+      setMentionQuery(match[1]);
+      setMentionStart(caret - match[1].length - 1);
     } else {
       closeMention();
     }
@@ -312,46 +302,24 @@ export function IntentComposer({
 
   return (
     <div className="relative">
-      {mentionQuery !== null && filteredTargets.length > 0 && (
-        <div className="absolute bottom-[100%] left-[0] mb-[6px] z-[20] bg-[var(--surface-raised)] border border-[var(--border-default)] rounded-md shadow-md py-[4px] w-[220px] max-h-[200px] overflow-y-auto">
-          {filteredTargets.map((t) => (
-            <button
-              key={`${t.kind}-${t.id}`}
-              onClick={() => selectMention(t)}
-              className="w-full text-left text-[12px] font-medium px-[10px] py-[6px] hover:bg-[var(--fill-highlight)] bg-transparent border-none cursor-pointer flex items-center gap-[6px]"
-            >
-              <span className="text-[9px] font-bold uppercase text-[var(--text-muted)] shrink-0">
-                {t.kind === "project" ? "Project" : t.kind === "section" ? "Section" : "Block"}
-              </span>
-              <span className="truncate">{t.label}</span>
-            </button>
+      {mentionQuery !== null && filteredTargets.length > 0 && <MentionResults targets={filteredTargets} onSelect={selectMention} />}
+      {/* Tags sit above the box, not in it — the box is just the words and
+       * their attachments, so a note's filing never crowds the writing. */}
+      {links && links.length > 0 && (
+        <div className="flex flex-wrap gap-[6px] mb-[8px]">
+          {links.map((l) => (
+            <NoteTag key={`${l.kind}-${l.id}`} tag={l.label} kind={l.kind} onRemove={() => removeLink(l)} alwaysRemovable />
           ))}
         </div>
       )}
       <div className="bg-[var(--surface-raised)] border border-[var(--border-strong)] rounded-md p-[9px]">
-        {(fixedChip || (links?.length ?? 0) > 0 || (attachments?.length ?? 0) > 0) && (
+        {(fixedChip || (attachments?.length ?? 0) > 0) && (
           <div className="flex flex-wrap gap-[4px] mb-[8px]">
             {fixedChip && (
               <span className="inline-flex items-center text-[10px] font-bold text-[var(--text-primary)] bg-neutral-100 py-[2px] px-[6px] rounded-xs border border-[var(--border-strong)]">
                 {fixedChip.label}
               </span>
             )}
-            {links?.map((l) => (
-              <span
-                key={`${l.kind}-${l.id}`}
-                className="inline-flex items-center gap-[4px] text-[10px] font-bold text-[var(--text-primary)] bg-neutral-100 py-[2px] px-[6px] rounded-xs border border-[var(--border-strong)]"
-              >
-                {l.kind === "project" ? "@" : "#"}
-                {l.label}
-                <button
-                  onClick={() => removeLink(l)}
-                  title="Remove tag"
-                  className="bg-transparent border-none p-0 cursor-pointer flex text-[var(--text-muted)]"
-                >
-                  <X size={10} />
-                </button>
-              </span>
-            ))}
             {attachments?.map((a) => (
               <span
                 key={a.url}
@@ -418,7 +386,7 @@ export function IntentComposer({
               rows={1}
               autoFocus={autoFocus}
               placeholder={placeholder}
-              className="relative block font-sans text-[14px] font-medium w-full p-0 m-0 resize-none border-none outline-none bg-transparent caret-[var(--text-primary)] text-transparent placeholder:text-[var(--text-muted)] leading-[1.5] overflow-y-auto"
+              className="relative block text-[14px] w-full p-0 m-0 resize-none border-none outline-none bg-transparent caret-[var(--text-primary)] text-transparent placeholder:text-[var(--text-muted)] leading-[1.5] overflow-y-auto"
             />
           </div>
           <button

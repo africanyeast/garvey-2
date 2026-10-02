@@ -1,4 +1,4 @@
-import { PART_PERMISSION, documentText, renderSteps, renderSystem, type Step } from "@/lib/context/resolve";
+import { PART_PERMISSION, documentParts, documentText, renderSteps, renderSystem, type DraftParts, type Step } from "@/lib/context/resolve";
 import type { PluginContext, PluginManifest } from "./types";
 
 // What a plugin's code may use to turn its harness-built context into a
@@ -34,6 +34,12 @@ export function contextSteps(ctx: Pick<PluginContext, "context">, steps: Step[])
 /** The document text the plugin declared (its block, section or draft). */
 export function contextText(ctx: Pick<PluginContext, "context">): string {
   return documentText(ctx.context);
+}
+
+/** The section split around the cursor's block, for a plugin that
+ * declared "section" scope; null otherwise. */
+export function contextParts(ctx: Pick<PluginContext, "context">): DraftParts | null {
+  return documentParts(ctx.context);
 }
 
 /** Every context part a manifest declares that its permissions don't

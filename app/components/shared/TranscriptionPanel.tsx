@@ -200,7 +200,7 @@ export function TranscriptionPanel({
               <button
                 onClick={() => onInsertText(flattenBlocksToMarkdown(transcription.blocks))}
                 title="Insert into note"
-                className="bg-transparent border-none text-[var(--text-muted)] cursor-pointer p-[6px] rounded-[6px] hover:bg-neutral-100 flex items-center justify-center"
+                className="bg-transparent border-none text-[var(--text-muted)] cursor-pointer p-[6px] rounded-[6px] hover:bg-[var(--surface-hover)] flex items-center justify-center"
               >
                 <ClipboardPaste size={15} strokeWidth={1.8} />
               </button>
@@ -212,7 +212,7 @@ export function TranscriptionPanel({
                 setTimeout(() => setCopied(false), 1500);
               }}
               title={copied ? "Copied" : "Copy"}
-              className="bg-transparent border-none text-[var(--text-muted)] cursor-pointer p-[6px] rounded-[6px] hover:bg-neutral-100 flex items-center justify-center"
+              className="bg-transparent border-none text-[var(--text-muted)] cursor-pointer p-[6px] rounded-[6px] hover:bg-[var(--surface-hover)] flex items-center justify-center"
             >
               {copied ? <Check size={15} strokeWidth={1.8} /> : <Copy size={15} strokeWidth={1.8} />}
             </button>

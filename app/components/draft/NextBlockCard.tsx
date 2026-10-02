@@ -39,7 +39,7 @@ export function NextBlockCard({ editor }: { editor: DraftEditor }) {
       }}
       starters={STARTERS}
       refinements={REFINEMENTS}
-      onGenerate={(instruction) => assist.requestNextBlock(instruction)}
+      onGenerate={(instruction, revise) => assist.requestNextBlock(instruction, revise)}
       onAccept={(text) => assist.acceptNextBlock(text)}
       onDiscard={() => {
         assist.discardNextBlock();

@@ -21,6 +21,22 @@ export interface MentionTarget {
   projectId?: string;
 }
 
+const KIND_RANK = { project: 0, section: 1, block: 2 } as const;
+
+/** The "@" search: every kind of target whose text contains `query`, best
+ * first — text that starts with the query, then projects before sections
+ * before blocks. An empty query lists projects first. */
+export function searchMentionTargets(targets: MentionTarget[], query: string, exclude: MentionTarget[] = [], limit = 8): MentionTarget[] {
+  const q = query.trim().toLowerCase();
+  const taken = new Set(exclude.map((t) => `${t.kind}:${t.id}`));
+  return targets
+    .filter((t) => !taken.has(`${t.kind}:${t.id}`) && t.label.toLowerCase().includes(q))
+    .map((t, i) => ({ t, i, starts: t.label.toLowerCase().startsWith(q) ? 0 : 1 }))
+    .sort((a, b) => a.starts - b.starts || KIND_RANK[a.t.kind] - KIND_RANK[b.t.kind] || a.i - b.i)
+    .slice(0, limit)
+    .map((x) => x.t);
+}
+
 export function buildProjectTargets(projects: Project[]): MentionTarget[] {
   return projects.map((p) => ({ kind: "project", id: p.id, label: p.title }));
 }
@@ -77,6 +93,7 @@ export function blockMentionTargets(doc: DraftBlock[], projectId: string): Menti
  * (a project id, or a block id) so a single tag can be removed without
  * touching any of the note's other tags (`withoutTag`). */
 export interface ResolvedTag {
+  /** Just the label — the tag's kind shows as an icon, not a prefix. */
   text: string;
   href: string;
   kind: "project" | "section" | "block";
@@ -106,9 +123,9 @@ export function resolveTags(links: Link[], projectFor: (id: string) => ProjectLo
     .map((tag): ResolvedTag | null => {
       const project = projectFor(tag.projectId);
       if (!project) return null;
-      if (tag.kind === "project") return { text: "@" + project.title, href: `/${project.slug}`, kind: "project", tagId: tag.id };
+      if (tag.kind === "project") return { text: project.title, href: `/${project.slug}`, kind: "project", tagId: tag.id };
       const href = tag.kind === "section" ? `/${project.slug}?section=${tag.id}` : `/${project.slug}?block=${tag.id}`;
-      return { text: "#" + tag.label, href, kind: tag.kind, tagId: tag.id };
+      return { text: tag.label, href, kind: tag.kind, tagId: tag.id };
     })
     .filter((t): t is ResolvedTag => t !== null);
 }

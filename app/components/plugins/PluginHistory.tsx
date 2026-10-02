@@ -85,7 +85,7 @@ export function PluginHistory({ runs, loaded, openId }: { runs: PluginRun[]; loa
                   className={`shrink-0 text-[var(--text-muted)] transition-transform duration-150 ${isOpen ? "rotate-90" : ""}`}
                 />
                 {kind && <span className="shrink-0 text-xs text-[var(--text-muted)]">{kind}</span>}
-                <span className={`flex-1 min-w-0 text-[13px] leading-[1.45] ${run.ok ? "text-[var(--text-primary)]" : "text-[var(--text-muted)]"} ${isOpen ? "break-words" : "truncate"}`}>
+                <span className={`flex-1 min-w-0 text-[14px] font-medium leading-[1.45] ${run.ok ? "text-[var(--text-primary)]" : "text-[var(--text-muted)]"} ${isOpen ? "break-words" : "truncate"}`}>
                   {text}
                 </span>
                 {outcome && <span className="hidden sm:inline shrink-0 text-xs text-[var(--text-muted)]">{outcome}</span>}

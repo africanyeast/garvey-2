@@ -53,7 +53,7 @@ function Prose({ text }: { text: string }) {
   if (!text) return <span className="text-[var(--text-muted)]">(nothing)</span>;
   const long = text.length > 80 || text.includes("\n");
   return long ? (
-    <div className="font-serif text-[15px] leading-[1.6] text-[var(--text-primary)] whitespace-pre-wrap break-words">{text}</div>
+    <div className="font-sans text-[15px] leading-[1.6] text-[var(--text-primary)] whitespace-pre-wrap break-words">{text}</div>
   ) : (
     <span className="text-[13px] text-[var(--text-primary)] break-words">{text}</span>
   );

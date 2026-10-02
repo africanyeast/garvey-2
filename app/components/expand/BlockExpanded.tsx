@@ -18,8 +18,10 @@ import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 const heading = "font-sans text-xs font-bold uppercase tracking-[0.08em] text-[var(--text-muted)] mb-[8px]";
 
 /** A version's "more" menu: Delete. */
-function AltMoreMenu({ onDelete }: { onDelete: () => void }) {
+function AltMoreMenu({ onDelete }: { onDelete?: () => void }) {
   const [open, setOpen] = useState(false);
+  // The only version can't be deleted; keep its width so rows wrap alike.
+  if (!onDelete) return <div className="w-[20px] shrink-0" aria-hidden />;
   return (
     <div className="relative">
       {open && <div className="fixed inset-0 z-[9]" onClick={() => setOpen(false)} />}
@@ -105,6 +107,9 @@ export function BlockExpanded({ id }: { id: string }) {
     syncDocument();
   };
 
+  // Refining words in any version reads this block's place in the draft.
+  const place = () => (activeProjectId ? { thing: activeProjectId, block: b.id, document: editor.document } : null);
+
   // Display order: variants above the active one, the active one, the rest.
   const sorted = [...alts].sort((x, y) => x.order - y.order || x.id.localeCompare(y.id));
   const above = sorted.filter((v) => v.order < 0);
@@ -128,20 +133,37 @@ export function BlockExpanded({ id }: { id: string }) {
     reorderVariants(b.id, orders);
   };
 
+  // Deleting the active version hands the draft to the version listed just
+  // before it (else just after), then drops that version's slot — which
+  // by then holds the old active content.
+  const deleteActive = () => {
+    const at = rows.indexOf(null);
+    const next = rows[at - 1] ?? rows[at + 1];
+    if (!next) return;
+    pick(next);
+    deleteVariant(next);
+  };
+
   return (
     <>
       <div className="flex flex-col gap-[4px]">
-        {rows.map((v) =>
+        {/* Keyed by slot, not by version: picking swaps which version a slot
+         * is, but never the text shown in it, so every row (and its editor)
+         * stays put and only the check moves. Keyed by id, picking would
+         * reorder the rows — remounting editors, so the blocks look
+         * rearranged. */}
+        {rows.map((v, i) =>
           v ? (
-            <div key={v.id} className="wos-row flex items-start gap-[10px]">
+            <div key={i} className="wos-row flex items-start gap-[10px]">
               <ActiveDot active={false} onPick={() => pick(v)} />
-              <BlockVersionEditor key={v.id} content={v.content} onChange={(content) => updateVariantContent(v, content)} />
+              <BlockVersionEditor content={v.content} onChange={(content) => updateVariantContent(v, content)} place={place} onBackspaceEmpty={() => deleteVariant(v)} />
               <AltMoreMenu onDelete={() => deleteVariant(v)} />
             </div>
           ) : (
-            <div key={b.id} className="flex items-start gap-[10px]">
+            <div key={i} className="flex items-start gap-[10px]">
               <ActiveDot active />
-              <BlockVersionEditor key={b.id} content={b} onChange={updateBlock} />
+              <BlockVersionEditor content={b} onChange={updateBlock} place={place} onBackspaceEmpty={alts.length ? deleteActive : undefined} />
+              <AltMoreMenu onDelete={alts.length ? deleteActive : undefined} />
             </div>
           )
         )}

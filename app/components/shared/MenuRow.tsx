@@ -26,7 +26,7 @@ export function MenuRow({
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-[8px] w-full text-left text-xs font-medium py-[7px] px-[10px] rounded-[4px] cursor-pointer bg-transparent border-none hover:bg-[rgba(0,0,0,0.05)] ${
+      className={`flex items-center gap-[8px] w-full text-left text-xs font-medium py-[7px] px-[10px] rounded-[4px] cursor-pointer bg-transparent border-none hover:bg-[var(--surface-hover)] ${
         active ? "text-[var(--text-link)]" : "text-[var(--text-primary)]"
       }`}
     >

@@ -5,6 +5,7 @@ import { useCreateBlockNote } from "@blocknote/react";
 import { draftSchema, type DraftBlock, type DraftEditor, type DraftPartialBlock } from "./schema";
 import { SectionDropExtension } from "./sectionDrop";
 import { WritingAssistExtension } from "./writingAssist";
+import { RefineExtension } from "./refine";
 
 /**
  * The single BlockNote editor instance for the whole draft — one document,
@@ -63,13 +64,18 @@ export function DraftEditorProvider({
       initialContent: initialDocument,
       // Ghost text and next block — the draft's editor only, not notes or
       // transcripts.
-      extensions: [WritingAssistExtension({ projectId }), SectionDropExtension()],
+      extensions: [
+        WritingAssistExtension({ projectId }),
+        RefineExtension(),
+        SectionDropExtension(),
+      ],
     },
     [],
   );
   // The editor is created once; keep the assist pointed at the project.
   useEffect(() => {
     editor.getExtension(WritingAssistExtension)?.setProjectId(projectId);
+    editor.getExtension(RefineExtension)?.setPlace((block) => ({ thing: projectId, block }));
   }, [editor, projectId]);
   seedSectionsOpen(editor.document);
   const [doc, setDoc] = useState<DraftBlock[]>(editor.document);

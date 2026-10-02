@@ -9,8 +9,8 @@ import { askAssist, reportOutcome } from "@/app/lib/writing-os/writingAssist";
 import { AssistCard } from "@/app/components/draft/AssistCard";
 
 type Card =
-  | { status: "asking"; text: ""; instruction?: undefined; runId?: undefined; error?: undefined }
-  | { status: "loading" | "ready" | "error"; text: string; instruction?: string; runId?: string; error?: string };
+  | { status: "asking"; text: ""; instruction?: undefined; runId?: undefined; error?: undefined; rejected?: undefined }
+  | { status: "loading" | "ready" | "error"; text: string; instruction?: string; runId?: string; error?: string; rejected: string[] };
 
 /**
  * How a new version gets added to an expanded block: a blank one to type
@@ -43,33 +43,36 @@ export function AlternateComposer({
     setCard(null);
   };
 
-  const generate = (instruction: string) => {
+  /** A fresh try differs from the ones passed over; with `revise`, the
+   * instruction reshapes that suggestion instead. */
+  const generate = (instruction: string, revise?: string) => {
     if (!projectId) return;
-    const previous = card?.status === "ready" ? card.text : undefined;
-    if (previous) reportOutcome(card?.runId, "dismissed");
+    const shown = card?.status === "ready" ? card.text : undefined;
+    if (shown) reportOutcome(card?.runId, "dismissed");
+    const rejected = revise ? [] : [...(card?.rejected ?? []), ...(shown ? [shown] : [])].slice(-3);
     abortRef.current?.abort();
     const abort = new AbortController();
     abortRef.current = abort;
     const note = instruction.trim() || undefined;
-    setCard({ status: "loading", text: "", instruction: note });
+    setCard({ status: "loading", text: "", instruction: note, rejected });
     askAssist(
-      { task: "alternate", cursor: { thing: projectId, block: blockId }, document, instruction: note, previous },
+      { task: "alternate", cursor: { thing: projectId, block: blockId }, document, instruction: note, revise, rejected },
       abort.signal,
       (soFar) => {
-        if (!abort.signal.aborted) setCard({ status: "loading", text: soFar, instruction: note });
+        if (!abort.signal.aborted) setCard({ status: "loading", text: soFar, instruction: note, rejected });
       }
     )
       .then(({ text, runId }) => {
         if (abort.signal.aborted) return;
         setCard(
           text
-            ? { status: "ready", text, runId, instruction: note }
-            : { status: "error", text: "", runId, instruction: note, error: "Nothing came back." }
+            ? { status: "ready", text, runId, instruction: note, rejected }
+            : { status: "error", text: "", runId, instruction: note, rejected, error: "Nothing came back." }
         );
       })
       .catch((err: Error) => {
         if (abort.signal.aborted) return;
-        setCard({ status: "error", text: "", instruction: note, error: err.message });
+        setCard({ status: "error", text: "", instruction: note, rejected, error: err.message });
       });
   };
 
@@ -116,7 +119,7 @@ export function AlternateComposer({
       {projectId && (
         <button
           onClick={() => setCard({ status: "asking", text: "" })}
-          className="w-full py-[8px] flex items-center gap-[8px] text-[14px] font-medium leading-[1.5] text-[var(--text-muted)] bg-transparent border border-[var(--border-default)] rounded-[10px] py-[12px] px-[12px] cursor-text text-left hover:border-[var(--text-muted)]"
+          className="w-full py-[8px] flex items-center gap-[8px] text-[14px] text-[var(--text-muted)] bg-transparent border border-[var(--border-default)] rounded-[10px] py-[12px] px-[12px] cursor-text text-left"
         >
           <Sparkles size={14} strokeWidth={1.8} className="shrink-0" />
           Write another version… say what it should do differently, or leave it blank
@@ -125,7 +128,7 @@ export function AlternateComposer({
       <button
         onClick={onAddBlank}
         title="Add a blank version to write yourself"
-        className="flex items-center gap-[6px] text-xs font-semibold text-[var(--text-secondary)] bg-transparent border-none py-[8px] px-[6px] cursor-pointer hover:text-[var(--text-primary)]"
+        className="flex items-center gap-[6px] text-xs font-semibold text-[var(--text-secondary)] bg-transparent border-none py-[8px] px-[6px] cursor-pointer"
       >
         <Plus size={13} strokeWidth={1.8} />
         Add a blank version

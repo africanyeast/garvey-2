@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { CONTEXT_PARTS, ContextError, documentText, renderSystem, resolveContext, type ContextDeclaration, type DraftScope } from "@/lib/context";
 
-const SCOPES: DraftScope[] = ["none", "block", "section-to-cursor", "draft"];
+const SCOPES: DraftScope[] = ["none", "block", "section-to-cursor", "section", "draft"];
 
 /** The inspector's preview: what a plugin would see from a place, with
  * everything included unless the request narrows it. Reads only. */

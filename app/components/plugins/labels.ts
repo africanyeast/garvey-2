@@ -25,12 +25,14 @@ export const CONTEXT_LABELS: Record<string, string> = {
   "section-material": "notes on the section",
   "block-material": "notes on the block",
   comments: "comments",
+  versions: "the block's other versions",
 };
 
 export const DRAFT_LABELS: Record<string, string> = {
   none: "no draft text",
   block: "the block you're in",
   "section-to-cursor": "the section up to your cursor",
+  section: "the section around your block",
   draft: "the whole draft",
 };
 

@@ -21,9 +21,9 @@ function Select({ value, onChange, disabled, children }: { value: string; onChan
   );
 }
 
-function Row({ name, children }: { name: string; children: React.ReactNode }) {
+function Row({ name, children, large }: { name: string; children: React.ReactNode; large?: boolean }) {
   return (
-    <div className="flex gap-[16px] py-[8px] text-[13px]">
+    <div className={`flex gap-[16px] py-[8px] ${large ? "text-[14px]" : "text-[13px]"}`}>
       <div className="w-[130px] shrink-0 text-[var(--text-muted)]">{name}</div>
       <div className="flex-1 min-w-0 text-[var(--text-primary)] leading-[1.5]">{children}</div>
     </div>
@@ -67,15 +67,15 @@ export function PluginConfig({ details, onChange }: { details: PluginDetails; on
       <section>
         <div className={`${label} mb-[4px]`}>About</div>
         <div className="divide-y divide-[var(--border-default)]">
-          <Row name="Description">{details.description}</Row>
-          <Row name="Trigger">{TRIGGER_LABELS[details.trigger] ?? details.trigger}</Row>
-          <Row name="Permissions">{details.permissions.length ? details.permissions.map((p) => PERMISSION_LABELS[p] ?? p).join(", ") : "None"}</Row>
+          <Row large name="Description">{details.description}</Row>
+          <Row large name="Trigger">{TRIGGER_LABELS[details.trigger] ?? details.trigger}</Row>
+          <Row large name="Permissions">{details.permissions.length ? details.permissions.map((p) => PERMISSION_LABELS[p] ?? p).join(", ") : "None"}</Row>
           {limits.map((l) => (
-            <Row key={l.key} name={l.name}>
+            <Row large key={l.key} name={l.name}>
               {l.k}k characters
             </Row>
           ))}
-          <Row name="Data">
+          <Row large name="Data">
             <div>Every call: when, how long, what it was given, and what it returned.</div>
             {details.data.map((d) => (
               <div key={d.what}>

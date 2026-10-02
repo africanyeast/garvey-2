@@ -1,6 +1,9 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useCreateBlockNote } from "@blocknote/react";
+import { draftSchema } from "@/app/lib/writing-os/schema";
+import { BlockNoteDocument } from "@/app/components/draft/BlockNoteDocument";
 import { ArrowUp, Loader2, Sparkles } from "lucide-react";
 import { inspectorHref } from "@/app/lib/writing-os/writingAssist";
 import { AutoTextarea } from "@/app/components/shared/AutoTextarea";
@@ -23,8 +26,10 @@ export interface AssistCardProps {
   /** One-click instructions: before the first suggestion, and for a rewrite. */
   starters: string[];
   refinements: string[];
-  /** Ask (from "asking") or ask again with a new instruction. */
-  onGenerate: (instruction: string) => void;
+  /** Ask (from "asking"), or ask again. Asked with a new instruction while
+   * a suggestion shows, `revise` is that suggestion (as edited): the
+   * instruction reshapes it. Without one, it is a fresh try. */
+  onGenerate: (instruction: string, revise?: string) => void;
   onAccept: (text: string) => void;
   /** Close it; while loading, this stops the call. */
   onDiscard: () => void;
@@ -40,6 +45,50 @@ export interface AssistCardProps {
  * accepted. Pure view; whoever renders it owns the request and where the
  * accepted text goes.
  */
+/**
+ * The suggestion, in a BlockNote editor of its own — the same engine and
+ * styles as the draft (`.bn-default-styles`), so type, spacing and block
+ * kinds are exactly what accepting it will produce. It fills in read-only as
+ * the text streams, then becomes editable; `onMarkdown` reports edits.
+ */
+function AssistOutput({
+  text,
+  editable,
+  onMarkdown,
+}: {
+  text: string;
+  editable: boolean;
+  onMarkdown: (markdown: string) => void;
+}) {
+  const editor = useCreateBlockNote({ schema: draftSchema, initialContent: [{ type: "paragraph" }] }, []);
+
+  // Streamed or fresh text replaces the content — but never what the writer
+  // is in the middle of editing.
+  useLayoutEffect(() => {
+    if (editable && editor.isFocused()) return;
+    const blocks = editor.tryParseMarkdownToBlocks(text);
+    editor.replaceBlocks(editor.document, blocks.length > 0 ? blocks : [{ type: "paragraph" }]);
+  }, [editor, text, editable]);
+
+  // Once it's editable, take focus at the end so the writer can just type.
+  useEffect(() => {
+    if (!editable) return;
+    const last = editor.document[editor.document.length - 1];
+    if (last) editor.setTextCursorPosition(last, "end");
+    editor.focus();
+  }, [editor, editable]);
+
+  const handleChange = useCallback(() => {
+    if (editable) onMarkdown(editor.blocksToMarkdownLossy(editor.document).trim());
+  }, [editor, editable, onMarkdown]);
+
+  return (
+    <div className={editable ? "" : "opacity-70"}>
+      <BlockNoteDocument editor={editor} onChange={handleChange} editable={editable} sideMenu={false} slashMenu={false} commentable={false} />
+    </div>
+  );
+}
+
 export function AssistCard({
   status,
   text,
@@ -57,7 +106,6 @@ export function AssistCard({
   const [draft, setDraft] = useState(text);
   const [ask, setAsk] = useState(instruction ?? "");
   const rootRef = useRef<HTMLDivElement>(null);
-  const textRef = useRef<HTMLTextAreaElement>(null);
   const askRef = useRef<HTMLTextAreaElement>(null);
 
   // A fresh suggestion replaces whatever was being edited, and brings back
@@ -88,7 +136,9 @@ export function AssistCard({
   const ready = status === "ready";
   const shown = ready ? draft : text;
   const submit = (value = ask) => {
-    if (!loading) onGenerate(value);
+    if (loading) return;
+    const changed = value.trim() && value.trim() !== (instruction ?? "").trim();
+    onGenerate(value, ready && changed && draft.trim() ? draft : undefined);
   };
   const chips = ready || status === "error" ? refinements : status === "asking" ? starters : [];
   const rewriting = ready || status === "error";
@@ -110,24 +160,9 @@ export function AssistCard({
       }}
     >
       {(loading || ready) && (
-        <div className="px-[16px] pt-[14px] pb-[12px]">
-          {ready ? (
-            <AutoTextarea
-              textareaRef={textRef}
-              value={draft}
-              onChange={setDraft}
-              autoFocus
-              minRows={1}
-              className="p-[0]"
-              // The draft's own type (see `.bn-default-styles`), inline because
-              // the global `textarea { font-family: inherit }` outranks classes.
-              style={{ fontFamily: "var(--font-serif)", fontSize: 17, lineHeight: 1.6 }}
-            />
-          ) : shown ? (
-            <div className="whitespace-pre-wrap text-[var(--text-secondary)]" style={{ fontFamily: "var(--font-serif)", fontSize: 17, lineHeight: 1.6 }}>
-              {shown}
-              <span className="inline-block w-[2px] h-[1em] ml-[2px] align-[-2px] bg-[var(--text-muted)] animate-pulse" />
-            </div>
+        <div className="px-[16px] py-[2px]">
+          {shown ? (
+            <AssistOutput text={shown} editable={ready} onMarkdown={setDraft} />
           ) : (
             <div className="flex items-center gap-[8px] text-xs font-medium text-[var(--text-muted)] py-[4px]">
               <Loader2 size={13} className="animate-spin" />
@@ -149,7 +184,7 @@ export function AssistCard({
           onSubmit={() => submit()}
           minRows={rewriting ? 1 : 2}
           placeholder={rewriting ? labels.refine : labels.ask}
-          className="flex-1 min-w-0 text-[16px] leading-[1.5]"
+          className="flex-1 min-w-0 text-[15px] leading-[1.8]"
         />
         {loading ? (
           <button
@@ -183,7 +218,7 @@ export function AssistCard({
                 setAsk(chip);
                 submit(chip);
               }}
-              className="text-xs font-medium text-[var(--text-secondary)] bg-transparent border border-[var(--border-default)] rounded-full py-[3px] px-[10px] cursor-pointer hover:bg-[rgba(0,0,0,0.03)]"
+              className="text-xs font-medium text-[var(--text-secondary)] bg-transparent border border-[var(--border-default)] rounded-full py-[3px] px-[10px] cursor-pointer hover:bg-[var(--surface-hover)]"
             >
               {chip}
             </button>
