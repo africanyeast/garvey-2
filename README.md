@@ -71,17 +71,17 @@ Both are gitignored, so your writing is never committed. Back them up yourself.
 
 ### Run a production build in the background
 
-For everyday use, build once and run the production server in the background on port 3001, with its output in `/tmp/garvey.log`:
+For everyday use, run the production build as a background service on port 3001. It starts at login, restarts if it crashes, and logs to `~/Library/Logs/garvey.log`:
 
 ```bash
-bun run build && (lsof -ti tcp:3001 | xargs kill; nohup bun run start -p 3001 > /tmp/garvey.log 2>&1 &)
+bun run deploy
 ```
 
-Then open [http://localhost:3001](http://localhost:3001).
+Run the same command after any change to build and restart on the new version. The first run installs the service (a launchd agent at `~/Library/LaunchAgents/com.garvey.server.plist`). Then open [http://localhost:3001](http://localhost:3001).
 
 ```bash
-tail -f /tmp/garvey.log         # follow the server's output
-lsof -ti tcp:3001 | xargs kill  # stop it
+tail -f ~/Library/Logs/garvey.log                                 # follow the server's output
+launchctl bootout gui/$(id -u)/com.garvey.server                  # stop it (comes back on next deploy or login)
 ```
 
 ## Development
