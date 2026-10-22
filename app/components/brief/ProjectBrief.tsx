@@ -37,8 +37,8 @@ function toCandidates(lines: Line[], currentId: number): TitleCandidate[] {
 const isPlainEnter = (e: KeyboardEvent) => e.key === "Enter" && !e.shiftKey && !e.metaKey && !e.ctrlKey && !e.nativeEvent.isComposing;
 const isModEnter = (e: KeyboardEvent) => e.key === "Enter" && (e.metaKey || e.ctrlKey);
 
-/** Small bold label over each part of the brief. */
-function BriefLabel({ children, hint }: { children: string; hint?: string }) {
+/** Small bold label over each part of the brief (a reply's brief too). */
+export function BriefLabel({ children, hint }: { children: string; hint?: string }) {
   return (
     <div className="mb-[10px]">
       <h2 className="m-[0] text-xs font-bold text-[var(--text-primary)]">{children}</h2>

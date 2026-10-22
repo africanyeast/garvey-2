@@ -3,8 +3,18 @@
 // its kind; kind-specific fields follow the shared ones, and anything with
 // no home in the new shape sits under `legacy`.
 
-export const KINDS = ["project", "note", "comment", "thread", "variant"] as const;
+export const KINDS = ["project", "note", "comment", "thread", "variant", "reply"] as const;
 export type Kind = (typeof KINDS)[number];
+
+/** A reply is a special kind of project (artifacts/REPLY_SPEC.md): its
+ * header is its brief, its body is its draft, and everything a project's
+ * machinery does (comments, versions, slugs, trash) it does too. */
+export const PROJECT_LIKE_KINDS = ["project", "reply"] as const;
+export type ProjectLikeKind = (typeof PROJECT_LIKE_KINDS)[number];
+
+export function isProjectLike(kind: unknown): kind is ProjectLikeKind {
+  return kind === "project" || kind === "reply";
+}
 
 export const RELATIONS = ["filed-under", "about", "comment-on", "alternate-of"] as const;
 export type Relation = (typeof RELATIONS)[number];

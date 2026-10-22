@@ -1,11 +1,15 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import dynamic from "next/dynamic";
 import { useRouter } from "next/navigation";
+import { PLUGINS_CHANGED } from "@/app/lib/writing-os/writingAssist";
+import { ProjectPlugins } from "@/app/components/plugins/ProjectPlugins";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useDraftEditor } from "@/app/lib/writing-os/editor-context";
 import { ProjectBrief } from "@/app/components/brief/ProjectBrief";
+import { ReplyBrief, type ReplyBriefPatch } from "@/app/components/brief/ReplyBrief";
+import { DRAFT_MODES, DraftModeProvider } from "@/app/lib/writing-os/draftMode";
 import { SaveStatusBadge, useSaveStatus } from "@/app/components/shared/FormFields";
 import { ShortcutsPanel } from "@/app/components/shortcuts/ShortcutsPanel";
 import { SidePanel } from "@/app/components/panel/SidePanel";
@@ -14,7 +18,8 @@ import { DraftEditor } from "@/app/components/draft/DraftEditor";
 import { ExpandedView } from "@/app/components/expand/ExpandedView";
 import { PdfViewerPanel } from "@/app/components/shared/PdfViewerPanel";
 import type { Project, TitleCandidate } from "@/app/lib/writing-os/types";
-import { projectDisplayTitle } from "@/app/lib/writing-os/types";
+import { X_MAX_CHARS, projectDisplayTitle } from "@/app/lib/writing-os/types";
+import { xPost } from "@/app/lib/writing-os/replySource";
 import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 
 function patchProject(slug: string, patch: Partial<Omit<Project, "slug">>): Promise<Project | undefined> {
@@ -23,7 +28,7 @@ function patchProject(slug: string, patch: Partial<Omit<Project, "slug">>): Prom
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
   })
-    .then((res) => res.json())
+    .then((res) => (res.ok ? res.json() : undefined))
     .then((p: Project) => p)
     .catch(() => undefined);
 }
@@ -51,16 +56,14 @@ const DraftEditorProvider = dynamic(
 export function DraftScreen({
   project,
   initialDocument,
-  openBriefByDefault = false,
   openBlockId,
   scrollToSectionId,
 }: {
   project: Project;
   initialDocument: DraftPartialBlock[];
-  openBriefByDefault?: boolean;
   /** Landed on from clicking a "#" block tag chip elsewhere (`?block=` on
    * the URL) — opens straight to that block fullscreen, once, then the
-   * param is stripped, same treatment as `openBriefByDefault`/`?new=1`. */
+   * param is stripped. */
   openBlockId?: string;
   /** Landed on from clicking a "#" section tag chip (`?section=` on the
    * URL) — scrolls straight to that section inline in the main draft, once,
@@ -85,19 +88,21 @@ export function DraftScreen({
   // expanded-block panel, the preview) lives behind this one provider.
   return (
     <DraftEditorProvider projectSlug={slug} projectId={project.id} initialDocument={initialDocument}>
-      {/* `key` forces a remount on project switch so title/subtitle state
-       * (and the "open brief by default" state) always starts fresh for the
-       * new project, instead of needing an effect to resync it. Keyed by id,
-       * which a rename never changes. */}
-      <DraftScreenInner
-        key={project.id}
-        project={project}
-        slug={slug}
-        onSlugChange={setSlug}
-        openBriefByDefault={openBriefByDefault}
-        openBlockId={openBlockId}
-        scrollToSectionId={scrollToSectionId}
-      />
+      {/* What this kind of project shows: a reply hides parts of the screen. */}
+      <DraftModeProvider value={DRAFT_MODES[project.kind]}>
+        {/* `key` forces a remount on project switch so title/subtitle state
+         * (and the "open brief by default" state) always starts fresh for the
+         * new project, instead of needing an effect to resync it. Keyed by id,
+         * which a rename never changes. */}
+        <DraftScreenInner
+          key={project.id}
+          project={project}
+          slug={slug}
+          onSlugChange={setSlug}
+          openBlockId={openBlockId}
+          scrollToSectionId={scrollToSectionId}
+        />
+      </DraftModeProvider>
     </DraftEditorProvider>
   );
 }
@@ -106,7 +111,6 @@ function DraftScreenInner({
   project,
   slug,
   onSlugChange,
-  openBriefByDefault,
   openBlockId,
   scrollToSectionId,
 }: {
@@ -114,7 +118,6 @@ function DraftScreenInner({
   /** The project's live slug — `project.slug` until a rename moves it. */
   slug: string;
   onSlugChange: (slug: string) => void;
-  openBriefByDefault: boolean;
   openBlockId?: string;
   scrollToSectionId?: string;
 }) {
@@ -129,6 +132,15 @@ function DraftScreenInner({
   // at the initial page load the next time it's reopened, discarding a save
   // that already made it to disk.
   const [brief, setBrief] = useState(project.brief);
+  // A reply's brief, lifted for the same reason.
+  const [reply, setReply] = useState({
+    channel: project.channel ?? "other",
+    replyingTo: project.replyingTo ?? "",
+    replyingToUrl: project.replyingToUrl ?? "",
+    intent: project.intent ?? "",
+    aboutProjectId: project.aboutProjectId ?? "",
+  });
+  const mode = DRAFT_MODES[project.kind];
   const [updatedAt, setUpdatedAt] = useState(project.updatedAt);
   const {
     docMode,
@@ -146,23 +158,21 @@ function DraftScreenInner({
   // Aliased from the global `document` it'd otherwise shadow.
   const { document: draftDoc, savedAt } = useDraftEditor();
   const router = useRouter();
-  // A brand-new project (created from the sidebar) opens straight into the
-  // brief, Notion-style, until the user closes it.
-  const [briefOpen, setBriefOpen] = useState(openBriefByDefault);
+  // The brief is opened on request; a new project lands on the draft. A
+  // reply with nothing to reply to yet opens on its brief, to paste it in.
+  const [briefOpen, setBriefOpen] = useState(mode.brief === "reply" && !project.replyingTo);
 
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
+  const [pluginsOpen, setPluginsOpen] = useState(false);
+  const [pluginOverrides, setPluginOverrides] = useState(project.pluginOverrides ?? {});
+  const savePluginOverrides = (next: Record<string, boolean>) => {
+    setPluginOverrides(next);
+    fetch(`/api/projects/${slug}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pluginOverrides: next }) }).then(() => window.dispatchEvent(new Event(PLUGINS_CHANGED)))
+      .catch(() => {});
+  };
   // One "Saving…/Saved" for everything the brief writes, shown in its
   // panel's header so it stays in view however far down the brief runs.
   const { status: briefSaveStatus, track: trackBriefSave } = useSaveStatus();
-
-  useEffect(() => {
-    if (openBriefByDefault) {
-      router.replace(`/${project.slug}`);
-    }
-    // Only ever meant to strip the `?new=1` marker once, right after landing
-    // on a freshly created project — not on every re-render.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
 
   useEffect(() => {
     if (openBlockId) {
@@ -172,7 +182,7 @@ function DraftScreenInner({
       setScrollToBlockId(scrollToSectionId);
       router.replace(`/${project.slug}`);
     }
-    // Same one-shot treatment as `?new=1` above: only meant to fire once,
+    // One-shot: only meant to fire once,
     // right after landing from a tag chip's `?section=`/`?block=` link.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -210,15 +220,17 @@ function DraftScreenInner({
     setTitleCandidates(candidates);
     patchProjectInList(slug, { title: text, titleCandidates: candidates });
     setActiveProject(text);
-    return patchProject(slug, { title: text, titleCandidates: candidates }).then((updated) => {
-      if (!updated) return;
-      setUpdatedAt(updated.updatedAt);
-      if (updated.slug !== slug) {
-        patchProjectInList(slug, { slug: updated.slug });
-        onSlugChange(updated.slug);
-        window.history.replaceState(null, "", `/${updated.slug}`);
-      }
-    });
+    return patchProject(slug, { title: text, titleCandidates: candidates }).then((updated) => updated && followSlug(updated));
+  };
+  /** After a save that may have re-slugged the project: the list and the
+   * URL follow its new slug. */
+  const followSlug = (updated: Project, from = slug) => {
+    setUpdatedAt(updated.updatedAt);
+    if (updated.slug !== from) {
+      patchProjectInList(from, { slug: updated.slug });
+      onSlugChange(updated.slug);
+      window.history.replaceState(null, "", `/${updated.slug}`);
+    }
   };
   const saveTitle = (text: string) => {
     if (text.trim() !== title.trim()) applyTitle(text.trim(), withCurrentText(titleCandidates, text));
@@ -240,10 +252,40 @@ function DraftScreenInner({
     return patchProject(slug, { brief: text }).then((updated) => updated && setUpdatedAt(updated.updatedAt));
   };
 
+  // A new message can retitle a reply still on its default title (see
+  // `updateProject`), so the title and slug follow what comes back.
+  // They save one at a time, each against the slug the last one left: a
+  // pasted link is saved, then the post it is read as, and the first save
+  // can re-slug the reply before the second goes out.
+  const replySaves = useRef<Promise<unknown>>(Promise.resolve());
+  const live = useRef({ slug, title });
+  useEffect(() => {
+    live.current = { slug, title };
+  }, [slug, title]);
+  const applyReplyBrief = (patch: ReplyBriefPatch) => {
+    setReply((r) => ({ ...r, ...patch }));
+    const save = replySaves.current
+      .then(() => patchProject(live.current.slug, patch))
+      .then((updated) => {
+        if (!updated) return;
+        const from = live.current.slug;
+        if (updated.title !== live.current.title) {
+          setTitle(updated.title);
+          setTitleCandidates(updated.titleCandidates);
+          patchProjectInList(from, { title: updated.title });
+          setActiveProject(projectDisplayTitle(updated));
+        }
+        live.current = { slug: updated.slug, title: updated.title };
+        followSlug(updated, from);
+      });
+    replySaves.current = save.catch(() => {});
+    return save;
+  };
+
   // The main document always stays visible — an expanded block/note takes
   // over the right dock (in place of the notes panel) rather than replacing
   // the document, so it's only ever fully hidden if the user goes fullscreen.
-  const panelOpen = panelMode !== "collapsed" || !!expandedItem;
+  const panelOpen = (mode.notes && panelMode !== "collapsed") || !!expandedItem;
   // A focused section mounts the draft's one editor inside the expand
   // shell, so the page's copy steps aside while it's open.
   const sectionFocus = expandedItem?.kind === "section";
@@ -263,7 +305,10 @@ function DraftScreenInner({
             onTitleChange={saveTitle}
             onSubtitleChange={saveSubtitle}
             onOpenBrief={() => setBriefOpen(true)}
+            onOpenPlugins={() => setPluginsOpen(true)}
             onOpenShortcuts={() => setShortcutsOpen(true)}
+            charLimit={mode.brief === "reply" && reply.channel === "x" ? X_MAX_CHARS : undefined}
+            xPostId={mode.brief === "reply" ? xPost(reply.replyingToUrl)?.id : undefined}
           />}
         </div>
       </div>
@@ -275,9 +320,9 @@ function DraftScreenInner({
         <PdfViewerPanel />
       ) : expandedItem ? (
         <ExpandedView item={expandedItem} />
-      ) : (
+      ) : mode.notes ? (
         <SidePanel />
-      )}
+      ) : null}
 
       {/* Brief and Preview are both read/reference overlays, not part of the
        * dockable panel set — they only ever appear fullscreen, with a single
@@ -307,16 +352,32 @@ function DraftScreenInner({
             }
           }}
         >
-          <ProjectBrief
-            title={title}
-            subtitle={subtitle}
-            titleCandidates={titleCandidates}
-            subtitleCandidates={subtitleCandidates}
-            brief={brief}
-            onTitleChange={(text, candidates) => trackBriefSave(applyTitle(text, candidates))}
-            onSubtitleChange={(text, candidates) => trackBriefSave(applySubtitle(text, candidates))}
-            onBriefChange={(text) => trackBriefSave(applyBrief(text))}
-          />
+          {mode.brief === "reply" ? (
+            <ReplyBrief
+              channel={reply.channel}
+              replyingTo={reply.replyingTo}
+              intent={reply.intent}
+              aboutProjectId={reply.aboutProjectId}
+              onChange={(patch) => trackBriefSave(applyReplyBrief(patch))}
+            />
+          ) : (
+            <ProjectBrief
+              title={title}
+              subtitle={subtitle}
+              titleCandidates={titleCandidates}
+              subtitleCandidates={subtitleCandidates}
+              brief={brief}
+              onTitleChange={(text, candidates) => trackBriefSave(applyTitle(text, candidates))}
+              onSubtitleChange={(text, candidates) => trackBriefSave(applySubtitle(text, candidates))}
+              onBriefChange={(text) => trackBriefSave(applyBrief(text))}
+            />
+          )}
+        </PanelShell>
+      )}
+
+      {pluginsOpen && (
+        <PanelShell mode="fullscreen" onClose={() => setPluginsOpen(false)}>
+          <ProjectPlugins overrides={pluginOverrides} onChange={savePluginOverrides} />
         </PanelShell>
       )}
 
@@ -326,7 +387,7 @@ function DraftScreenInner({
         </PanelShell>
       )}
 
-      {docMode === "preview" && (
+      {mode.preview && docMode === "preview" && (
         <PanelShell mode="fullscreen" onClose={() => setDocMode("edit")}>
           <DraftPreview title={title} subtitle={subtitle} document={draftDoc} />
         </PanelShell>

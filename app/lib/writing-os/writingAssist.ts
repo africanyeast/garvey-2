@@ -35,6 +35,10 @@ import type { DraftEditor } from "./schema";
 /** A typing pause this long fires ghost text. Long on purpose: each
  * suggestion is a whole Agent SDK call, several seconds (Phase 6 baseline;
  * Phase 7 makes it fast). */
+/** Fired on `window` when a project's plugin switches change, so a plugin
+ * the editor had given up on is tried again. */
+export const PLUGINS_CHANGED = "garvey:plugins-changed";
+
 export const GHOST_PAUSE_MS = 1500;
 /** Paragraph-like blocks ghost text fires in, and then only with this much
  * text already written in the block. */
@@ -200,9 +204,10 @@ export const WritingAssistExtension = createExtension(
       projectId = id;
     };
     const store = createStore<{ nextBlock: NextBlock | null }>({ nextBlock: null });
-    // Set when the server says the plugin is off (not in .os/config.yaml):
-    // no more ghost requests this session.
+    // Set when the server says the plugin is off (globally, or for this
+    // project): no more ghost requests until a plugin switch changes.
     let disabled = false;
+    window.addEventListener(PLUGINS_CHANGED, () => (disabled = false));
     let nextBlockAbort: AbortController | null = null;
     // The ghost the writer took with Tab, so its removal isn't reported as
     // a dismissal.
@@ -372,7 +377,7 @@ export const WritingAssistExtension = createExtension(
             .catch((err: Error & { status?: number }) => {
               if (abort.signal.aborted) return;
               inFlight = null;
-              if (err.status === 502 && /not enabled/.test(err.message)) disabled = true;
+              if (err.status === 502 && /not enabled|switched off/.test(err.message)) disabled = true;
             });
         };
 

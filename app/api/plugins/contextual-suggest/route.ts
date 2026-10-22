@@ -17,6 +17,7 @@ export async function POST(req: NextRequest) {
   }
   const input: SuggestInput = { selection, instruction };
   const result = await runPlugin<SuggestInput, SuggestResult>("contextual-suggest", input, {
+    project: typeof body.projectId === "string" ? body.projectId : undefined,
     cursor: { block: body.cursor.block },
     document: body.document,
     signal: req.signal,

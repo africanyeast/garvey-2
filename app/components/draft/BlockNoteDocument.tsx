@@ -56,6 +56,8 @@ import { useClickOutside } from "@/app/hooks/useClickOutside";
 import { blockPlainText } from "@/app/lib/writing-os/blockText";
 import { moveIntoSection, moveOutOfSection, sectionIdOf } from "@/app/lib/writing-os/sections";
 import { draftSchema, type DraftEditor } from "@/app/lib/writing-os/schema";
+import { useWritingOS } from "@/app/lib/writing-os/context";
+import { useDraftMode } from "@/app/lib/writing-os/draftMode";
 import { RefineExtension } from "@/app/lib/writing-os/refine";
 import { RefinePopover } from "@/app/components/draft/RefinePopover";
 
@@ -94,6 +96,7 @@ function DraftSideMenu() {
   const Components = useComponentsContext()!;
   const editor = useBlockNoteEditor(draftSchema);
   const sideMenu = useExtension(SideMenuExtension);
+  const { sections: withSections } = useDraftMode();
   const block = useExtensionState(SideMenuExtension, { selector: (s) => s?.block });
   const [open, setOpen] = useState<"down" | "up" | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -105,8 +108,8 @@ function DraftSideMenu() {
 
   if (!block) return null;
   const isSection = block.type === "section";
-  const inSection = isSection ? null : sectionIdOf(editor, block.id);
-  const sections = isSection ? [] : editor.document.filter((b) => b.type === "section" && b.id !== inSection);
+  const inSection = isSection || !withSections ? null : sectionIdOf(editor, block.id);
+  const sections = isSection || !withSections ? [] : editor.document.filter((b) => b.type === "section" && b.id !== inSection);
   const act = (fn: () => void) => {
     fn();
     close();
@@ -164,6 +167,9 @@ function DraftSideMenu() {
  * way paragraph/heading/list items do.
  */
 function DraftSlashMenu({ findWord }: { findWord: boolean }) {
+  const { activeProjectId } = useWritingOS();
+  // A reply is flat prose: no sections or headings to offer.
+  const { sections: withSections } = useDraftMode();
   const editor = useBlockNoteEditor(draftSchema);
   const popover = useContext(SuggestPopoverContext);
   // Only the draft's editor has the writing assist.
@@ -175,15 +181,19 @@ function DraftSlashMenu({ findWord }: { findWord: boolean }) {
       getItems={async (query) =>
         filterSuggestionItems(
           [
-            {
-              key: "section",
-              title: "Section",
-              subtext: "A collapsible group of blocks",
-              aliases: ["toggle", "group", "collapse", "heading"],
-              group: "Structure",
-              icon: <ChevronsUpDown size={18} />,
-              onItemClick: () => insertOrUpdateBlockForSlashMenu(editor, { type: "section" }),
-            },
+            ...(withSections
+              ? [
+                  {
+                    key: "section",
+                    title: "Section",
+                    subtext: "A collapsible group of blocks",
+                    aliases: ["toggle", "group", "collapse", "heading"],
+                    group: "Structure",
+                    icon: <ChevronsUpDown size={18} />,
+                    onItemClick: () => insertOrUpdateBlockForSlashMenu(editor, { type: "section" }),
+                  },
+                ]
+              : []),
             ...(assist?.askNextBlock
               ? [
                   {
@@ -223,12 +233,13 @@ function DraftSlashMenu({ findWord }: { findWord: boolean }) {
                       // Nothing to replace: let the writer describe what they want.
                       if (!target) return popover.setAsking(cursorRect(editor));
                       const signal = popover.setSuggesting(target.rect, { selection: target.word });
-                      void fetchSuggestions(editor, popover, { selection: target.word }, signal);
+                      void fetchSuggestions(editor, popover, { selection: target.word }, signal, activeProjectId);
                     },
                   },
                 ]
               : []),
-            ...getDefaultReactSlashMenuItems(editor),
+            // The React items' type drops core's `key`, which they still carry.
+            ...getDefaultReactSlashMenuItems(editor).filter((item) => withSections || !(item as { key?: string }).key?.includes("heading")),
           ],
           query,
         )
@@ -398,6 +409,8 @@ function typographyKeyOf(block: { type: string; props?: Record<string, unknown> 
 
 function TypographyMenuItem() {
   const editor = useBlockNoteEditor(draftSchema);
+  const { sections: withSections } = useDraftMode();
+  const options = TYPOGRAPHY_OPTIONS.filter((o) => withSections || !o.key.startsWith("heading"));
   const [open, setOpen] = useState(false);
   const activeKey = useEditorState({
     editor,
@@ -407,7 +420,7 @@ function TypographyMenuItem() {
   if (open) {
     return (
       <div className="flex flex-col">
-        {TYPOGRAPHY_OPTIONS.map((opt) => (
+        {options.map((opt) => (
           <MenuRow
             key={opt.key}
             icon={opt.icon}
@@ -471,13 +484,14 @@ async function fetchSuggestions(
   popover: NonNullable<ContextType<typeof SuggestPopoverContext>>,
   request: { selection?: string; instruction?: string },
   signal: AbortSignal,
+  projectId: string | null,
 ) {
   const cursor = { block: editor.getTextCursorPosition().block.id };
   try {
     const res = await fetch("/api/plugins/contextual-suggest", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...request, cursor, document: editor.document }),
+      body: JSON.stringify({ ...request, projectId, cursor, document: editor.document }),
       signal,
     });
     if (!res.ok) throw new Error();
@@ -644,6 +658,7 @@ function SuggestPopover({
  * actually renders the popover, so it survives the toolbar closing.
  */
 function SynonymMenuItem() {
+  const { activeProjectId } = useWritingOS();
   const editor = useBlockNoteEditor(draftSchema);
   const formattingToolbar = useExtension(FormattingToolbarExtension, { editor });
   const popover = useContext(SuggestPopoverContext)!;
@@ -665,7 +680,7 @@ function SynonymMenuItem() {
     formattingToolbar.store.setState(false);
     const signal = popover.setSuggesting(anchorRect, { selection });
 
-    await fetchSuggestions(editor, popover, { selection }, signal);
+    await fetchSuggestions(editor, popover, { selection }, signal, activeProjectId);
   }
 
   if (!oneWord) return null;
@@ -707,6 +722,7 @@ function RefineMenuItem() {
  * own comment for why that placement matters.
  */
 function SuggestPopoverHost() {
+  const { activeProjectId } = useWritingOS();
   const editor = useBlockNoteEditor(draftSchema);
   const popover = useContext(SuggestPopoverContext)!;
   if (popover.state === "closed" || !popover.anchorRect) return null;
@@ -718,7 +734,7 @@ function SuggestPopoverHost() {
       query={popover.query}
       onAsk={(instruction) => {
         const signal = popover.setSuggesting(popover.anchorRect!, { instruction });
-        void fetchSuggestions(editor, popover, { instruction }, signal);
+        void fetchSuggestions(editor, popover, { instruction }, signal, activeProjectId);
       }}
       onPick={(suggestion) => {
         editor.insertInlineContent(suggestion);

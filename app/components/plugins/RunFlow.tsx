@@ -20,6 +20,15 @@ const GROUPS: Array<{ key: string; label: string; steps: number[]; empty: string
   { key: "text", label: "What you'd written", steps: [7], empty: "none" },
 ];
 
+/** A reply's call (artifacts/REPLY_SPEC.md): its brief and its linked
+ * project in place of the piece, no sections, comments on its block. */
+const REPLY_GROUPS: typeof GROUPS = [
+  GROUPS[0],
+  { key: "project", label: "The reply and its project", steps: [2, 4], empty: "nothing" },
+  { key: "spot", label: "Comments on this block", steps: [6], empty: "nothing linked" },
+  GROUPS[4],
+];
+
 export const OUTCOME_LABELS: Record<OutcomeStatus, string> = {
   accepted: "Accepted",
   edited: "Accepted, edited",
@@ -110,7 +119,7 @@ export function RunFlow({ run }: { run: PluginRun }) {
   if (manifest) facts.push(["Context", `${fmtChars(manifest.chars)} of ${fmtChars(manifest.budget)} chars`]);
 
   const byGroup = manifest
-    ? GROUPS.map((def) => ({
+    ? (manifest.thingKind === "reply" ? REPLY_GROUPS : GROUPS).map((def) => ({
         def,
         entries: manifest.items.filter((x) => def.steps.includes(x.step)),
         dropped: manifest.dropped.filter((x) => def.steps.includes(x.step)),

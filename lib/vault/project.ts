@@ -1,19 +1,36 @@
-import { SHARED_FIELDS, newId, type Link, type Thing } from "@/lib/store";
+import { PROJECT_LIKE_KINDS, SHARED_FIELDS, isProjectLike, newId, type Link, type Thing } from "@/lib/store";
 import { liveProjectBySlug, projectContents, vault } from "./store";
-import { toProject } from "./shapes";
+import { aboutLink, toProject } from "./shapes";
 import { slugify } from "./slug";
-import type { Project, TrashedProject } from "@/app/lib/writing-os/types";
-import { projectDisplayTitle } from "@/app/lib/writing-os/types";
+import type { Project, ProjectKind, TrashedProject } from "@/app/lib/writing-os/types";
+import { defaultReplyTitle, projectDisplayTitle } from "@/app/lib/writing-os/types";
 
 // A project is one thing: its brief is the header, its draft is the body
 // (see lib/store). Its notes, comments, alt versions and threads are
-// separate things linked to it.
+// separate things linked to it. A reply is a special kind of project
+// (artifacts/REPLY_SPEC.md): every function here handles both, and only
+// the brief fields differ.
 
 /** The header fields a project's brief is stored under. `order` is only
  * present once the project has been dragged in the sidebar. The old
  * separate brief fields (`problem`, `goal`…) are left as they are on disk;
  * once `brief` is written they are no longer read (see `briefFromHeader`). */
 function briefFields(p: Omit<Project, "id" | "slug" | "createdAt" | "updatedAt">): Record<string, unknown> {
+  const shared = {
+    ...(p.order !== undefined ? { order: p.order } : {}),
+    ...(p.pluginOverrides && Object.keys(p.pluginOverrides).length ? { plugin_overrides: p.pluginOverrides } : {}),
+  };
+  if (p.kind === "reply") {
+    return {
+      title: p.title,
+      channel: p.channel ?? "other",
+      replying_to: p.replyingTo ?? "",
+      ...(p.replyingToUrl ? { replying_to_url: p.replyingToUrl } : {}),
+      intent: p.intent ?? "",
+      status: p.status,
+      ...shared,
+    };
+  }
   return {
     title: p.title,
     subtitle: p.subtitle,
@@ -21,22 +38,31 @@ function briefFields(p: Omit<Project, "id" | "slug" | "createdAt" | "updatedAt">
     title_candidates: p.titleCandidates,
     subtitle_candidates: p.subtitleCandidates,
     status: p.status,
-    ...(p.order !== undefined ? { order: p.order } : {}),
+    ...shared,
   };
 }
 
-function writeProject(t: Thing, p: Project): Thing {
+function writeProject(t: Thing, p: Project, aboutLabel?: string): Thing {
+  // A reply's one `about` link is its linked project.
+  if (p.kind === "reply" && p.aboutProjectId !== aboutLink(t.header.links)?.to.id) {
+    t.header.links = [
+      ...t.header.links.filter((l) => l !== aboutLink(t.header.links)),
+      ...(p.aboutProjectId ? [{ rel: "about" as const, to: { id: p.aboutProjectId }, ...(aboutLabel ? { label: aboutLabel } : {}) }] : []),
+    ];
+  }
   delete t.header.order;
+  delete t.header.plugin_overrides;
+  delete t.header.replying_to_url;
   Object.assign(t.header, briefFields(p), { slug: p.slug, created_at: p.createdAt, updated_at: p.updatedAt });
   return t;
 }
 
-/** Top-level app routes a project's URL must not shadow. */
+/** Top-level app routes a project's (or reply's) URL must not shadow. */
 const RESERVED_SLUGS = ["inbox", "style", "trash", "inspector", "api"];
 
 async function liveSlugs(): Promise<Set<string>> {
   const store = await vault();
-  return new Set([...RESERVED_SLUGS, ...(await store.list({ kind: "project" })).map((p) => p.header.slug as string)]);
+  return new Set([...RESERVED_SLUGS, ...(await store.list({ kind: PROJECT_LIKE_KINDS })).map((p) => p.header.slug as string)]);
 }
 
 /** `base`, or `base-2`, `base-3`… — the first not taken. */
@@ -56,9 +82,10 @@ function orderKey(p: Project): number {
   return p.order ?? Date.parse(p.createdAt) ?? 0;
 }
 
-export async function listProjects(): Promise<Project[]> {
+/** Projects (by default), replies, or both. */
+export async function listProjects(kind: ProjectKind | "all" = "project"): Promise<Project[]> {
   const store = await vault();
-  return (await store.list({ kind: "project" }))
+  return (await store.list({ kind: kind === "all" ? PROJECT_LIKE_KINDS : kind }))
     .map(toProject)
     .sort((a, b) => orderKey(b) - orderKey(a) || a.slug.localeCompare(b.slug));
 }
@@ -68,7 +95,7 @@ export async function getProject(slug: string): Promise<Project | null> {
   return p ? toProject(p) : null;
 }
 
-export async function createProject(input: { title?: string; brief?: string }): Promise<Project> {
+export async function createProject(input: { title?: string; brief?: string; kind?: ProjectKind }): Promise<Project> {
   const store = await vault();
   // A brand-new project stays untitled (no fake "Untitled" title stored)
   // until the user actually sets one, or closes the brief without doing so
@@ -76,20 +103,23 @@ export async function createProject(input: { title?: string; brief?: string }): 
   // falls back to `slugify`'s own "untitled" default, uniquified below.
   const title = input.title?.trim() ?? "";
   const slug = uniqueSlug(slugify(title), await liveSlugs());
+  const kind = input.kind ?? "project";
   const brief = {
+    kind,
     title,
     subtitle: "",
     brief: input.brief ?? "",
     titleCandidates: title ? [{ text: title, current: true }] : [],
     subtitleCandidates: [],
     status: "active",
+    ...(kind === "reply" ? { channel: "other" as const, replyingTo: "", intent: "" } : {}),
   };
   // An empty body reads as today's empty draft (one paragraph).
-  const t = await store.create({ kind: "project", body: "", fields: { slug, ...briefFields(brief) } });
+  const t = await store.create({ kind, body: "", fields: { slug, ...briefFields(brief) } });
   return toProject(t);
 }
 
-// Trashes the project together with its contents (its notes, alt
+// Trashes the project (or reply) together with its contents (its notes, alt
 // versions, threads, and the comments on them and on its draft), each
 // marked `trashed_with` it so restore brings back exactly that set.
 // Nothing is destroyed.
@@ -127,7 +157,7 @@ export async function deleteProject(slug: string): Promise<boolean> {
 export async function restoreProject(id: string): Promise<Project | null> {
   const store = await vault();
   const p = await store.get(id);
-  if (!p || p.header.kind !== "project" || p.header.trashed_at === null) return null;
+  if (!p || !isProjectLike(p.header.kind) || p.header.trashed_at === null) return null;
   const slug = uniqueSlug(p.header.slug as string, await liveSlugs());
 
   for (const t of await projectContents(store, p.header.id, { trashedWith: true })) {
@@ -149,9 +179,10 @@ export async function restoreProject(id: string): Promise<Project | null> {
 /** Most recently trashed first. */
 export async function listTrashedProjects(): Promise<TrashedProject[]> {
   const store = await vault();
-  return (await store.list({ kind: "project", trashed: true }))
+  return (await store.list({ kind: PROJECT_LIKE_KINDS, trashed: true }))
     .map((p) => ({
       id: p.header.id,
+      kind: toProject(p).kind,
       title: projectDisplayTitle(toProject(p)),
       trashedAt: p.header.trashed_at as string,
     }))
@@ -188,6 +219,23 @@ export async function updateProject(slug: string, patch: Partial<Omit<Project, "
   if (!p) return null;
   const current = toProject(p);
 
+  // A reply's title follows its message until the writer sets one of their
+  // own: one still empty, or still the default for the old message, is
+  // replaced by the default for the new one.
+  if (current.kind === "reply" && patch.replyingTo !== undefined && patch.title === undefined) {
+    const auto = !current.title.trim() || current.title === defaultReplyTitle(current.replyingTo ?? "");
+    const title = defaultReplyTitle(patch.replyingTo);
+    if (auto && title) patch = { ...patch, title, titleCandidates: [{ text: title, current: true }] };
+  }
+
+  // A reply's linked project must be a live project; anything else unlinks.
+  let aboutLabel: string | undefined;
+  if (current.kind === "reply" && patch.aboutProjectId) {
+    const target = await store.get(patch.aboutProjectId);
+    if (target?.header.kind === "project" && target.header.trashed_at === null) aboutLabel = projectDisplayTitle(toProject(target));
+    else patch = { ...patch, aboutProjectId: "" };
+  }
+
   // Every rename re-slugs to match the new title — safe because nothing
   // long-lived references a project by slug: tags and links store its id.
   // (Still a no-op unless the title actually changed.)
@@ -197,9 +245,9 @@ export async function updateProject(slug: string, patch: Partial<Omit<Project, "
     nextSlug = uniqueSlug(slugify(newTitle), await liveSlugs(), slug);
   }
 
-  // A thing's id never changes, whatever the patch says.
-  const next: Project = { ...current, ...patch, id: current.id, slug: nextSlug, updatedAt: new Date().toISOString() };
-  await store.update(p.header.id, (x) => writeProject(x, next), { touch: false });
+  // A thing's id and kind never change, whatever the patch says.
+  const next: Project = { ...current, ...patch, id: current.id, kind: current.kind, slug: nextSlug, updatedAt: new Date().toISOString() };
+  await store.update(p.header.id, (x) => writeProject(x, next, aboutLabel), { touch: false });
   return next;
 }
 
@@ -282,7 +330,7 @@ export async function duplicateProject(slug: string): Promise<Project | null> {
   const srcFields = copyFields(src);
   delete srcFields.order;
   await store.create({
-    kind: "project",
+    kind: source.kind,
     id: next.id,
     body: rewrite(src.body),
     created_at: now,

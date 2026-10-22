@@ -155,3 +155,54 @@ describe("notes, comments and trash on links", () => {
     expect(notes.filter((n) => n.links[0]?.rel === "filed-under" && n.links[0].to.id === copy!.id).length).toBe(1);
   });
 });
+
+describe("replies, a special kind of project", () => {
+  let r: Awaited<ReturnType<typeof P.createProject>>;
+
+  test("a reply is created apart from projects, with an empty reply brief", async () => {
+    const before = (await P.listProjects()).length;
+    r = await P.createProject({ kind: "reply" });
+    expect(r.kind).toBe("reply");
+    expect([r.channel, r.replyingTo, r.intent]).toEqual(["other", "", ""]);
+    expect((await P.listProjects()).length).toBe(before);
+    expect((await P.listProjects("reply")).map((p) => p.id)).toEqual([r.id]);
+    expect((await P.listProjects("all")).some((p) => p.id === r.id)).toBe(true);
+  });
+
+  test("its title follows the message until the writer sets one", async () => {
+    r = (await P.updateProject(r.slug, { replyingTo: "@tola: are you free on the 12th for the panel?" }))!;
+    expect(r.title).toBe("Reply to @tola");
+    expect(r.slug).toBe("reply-to-tola");
+    r = (await P.updateProject(r.slug, { replyingTo: "Are you free on the 12th for the panel?" }))!;
+    expect(r.title).toBe("Are you free on the 12th");
+    r = (await P.updateProject(r.slug, { title: "Tola's panel" }))!;
+    r = (await P.updateProject(r.slug, { replyingTo: "Something else", intent: "decline politely", channel: "whatsapp" }))!;
+    expect([r.title, r.replyingTo, r.intent, r.channel]).toEqual(["Tola's panel", "Something else", "decline politely", "whatsapp"]);
+    expect((await P.getProject(r.slug))?.kind).toBe("reply");
+  });
+
+  test("slugs are unique across projects and replies", async () => {
+    const project = await P.createProject({ title: "Tola's panel" });
+    expect(project.slug).not.toBe(r.slug);
+    await P.deleteProject(project.slug);
+  });
+
+  test("its draft takes block comments and versions", async () => {
+    await D.saveDraft(r.slug, para("Thanks, but I can't make it.").map((b) => ({ ...b, id: "rb1" })) as never);
+    const c = await C.createComment({ on: { id: r.id, block: "rb1" }, text: "too blunt?" });
+    expect(c.links[0].to).toEqual({ id: r.id, block: "rb1" });
+    await V.createVariant(r.slug, { block: "rb1", content: para("alt")[0] as never, order: 0 });
+    expect((await V.listVariants(r.slug)).length).toBe(1);
+  });
+
+  test("it is trashed and restored with its comments", async () => {
+    await P.deleteProject(r.slug);
+    expect(await P.getProject(r.slug)).toBeNull();
+    expect((await P.listTrashedProjects()).find((t) => t.id === r.id)?.kind).toBe("reply");
+    expect((await C.listComments()).some((c) => c.text === "too blunt?")).toBe(false);
+    const back = await P.restoreProject(r.id);
+    expect(back?.kind).toBe("reply");
+    expect((await C.listComments()).some((c) => c.text === "too blunt?")).toBe(true);
+    expect((await V.listVariants(back!.slug)).length).toBe(1);
+  });
+});

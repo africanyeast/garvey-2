@@ -1,4 +1,6 @@
 import { CallCancelled, type CallControl, type CallUsage } from "@/lib/ai/client";
+import { vault } from "@/lib/vault/store";
+import { isProjectLike } from "@/lib/store";
 import { getOSConfig } from "@/lib/vault/config";
 import { effectiveSettings } from "./settings";
 import { ContextError, CURSOR_MARK, resolveContext, type Cursor } from "@/lib/context";
@@ -15,6 +17,9 @@ export interface PluginPlace {
   cursor?: Cursor | null;
   document?: DraftPartialBlock[];
   task?: string;
+  /** The project the call is made in (its id), for its own plugin switches.
+   * Falls back to the cursor's thing when that is a project. */
+  project?: string;
   /** Stops the call: the route passes its request's signal, so a client
    * that gives up (the writer typed on, closed the card) ends the AI call
    * too, instead of leaving it to run to the end. */
@@ -49,7 +54,7 @@ function callTitle(plugin: Plugin<any, any>, input: unknown, task: string | unde
 }
 
 /** The single entry point every plugin call goes through: looks the plugin
- * up, checks it's enabled in .os/config.yaml and that its permissions cover
+ * up, checks it's enabled in .os/config.yaml (unless the project overrides it) and that its permissions cover
  * the context it declares, resolves that context from the cursor, runs it,
  * records what was sent for the inspector, and normalizes both
  * harness-level and plugin-level failures into a PluginResult so callers
@@ -59,7 +64,16 @@ export async function runPlugin<TInput, TData>(pluginId: string, input: TInput, 
   if (!plugin) return { ok: false, error: `Unknown plugin: ${pluginId}` };
 
   const config = await getOSConfig();
-  if (!config.plugins.includes(pluginId)) {
+  // A project's own switch for the plugin, if it has one, beats the global.
+  let override: boolean | undefined;
+  const projectId = place.project ?? place.cursor?.thing;
+  if (projectId) {
+    const thing = await (await vault()).get(projectId);
+    const mine = isProjectLike(thing?.header.kind) ? (thing.header.plugin_overrides as Record<string, unknown> | undefined)?.[pluginId] : undefined;
+    if (typeof mine === "boolean") override = mine;
+  }
+  if (override === false) return { ok: false, error: `Plugin "${pluginId}" is switched off for this project` };
+  if (override === undefined && !config.plugins.includes(pluginId)) {
     return { ok: false, error: `Plugin "${pluginId}" is not enabled in .os/config.yaml` };
   }
 

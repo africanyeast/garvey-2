@@ -5,7 +5,7 @@ import { getDraft } from "./vault/draft";
 import { projectDisplayTitle } from "@/app/lib/writing-os/types";
 import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 
-export type SearchResultKind = "project" | "note";
+export type SearchResultKind = "project" | "reply" | "note";
 
 export interface SearchResult {
   kind: SearchResultKind;
@@ -61,7 +61,7 @@ export async function searchVault(query: string): Promise<SearchResult[]> {
   const qLower = q.toLowerCase();
   const results: SearchResult[] = [];
 
-  const projects = await listProjects();
+  const projects = await listProjects("all");
 
   // One result per project — a project and its draft are the same document
   // from a search standpoint, so a match in either the brief fields or the
@@ -70,10 +70,10 @@ export async function searchVault(query: string): Promise<SearchResult[]> {
   await Promise.all(
     projects.map(async (project) => {
       const title = projectDisplayTitle(project);
-      const briefText = [title, project.subtitle, project.brief].join(" ");
+      const briefText = [title, project.subtitle, project.brief, project.replyingTo, project.intent].filter(Boolean).join(" ");
       if (briefText.toLowerCase().includes(qLower)) {
         results.push({
-          kind: "project",
+          kind: project.kind,
           projectSlug: project.slug,
           projectTitle: title,
           title,
@@ -86,7 +86,7 @@ export async function searchVault(query: string): Promise<SearchResult[]> {
       const draftText = blockTreeText(await getDraft(project.slug));
       if (draftText.toLowerCase().includes(qLower)) {
         results.push({
-          kind: "project",
+          kind: project.kind,
           projectSlug: project.slug,
           projectTitle: title,
           title,

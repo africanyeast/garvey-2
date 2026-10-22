@@ -1,10 +1,10 @@
-import { StoreError, blockText, findBlock, isValidId, labelSnippet, parseBlocks, type Link, type Store, type Thing } from "@/lib/store";
+import { StoreError, blockText, findBlock, isProjectLike, isValidId, labelSnippet, parseBlocks, type Link, type Store, type Thing } from "@/lib/store";
 import { vault } from "./store";
 import { byId, toComment } from "./shapes";
 import type { Comment } from "@/app/lib/writing-os/types";
 
-// A comment is on a block in a project's draft: a thing with one
-// `comment-on` link to `{ project, block }`. Nothing else takes comments.
+// A comment is on a block in a project's (or reply's) draft: a thing with
+// one `comment-on` link to `{ project, block }`. Nothing else takes comments.
 
 function readRef(raw: unknown): { id: string; block: string } {
   const r = raw as { id?: unknown; block?: unknown } | null;
@@ -20,7 +20,7 @@ async function commentLink(store: Store, raw: unknown): Promise<Link> {
   const on = readRef(raw);
   const target = await store.get(on.id);
   if (!target || target.header.trashed_at !== null) throw new StoreError(`nothing live to comment on at ${on.id}`);
-  if (target.header.kind !== "project") throw new StoreError("a block comment must be on a project's draft");
+  if (!isProjectLike(target.header.kind)) throw new StoreError("a block comment must be on a project's or reply's draft");
   const block = findBlock(parseBlocks(target.body), on.block);
   const label = block ? labelSnippet(blockText(block)) : "";
   return { rel: "comment-on", to: on, ...(label ? { label } : {}) };

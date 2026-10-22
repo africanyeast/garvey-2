@@ -12,7 +12,8 @@ import type { Kind, Link, Ref, Relation, Thing, ThingHeader } from "./types";
 export class StoreError extends Error {}
 
 export interface ListQuery {
-  kind?: Kind;
+  /** One kind, or any of several. */
+  kind?: Kind | readonly Kind[];
   /** false (default): live things only. true: trashed only. "any": both. */
   trashed?: boolean | "any";
 }
@@ -120,10 +121,11 @@ export class Store {
 
   async list(query: ListQuery = {}): Promise<Thing[]> {
     const trashed = query.trashed ?? false;
+    const kinds = query.kind === undefined ? null : typeof query.kind === "string" ? [query.kind] : query.kind;
     const out: Thing[] = [];
     for (const { thing } of (await this.scan()).values()) {
       const h = thing.header;
-      if (query.kind && h.kind !== query.kind) continue;
+      if (kinds && !kinds.includes(h.kind)) continue;
       if (trashed !== "any" && (h.trashed_at !== null) !== trashed) continue;
       out.push(structuredClone(thing));
     }

@@ -1,6 +1,6 @@
 "use client";
 
-import { useLayoutEffect, useRef, type CSSProperties, type KeyboardEvent, type RefObject } from "react";
+import { useLayoutEffect, useRef, type ClipboardEvent, type CSSProperties, type KeyboardEvent, type RefObject } from "react";
 
 /**
  * The app's one multi-line input: grows with its text from `minRows`.
@@ -13,6 +13,7 @@ export function AutoTextarea({
   onSubmit,
   onKeyDown,
   onBlur,
+  onPaste,
   placeholder,
   minRows = 2,
   disabled,
@@ -26,6 +27,7 @@ export function AutoTextarea({
   onSubmit?: () => void;
   onKeyDown?: (e: KeyboardEvent<HTMLTextAreaElement>) => void;
   onBlur?: () => void;
+  onPaste?: (e: ClipboardEvent<HTMLTextAreaElement>) => void;
   placeholder?: string;
   minRows?: number;
   disabled?: boolean;
@@ -54,6 +56,7 @@ export function AutoTextarea({
       placeholder={placeholder}
       onChange={(e) => onChange(e.target.value)}
       onBlur={onBlur}
+      onPaste={onPaste}
       onKeyDown={(e) => {
         onKeyDown?.(e);
         if (e.defaultPrevented) return;

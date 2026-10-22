@@ -69,6 +69,12 @@ describe("run record", () => {
     expect(lines[0].length).toBeLessThan(700);
   });
 
+  test("a reply's run keeps what it was in and the project it is about", async () => {
+    const reply = { ...manifest, thingKind: "reply" as const, about: { id: "01M3T700000000000000000001", title: "Paper" } };
+    const run = await R.recordRun({ ...base, context: reply });
+    expect((await R.getRun(run.id))?.context).toEqual(reply);
+  });
+
   test("an outcome is attached to its run, and the first one wins", async () => {
     const run = await R.recordRun({ ...base, output: { text: "Hello." } });
     expect(await R.recordOutcome(run.id, "accepted", 6)).toBe(true);

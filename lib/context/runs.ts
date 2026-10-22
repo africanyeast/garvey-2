@@ -120,6 +120,8 @@ function packContext(c: ContextManifest | null) {
   if (!c) return 0;
   return {
     cu: c.cursor,
+    ...(c.thingKind === "reply" ? { tk: "reply" as const } : {}),
+    ...(c.about ? { ab: c.about } : {}),
     src: c.documentSource,
     sec: c.section,
     w: c.where,
@@ -138,6 +140,8 @@ function unpackContext(c: PackedContext): ContextManifest | null {
   if (!c) return null;
   return {
     cursor: c.cu,
+    ...(c.tk ? { thingKind: c.tk } : {}),
+    ...(c.ab ? { about: c.ab } : {}),
     documentSource: c.src,
     section: c.sec,
     ...(c.w ? { where: c.w } : {}),

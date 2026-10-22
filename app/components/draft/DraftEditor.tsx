@@ -2,9 +2,12 @@
 
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Copy, CopyPlus, EllipsisVertical, Eye, FileText, Keyboard, Pencil, StickyNotes, Can } from "lucide-react";
+import { Copy, CopyPlus, EllipsisVertical, ExternalLink, Eye, FileText, Keyboard, Pencil, Sparkles, StickyNotes, Can } from "lucide-react";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useDraftEditor } from "@/app/lib/writing-os/editor-context";
+import { useDraftMode } from "@/app/lib/writing-os/draftMode";
+import { documentPlainText } from "@/app/lib/writing-os/blockText";
+import { xReplyIntent } from "@/app/lib/writing-os/replySource";
 import { DraftDocument } from "@/app/components/draft/DraftDocument";
 import { MenuRow } from "@/app/components/shared/MenuRow";
 import { DropdownMenu } from "@/app/components/shared/DropdownMenu";
@@ -20,7 +23,10 @@ export function DraftEditor({
   onTitleChange,
   onSubtitleChange,
   onOpenBrief,
+  onOpenPlugins,
   onOpenShortcuts,
+  charLimit,
+  xPostId,
 }: {
   title: string;
   subtitle: string;
@@ -28,8 +34,14 @@ export function DraftEditor({
   onTitleChange: (text: string) => void;
   onSubtitleChange: (text: string) => void;
   onOpenBrief: () => void;
+  onOpenPlugins: () => void;
   onOpenShortcuts: () => void;
+  /** Shows a character counter against this limit (a reply on X). */
+  charLimit?: number;
+  /** The X post a reply answers: adds "Open reply on X". */
+  xPostId?: string;
 }) {
+  const mode = useDraftMode();
   const {
     openMenu,
     toggleMenu,
@@ -43,7 +55,7 @@ export function DraftEditor({
     addProjectToList,
     removeProjectFromList,
   } = useWritingOS();
-  const { editor } = useDraftEditor();
+  const { editor, document: draftDoc } = useDraftEditor();
   const router = useRouter();
 
   // Re-render every 30s so "2 min ago" keeps advancing without a refresh.
@@ -60,16 +72,19 @@ export function DraftEditor({
   };
 
   const togglePreview = () => {
+    if (!mode.preview) return;
     setDocMode(docMode === "edit" ? "preview" : "edit");
   };
 
-  const copyMarkdown = () => {
-    navigator.clipboard.writeText(editor.blocksToMarkdownLossy());
+  // A reply is copied out to be sent from another app, so as plain text;
+  // a project as markdown.
+  const copyDoc = () => {
+    navigator.clipboard.writeText(mode.preview ? editor.blocksToMarkdownLossy() : documentPlainText(editor.document));
     showToast("Copied");
   };
 
   const duplicateDoc = () => {
-    if (!activeProjectSlug) return;
+    if (!activeProjectSlug || !mode.duplicate) return;
     fetch(`/api/projects/${activeProjectSlug}/duplicate`, { method: "POST" })
       .then((res) => (res.ok ? res.json() : undefined))
       .then((project: Project | undefined) => {
@@ -101,7 +116,7 @@ export function DraftEditor({
         togglePreview();
       } else if (key === "c") {
         e.preventDefault();
-        copyMarkdown();
+        copyDoc();
       } else if (key === "d") {
         e.preventDefault();
         duplicateDoc();
@@ -109,7 +124,9 @@ export function DraftEditor({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [docMode, activeProjectSlug, editor, addProjectToList, router]);
+  }, [docMode, activeProjectSlug, editor, addProjectToList, router, mode]);
+
+  const charCount = charLimit ? documentPlainText(draftDoc).length : 0;
 
   return (
     <>
@@ -126,20 +143,33 @@ export function DraftEditor({
               {title}
             </div>
             <div className="flex items-center flex-wrap gap-x-[8px]">
-              <div
-                contentEditable
-                suppressContentEditableWarning
-                data-placeholder="Add a subtitle"
-                onBlur={(e) => onSubtitleChange(e.currentTarget.textContent ?? "")}
-                className="text-subtitle border-none outline-none bg-transparent p-[0] break-words"
-              >
-                {subtitle}
-              </div>
+              {mode.subtitle && (
+                <div
+                  contentEditable
+                  suppressContentEditableWarning
+                  data-placeholder="Add a subtitle"
+                  onBlur={(e) => onSubtitleChange(e.currentTarget.textContent ?? "")}
+                  className="text-subtitle border-none outline-none bg-transparent p-[0] break-words"
+                >
+                  {subtitle}
+                </div>
+              )}
               {updatedAt && (
                 <>
-                  <span className="text-[var(--text-muted)] text-sm select-none">•</span>
+                  {mode.subtitle && <span className="text-[var(--text-muted)] text-sm select-none">•</span>}
                   <span className="text-subtitle text-xs whitespace-nowrap">
                     {formatRelativeClient(updatedAt)}
+                  </span>
+                </>
+              )}
+              {charLimit && (
+                <>
+                  <span className="text-[var(--text-muted)] text-sm select-none">•</span>
+                  <span
+                    title={`${charLimit} characters at most`}
+                    className={`text-xs whitespace-nowrap tabular-nums ${charCount > charLimit ? "text-[var(--color-oxblood-500)] font-semibold" : "text-subtitle"}`}
+                  >
+                    {charCount}/{charLimit}
                   </span>
                 </>
               )}
@@ -154,13 +184,24 @@ export function DraftEditor({
             <FileText size={12} strokeWidth={1.7} />
             Brief
           </button>
-          <button
-            onClick={() => setPanelMode(panelMode === "collapsed" ? "docked" : "collapsed")}
-            className={`text-xs font-medium inline-flex items-center gap-[4px] bg-transparent border rounded-sm py-[4px] px-[8px] cursor-pointer whitespace-nowrap border-[var(--border-default)] text-[var(--text-secondary)]`}
-          >
-            <StickyNotes size={12} strokeWidth={1.7} />
-            Notes
-          </button>
+          {mode.notes ? (
+            <button
+              onClick={() => setPanelMode(panelMode === "collapsed" ? "docked" : "collapsed")}
+              className={`text-xs font-medium inline-flex items-center gap-[4px] bg-transparent border rounded-sm py-[4px] px-[8px] cursor-pointer whitespace-nowrap border-[var(--border-default)] text-[var(--text-secondary)]`}
+            >
+              <StickyNotes size={12} strokeWidth={1.7} />
+              Notes
+            </button>
+          ) : (
+            <button
+              onClick={copyDoc}
+              title="Copy as plain text (⌃C)"
+              className={`text-xs font-medium inline-flex items-center gap-[4px] bg-transparent border rounded-sm py-[4px] px-[8px] cursor-pointer whitespace-nowrap border-[var(--border-default)] text-[var(--text-secondary)]`}
+            >
+              <Copy size={12} strokeWidth={1.7} />
+              Copy
+            </button>
+          )}
           <button
             onClick={(e) => {
               stop(e);
@@ -172,30 +213,44 @@ export function DraftEditor({
           </button>
           {openMenu === "docmenu" && (
             <DropdownMenu>
-              <MenuRow
-                icon={docMode === "edit" ? Eye : Pencil}
-                label={docMode === "edit" ? "Preview" : "Edit"}
-                onClick={() => {
-                  togglePreview();
-                  closeMenu();
-                }}
-              />
+              {mode.preview && (
+                <MenuRow
+                  icon={docMode === "edit" ? Eye : Pencil}
+                  label={docMode === "edit" ? "Preview" : "Edit"}
+                  onClick={() => {
+                    togglePreview();
+                    closeMenu();
+                  }}
+                />
+              )}
               <MenuRow
                 icon={Copy}
                 label="Copy"
                 onClick={() => {
-                  copyMarkdown();
+                  copyDoc();
                   closeMenu();
                 }}
               />
-              <MenuRow
-                icon={CopyPlus}
-                label="Duplicate"
-                onClick={() => {
-                  duplicateDoc();
-                  closeMenu();
-                }}
-              />
+              {xPostId && (
+                <MenuRow
+                  icon={ExternalLink}
+                  label="Open reply on X"
+                  onClick={() => {
+                    window.open(xReplyIntent(xPostId, documentPlainText(editor.document)), "_blank", "noopener");
+                    closeMenu();
+                  }}
+                />
+              )}
+              {mode.duplicate && (
+                <MenuRow
+                  icon={CopyPlus}
+                  label="Duplicate"
+                  onClick={() => {
+                    duplicateDoc();
+                    closeMenu();
+                  }}
+                />
+              )}
               <MenuRow
                 icon={Can}
                 label="Delete"
@@ -205,6 +260,14 @@ export function DraftEditor({
                 }}
               />
               <div className="h-px bg-[var(--border-default)] my-[4px]" />
+              <MenuRow
+                icon={Sparkles}
+                label="Plugins"
+                onClick={() => {
+                  onOpenPlugins();
+                  closeMenu();
+                }}
+              />
               <MenuRow
                 icon={Keyboard}
                 label="Shortcuts"

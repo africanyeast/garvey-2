@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { EllipsisVertical, FileText, Inbox, Plus, Search, Can, GripVertical, Sparkles, UserPen } from "lucide-react";
+import { EllipsisVertical, FileText, Inbox, Plus, Reply, Search, Can, GripVertical, Sparkles, UserPen } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -19,7 +19,7 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { Project } from "@/app/lib/writing-os/types";
+import type { Project, ProjectKind } from "@/app/lib/writing-os/types";
 import { projectDisplayTitle } from "@/app/lib/writing-os/types";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { RowIconButton } from "@/app/components/shared/RowIconButton";
@@ -33,6 +33,7 @@ export function Sidebar() {
   const router = useRouter();
   const {
     projectsList: projects,
+    repliesList: replies,
     addProjectToList,
     removeProjectFromList,
     reorderProjectsInList,
@@ -74,17 +75,16 @@ export function Sidebar() {
   const activeSlug =
     !isInbox && !isStyle && !isTrash && !isInspector ? pathname?.split("/").filter(Boolean)[0] : null;
 
-  const createProject = async () => {
+  const createProject = async (kind: ProjectKind) => {
     const res = await fetch("/api/projects", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({}),
+      body: JSON.stringify({ kind }),
     });
     if (!res.ok) return;
     const project: Project = await res.json();
     addProjectToList(project);
-    // `?new=1` tells DraftScreen to open the brief by default, Notion-style.
-    router.push(`/${project.slug}?new=1`);
+    router.push(`/${project.slug}`);
   };
 
   const deleteProject = async (project: Project) => {
@@ -158,11 +158,45 @@ export function Sidebar() {
         </DndContext>
 
         <button
-          onClick={createProject}
+          onClick={() => createProject("project")}
           className="flex items-center gap-[8px] py-[9px] px-[10px] mt-[4px] cursor-pointer text-[var(--text-muted)] bg-transparent border-none text-left"
         >
           <Plus size={15} strokeWidth={1.8} />
           <span className={"text-xs font-semibold"}>New Project</span>
+        </button>
+      </div>
+
+      {/* Replies: newest first, never dragged, otherwise rows like projects'. */}
+      <div className="flex flex-col gap-[2px]">
+        <div className={`text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] px-[10px] mb-[6px]`}>
+          Replies
+        </div>
+
+        <DndContext>
+          <SortableContext items={replies.map((p) => p.slug)}>
+            {replies.map((reply) => (
+              <SortableProjectRow
+                key={reply.slug}
+                project={reply}
+                sortable={false}
+                active={activeSlug === reply.slug}
+                menuOpen={menuOpenSlug === reply.slug}
+                onToggleMenu={() => setMenuOpenSlug(menuOpenSlug === reply.slug ? null : reply.slug)}
+                onDelete={() => {
+                  setMenuOpenSlug(null);
+                  setConfirmProject(reply);
+                }}
+              />
+            ))}
+          </SortableContext>
+        </DndContext>
+
+        <button
+          onClick={() => createProject("reply")}
+          className="flex items-center gap-[8px] py-[9px] px-[10px] mt-[4px] cursor-pointer text-[var(--text-muted)] bg-transparent border-none text-left"
+        >
+          <Plus size={15} strokeWidth={1.8} />
+          <span className={"text-xs font-semibold"}>New Reply</span>
         </button>
       </div>
 
@@ -205,6 +239,7 @@ export function Sidebar() {
 
 function SortableProjectRow({
   project,
+  sortable = true,
   active,
   menuOpen,
   onToggleMenu,
@@ -212,15 +247,19 @@ function SortableProjectRow({
   onClickCapture,
 }: {
   project: Project;
+  /** Off for a reply: replies keep newest-first, with no grip. */
+  sortable?: boolean;
   active: boolean;
   menuOpen: boolean;
   onToggleMenu: () => void;
   onDelete: () => void;
-  onClickCapture: (e: MouseEvent) => void;
+  onClickCapture?: (e: MouseEvent) => void;
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: project.slug,
+    disabled: !sortable,
   });
+  const Icon = project.kind === "reply" ? Reply : FileText;
 
   return (
     <Link
@@ -230,21 +269,23 @@ function SortableProjectRow({
       onClickCapture={onClickCapture}
       className={`wos-row group relative flex items-center gap-[10px] py-[9px] pr-[8px] pl-[10px] rounded-sm cursor-pointer ${active ? "border border-[var(--border-default)]" : "bg-transparent"}`}
     >
-      <span
-        {...attributes}
-        {...listeners}
-        className={`absolute left-[-3px] top-1/2 -translate-y-1/2 cursor-grab text-[var(--text-muted)] touch-none ${isDragging ? "" : "opacity-0 group-hover:opacity-100"}`}
-        onClick={(e) => e.preventDefault()}
-      >
-        <GripVertical size={13} strokeWidth={1.8} />
-      </span>
-      <FileText size={17} className="shrink-0 text-[var(--text-secondary)]" />
+      {sortable && (
+        <span
+          {...attributes}
+          {...listeners}
+          className={`absolute left-[-3px] top-1/2 -translate-y-1/2 cursor-grab text-[var(--text-muted)] touch-none ${isDragging ? "" : "opacity-0 group-hover:opacity-100"}`}
+          onClick={(e) => e.preventDefault()}
+        >
+          <GripVertical size={13} strokeWidth={1.8} />
+        </span>
+      )}
+      <Icon size={17} className="shrink-0 text-[var(--text-secondary)]" />
       <span className="text-xs font-medium flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--text-primary)]">
         {projectDisplayTitle(project)}
       </span>
       <RowIconButton
         icon={<EllipsisVertical size={13} strokeWidth={1.8} />}
-        label="Project options"
+        label={project.kind === "reply" ? "Reply options" : "Project options"}
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();

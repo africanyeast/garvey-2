@@ -1,7 +1,7 @@
 import { commentOn } from "@/lib/store/links";
-import type { Link, Thing } from "@/lib/store/types";
+import { isProjectLike, type Link, type Thing } from "@/lib/store/types";
 import { blockPlainText, flattenBlocksToMarkdown } from "@/app/lib/writing-os/blockText";
-import { briefFromHeader, projectDisplayTitle, type Attachment } from "@/app/lib/writing-os/types";
+import { briefFromHeader, projectDisplayTitle, replyChannelLabel, type Attachment, type ReplyChannel } from "@/app/lib/writing-os/types";
 import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 
 // The AI rule (artifacts/MENTAL_MODEL.md, V2_SPEC.md Phase 5): what a
@@ -10,6 +10,12 @@ import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 // the bundle in a fixed order, most stable first, and a manifest of what
 // is in it and why. It is pure: the caller hands it the things, the style
 // and (optionally) the editor's live copy of the document.
+//
+// A reply (artifacts/REPLY_SPEC.md) resolves the same way with its own
+// rule: its brief (channel, the message, the intent) and, if it is about a
+// project, that project's brief in step 2; that project's own notes in
+// step 4; no outline and no section material; comments and versions on
+// the cursor's block as for a project. Nothing from any other project.
 
 /** What a plugin may ask for. Each part needs a permission (`PART_PERMISSION`). */
 export const CONTEXT_PARTS = [
@@ -98,6 +104,10 @@ export interface ManifestEntry {
 
 export interface ContextManifest {
   cursor: Cursor;
+  /** What the cursor is in: a project's draft or a reply's. */
+  thingKind?: "project" | "reply";
+  /** A reply's linked project, when it has one. */
+  about?: { id: string; title: string };
   /** Where the document text came from: the editor's live copy, or the
    * vault (the last save). */
   documentSource: "editor" | "vault" | "none";
@@ -175,6 +185,30 @@ function briefText(p: Thing): string {
     .join("\n");
 }
 
+/** How each channel's reply should read, as the assist is told. */
+const CHANNEL_LINE: Record<ReplyChannel, string> = {
+  x: "This is a reply on X: plain text, at most 280 characters.",
+  whatsapp: "This is a WhatsApp reply: plain text, conversational.",
+  email: "This is an email reply.",
+  other: "This is a reply to a message.",
+};
+
+/** A reply's brief: the channel line, the message as pasted (and the link
+ * it was pasted as), and what the writer wants to say. */
+function replyBriefText(r: Thing): string {
+  const h = r.header as Record<string, unknown>;
+  const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
+  const channel = (str(h.channel) in replyChannelLabel ? str(h.channel) : "other") as ReplyChannel;
+  const url = str(h.replying_to_url);
+  return [
+    CHANNEL_LINE[channel],
+    `Replying to${url ? ` (${url})` : ""}:\n${str(h.replying_to) || "(nothing pasted yet)"}`,
+    str(h.intent) && `What I want to say: ${str(h.intent)}`,
+  ]
+    .filter(Boolean)
+    .join("\n\n");
+}
+
 /** A note's own text, and its attachments' transcripts. Nothing linked to
  * the note from elsewhere comes with it. */
 function noteText(n: Thing): string {
@@ -211,10 +245,15 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
   const live = input.things.filter((t) => t.header.trashed_at === null);
   const thing = cursor?.thing ? live.find((t) => t.header.id === cursor.thing) : undefined;
   if (cursor?.thing && !thing) throw new ContextError(`nothing live at ${cursor.thing}`);
-  const project = thing?.header.kind === "project" ? thing : undefined;
+  // A reply is a special kind of project: everything below that is the
+  // same for both uses `project`; where a reply differs, `reply` says so.
+  const project = isProjectLike(thing?.header.kind) ? thing : undefined;
+  const reply = project?.header.kind === "reply";
+  const aboutId = reply ? project.header.links.find((l) => l.rel === "about" && l.to.block === undefined)?.to.id : undefined;
+  const about = aboutId ? live.find((t) => t.header.id === aboutId && t.header.kind === "project") : undefined;
 
   const needsProject = decl.include.some((p) => p !== "style");
-  if (needsProject && !project) throw new ContextError("this plugin needs a cursor in a project's draft");
+  if (needsProject && !project) throw new ContextError("this plugin needs a cursor in a project's or reply's draft");
   if (decl.draft !== "none" && !cursor) throw new ContextError("this plugin needs a cursor");
 
   const doc: Block[] = (input.document as Block[] | undefined) ?? (thing ? parseDoc(thing.body) : []);
@@ -241,11 +280,25 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
   if (wants.has("style") && input.style) {
     items.push({ step: 1, kind: "style", title: "Style profile", why: "global style", text: input.style });
   }
-  // 2. Brief. 3. Outline.
+  // 2. Brief: a reply's own, then the project it is about. 3. Outline.
   if (project && wants.has("brief")) {
-    items.push({ step: 2, kind: "brief", id: project.header.id, title: `Brief: ${titleOfProject(project)}`, why: "the project's brief", text: briefText(project) });
+    if (reply) {
+      items.push({ step: 2, kind: "brief", id: project.header.id, title: `Reply brief: ${titleOfProject(project)}`, why: "the reply's brief", text: replyBriefText(project) });
+      if (about) {
+        items.push({
+          step: 2,
+          kind: "brief",
+          id: about.header.id,
+          title: `Brief: ${titleOfProject(about)}`,
+          why: "the brief of the project this reply is about",
+          text: `The project this reply is about:\n${briefText(about)}`,
+        });
+      }
+    } else {
+      items.push({ step: 2, kind: "brief", id: project.header.id, title: `Brief: ${titleOfProject(project)}`, why: "the project's brief", text: briefText(project) });
+    }
   }
-  if (project && wants.has("outline")) {
+  if (project && !reply && wants.has("outline")) {
     const sections = blocks.filter((b) => b.block.type === "section").map((b) => blockPlainText(b.block).trim() || "(untitled section)");
     items.push({
       step: 3,
@@ -257,15 +310,26 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
     });
   }
 
+  const liveNotes = live
+    .filter((t) => t.header.kind === "note" && !(t.header.resolved as boolean | undefined))
+    .sort((a, b) => a.header.id.localeCompare(b.header.id));
+
+  // 4. A reply's linked project's own notes: those linked to the project
+  // alone, never to a place in its draft. A reply has no notes of its own.
+  if (about && wants.has("project-material")) {
+    for (const n of liveNotes) {
+      const links = n.header.links.filter((l) => NOTE_RELS.has(l.rel) && l.to.id === about.header.id);
+      if (!links.length || links.some((l) => l.to.block !== undefined)) continue;
+      items.push({ step: 4, kind: "note", id: n.header.id, title: noteTitle(n), why: `linked to "${titleOfProject(about)}", the project this reply is about`, text: noteText(n) });
+    }
+  }
+
   // 4–6. Notes, by how they are linked to this project. A note linked to
   // a place in the project is scoped to that place; one linked to the
   // project alone reaches every section (decision 3).
   if (project) {
     const P = project.header.id;
-    const notes = live
-      .filter((t) => t.header.kind === "note" && !(t.header.resolved as boolean | undefined))
-      .sort((a, b) => a.header.id.localeCompare(b.header.id));
-    for (const n of notes) {
+    for (const n of reply ? [] : liveNotes) {
       const links = n.header.links.filter((l) => NOTE_RELS.has(l.rel) && l.to.id === P);
       if (!links.length) continue;
       const places = links.filter((l) => l.to.block !== undefined);
@@ -364,7 +428,7 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
         after: md(inSection.slice(i + 1)),
       };
       text = [parts.heading && `## ${parts.heading}`, parts.before, parts.block, parts.after].filter(Boolean).join("\n\n");
-      why = sectionId ? "this section, around the cursor's block" : "the text before the first section, around the cursor's block";
+      why = reply ? "the reply, around the cursor's block" : sectionId ? "this section, around the cursor's block" : "the text before the first section, around the cursor's block";
     } else {
       const upTo = blocks.indexOf(at);
       const parts = blocks.slice(0, upTo + 1).filter((b) => b.section === sectionId);
@@ -375,7 +439,7 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
         })
         .filter(Boolean)
         .join("\n\n");
-      why = sectionId ? "this section, up to the cursor" : "the text before the first section, up to the cursor";
+      why = reply ? "the reply, up to the cursor" : sectionId ? "this section, up to the cursor" : "the text before the first section, up to the cursor";
     }
     if (decl.maxDraftChars && text.length > decl.maxDraftChars) {
       const tail = text.slice(-decl.maxDraftChars);
@@ -411,6 +475,8 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
     items: kept,
     manifest: {
       cursor: cursor ?? { block: "" },
+      ...(project ? { thingKind: reply ? ("reply" as const) : ("project" as const) } : {}),
+      ...(about ? { about: { id: about.header.id, title: titleOfProject(about) } } : {}),
       documentSource,
       section: sectionId ? { id: sectionId, title: sectionBlock ? blockPlainText(sectionBlock).trim() : sectionId } : null,
       ...(at
@@ -441,6 +507,12 @@ const HEADINGS: Partial<Record<Step, string>> = {
   6: "Notes and comments on this block",
 };
 
+const REPLY_HEADINGS: Partial<Record<Step, string>> = {
+  2: "Reply brief",
+  4: "Notes on the project this reply is about",
+  6: "Comments on this block",
+};
+
 /** The stable part of a bundle as system-prompt text: the style profile,
  * then the plugin's instruction, then brief, outline and linked material.
  * With only a style profile in the bundle this is exactly
@@ -457,12 +529,13 @@ export function renderSystem(instruction: string, bundle: ContextBundle | null, 
  * from). */
 export function renderSteps(bundle: ContextBundle | null, steps: Step[]): string {
   const items = bundle?.items ?? [];
+  const headings = bundle?.manifest.thingKind === "reply" ? { ...HEADINGS, ...REPLY_HEADINGS } : HEADINGS;
   const sections: string[] = [];
   for (const step of steps) {
     const here = items.filter((x) => x.step === step);
-    if (!here.length || !HEADINGS[step]) continue;
+    if (!here.length || !headings[step]) continue;
     const body = here.map((x) => (x.kind === "note" || x.kind === "comment" ? `[${x.kind}] ${x.text}` : x.text)).join("\n\n");
-    sections.push(`${HEADINGS[step]}:\n${body}`);
+    sections.push(`${headings[step]}:\n${body}`);
   }
   return sections.join("\n\n");
 }

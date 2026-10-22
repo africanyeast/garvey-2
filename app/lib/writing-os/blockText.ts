@@ -46,6 +46,22 @@ export function paragraphBlock(id: string, text: string): DraftPartialBlock {
 }
 
 /**
+ * The whole document as plain text, one block per paragraph separated by
+ * blank lines (nested blocks in order, empty ones dropped) — what a reply's
+ * Copy puts on the clipboard, and what its X counter counts.
+ */
+export function documentPlainText(blocks: DraftPartialBlock[]): string {
+  const out: string[] = [];
+  const walk = (b: DraftPartialBlock) => {
+    const text = blockPlainText(b).trim();
+    if (text) out.push(text);
+    ((b as { children?: DraftPartialBlock[] }).children ?? []).forEach(walk);
+  };
+  blocks.forEach(walk);
+  return out.join("\n\n");
+}
+
+/**
  * Flattens agent-produced blocks back down to a markdown string — used to
  * hand a `ContentPlacement`'s blocks to a caller that only knows how to
  * insert plain text (which then re-parses it into real blocks itself, e.g.

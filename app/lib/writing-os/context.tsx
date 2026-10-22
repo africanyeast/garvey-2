@@ -97,6 +97,10 @@ interface WritingOSState {
    * restoring a project shows up everywhere immediately, not just wherever
    * it happened. */
   projectsList: Project[];
+  /** Every reply, newest first, for the sidebar's Replies group. Kept
+   * apart from `projectsList` so nothing that lists projects (the "@"
+   * picker) picks up replies. `addProjectToList` and the rest handle both. */
+  repliesList: Project[];
   refreshProjects: () => void;
   addProjectToList: (p: Project) => void;
   removeProjectFromList: (slug: string) => void;
@@ -172,7 +176,11 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
   const [activeProject, setActiveProject] = useState("");
   const [activeProjectSlug, setActiveProjectSlug] = useState<string | null>(null);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  const [projectsList, setProjectsList] = useState<Project[]>([]);
+  // Projects and replies, in one list: every add/remove/patch below works
+  // on either kind. Split by kind for consumers.
+  const [allProjects, setProjectsList] = useState<Project[]>([]);
+  const projectsList = useMemo(() => allProjects.filter((p) => p.kind !== "reply"), [allProjects]);
+  const repliesList = useMemo(() => allProjects.filter((p) => p.kind === "reply"), [allProjects]);
   // One debounce timer per variant id — a fast typist firing an unbounced
   // PATCH per keystroke against the same JSON file is exactly what produced
   // the interleaved-write corruption that silently dropped alt versions on
@@ -200,7 +208,8 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
   const reorderProjectsInList = (slugs: string[]) => {
     setProjectsList((prev) => {
       const bySlug = new Map(prev.map((p) => [p.slug, p]));
-      return slugs.map((s) => bySlug.get(s)).filter((p): p is Project => !!p);
+      const moved = new Set(slugs);
+      return [...slugs.map((s) => bySlug.get(s)).filter((p): p is Project => !!p), ...prev.filter((p) => !moved.has(p.slug))];
     });
     fetch("/api/projects/reorder", {
       method: "POST",
@@ -499,7 +508,7 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
   };
 
   const projectFor = (id: string): ProjectLookup | undefined => {
-    const p = projectsList.find((p) => p.id === id);
+    const p = allProjects.find((p) => p.id === id);
     return p ? { slug: p.slug, title: p.title } : undefined;
   };
   const enrichNote = (n: Note): EnrichedNote => ({ ...n, tags: resolveTags(n.links, projectFor) });
@@ -526,6 +535,7 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     activeProjectId,
     setActiveProjectId,
     projectsList,
+    repliesList,
     refreshProjects,
     addProjectToList,
     removeProjectFromList,

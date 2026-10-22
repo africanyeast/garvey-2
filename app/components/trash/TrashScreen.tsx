@@ -55,7 +55,7 @@ export function TrashScreen() {
     <div className="max-w-[900px] my-[0] mx-[auto] pt-[44px] px-[48px] pb-[0] flex flex-col h-[100%]">
       <div className="mb-[8px] shrink-0">
         <h1 className={`font-sans text-3xl font-semibold leading-tight text-[var(--text-primary)] mt-[0] mx-[0] mb-[6px]`}>Trash</h1>
-        <p className={`text-subtitle mt-[0] mx-[0]`}>Deleted projects and inbox captures. Restore anything you didn&apos;t mean to delete.</p>
+        <p className={`text-subtitle mt-[0] mx-[0]`}>Deleted projects, replies and inbox captures. Restore anything you didn&apos;t mean to delete.</p>
       </div>
 
       <Tabs tabs={tabs} value={tab} onChange={setTab} className="mt-[16px] mb-[4px]" />
@@ -68,6 +68,7 @@ export function TrashScreen() {
               <div key={project.id} className="flex items-center gap-[10px] py-[13px]">
                 <Can size={15} className="shrink-0 text-[var(--text-muted)]" />
                 <span className="text-[13px] font-semibold text-[var(--text-primary)] flex-1 truncate">{project.title}</span>
+                {project.kind === "reply" && <span className="text-xs font-medium text-[var(--text-muted)] shrink-0">Reply</span>}
                 {project.trashedAt && <span className="text-xs font-medium text-[var(--text-muted)] shrink-0">{formatDate(project.trashedAt)}</span>}
                 <button
                   onClick={() => restoreProject(project)}

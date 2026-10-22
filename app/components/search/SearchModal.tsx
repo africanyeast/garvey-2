@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState, Fragment } from "react";
 import { useRouter } from "next/navigation";
-import { Search, FileText, Inbox } from "lucide-react";
+import { Search, FileText, Inbox, Reply } from "lucide-react";
 import type { SearchResult } from "@/lib/search";
 
 const KIND_ICON: Record<SearchResult["kind"], typeof FileText> = {
   project: FileText,
+  reply: Reply,
   note: Inbox,
 };
 

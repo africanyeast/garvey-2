@@ -134,6 +134,41 @@ export interface Project {
    * first. Falls back to `createdAt` when unset, so untouched projects stay
    * ordered newest-first by default. */
   order?: number;
+  /** Per plugin id: on or off for this project only, whatever the global
+   * setting says. A plugin with no entry follows the global setting. */
+  pluginOverrides?: Record<string, boolean>;
+  /** "reply" for a reply to someone else's message (artifacts/REPLY_SPEC.md):
+   * a special kind of project with its own brief (the fields below) in
+   * place of subtitle/brief/candidates, and no sections. */
+  kind: ProjectKind;
+  /** A reply's brief: where the message came from, the message exactly as
+   * pasted, the link it was pasted as (if any), and what the writer wants
+   * to say. Unset on a project. */
+  channel?: ReplyChannel;
+  replyingTo?: string;
+  replyingToUrl?: string;
+  intent?: string;
+  /** The one project a reply is about (an `about` link), whose brief and
+   * notes the assist then sees. "" or unset for none. */
+  aboutProjectId?: string;
+}
+
+export type ProjectKind = "project" | "reply";
+
+export const REPLY_CHANNELS = ["x", "whatsapp", "email", "other"] as const;
+export type ReplyChannel = (typeof REPLY_CHANNELS)[number];
+export const replyChannelLabel: Record<ReplyChannel, string> = { x: "X", whatsapp: "WhatsApp", email: "Email", other: "Other" };
+/** X's post length limit, for a reply's character counter. */
+export const X_MAX_CHARS = 280;
+
+/** A reply's title until the writer gives it one: "Reply to @handle" when
+ * the message starts `@handle:` or is an X post link, else its first few
+ * words. */
+export function defaultReplyTitle(replyingTo: string): string {
+  const text = replyingTo.trim();
+  const handle = text.match(/^(@\w{1,30})\s*:/) ?? text.match(/^https?:\/\/(?:www\.|mobile\.)?(?:x|twitter)\.com\/(\w{1,30})\/status/i);
+  if (handle) return `Reply to ${handle[1].startsWith("@") ? handle[1] : `@${handle[1]}`}`;
+  return text.split(/\s+/).slice(0, 6).join(" ");
 }
 
 /** A brand-new project can be left with no title (Notion-style "Untitled").
@@ -168,6 +203,7 @@ export function briefFromHeader(h: Record<string, unknown>): string {
 
 export interface TrashedProject {
   id: string;
+  kind: ProjectKind;
   title: string;
   trashedAt: string;
 }

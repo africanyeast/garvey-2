@@ -14,19 +14,18 @@ export default async function ProjectPage({
   searchParams,
 }: {
   params: Promise<{ slug: string }>;
-  searchParams: Promise<{ new?: string; section?: string; block?: string }>;
+  searchParams: Promise<{ section?: string; block?: string }>;
 }) {
   const { slug } = await params;
   const project = await getProject(slug);
   if (!project) notFound();
   const initialDocument = await getDraft(slug);
-  const { new: isNew, section, block } = await searchParams;
+  const { section, block } = await searchParams;
 
   return (
     <DraftScreen
       project={project}
       initialDocument={initialDocument}
-      openBriefByDefault={isNew === "1"}
       openBlockId={block}
       scrollToSectionId={section}
     />
