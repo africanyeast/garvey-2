@@ -1,9 +1,11 @@
 import { NextRequest, NextResponse } from "next/server";
 import sharp from "sharp";
 import { prepareImageForVision, type VisionImage } from "@/lib/ai/image";
+import { heicToJpeg, isHeic } from "@/lib/heic";
 import { runPlugin } from "@/lib/plugins/harness";
 import { fetchXPost } from "@/lib/replies/source";
 import { xPost } from "@/app/lib/writing-os/replySource";
+import { MAX_UPLOAD_BYTES } from "@/app/lib/writing-os/fileDrop";
 import type { OcrInput, OcrResult } from "@/lib/plugins/ocr";
 
 const VISION_TYPES: VisionImage["mimeType"][] = ["image/jpeg", "image/png", "image/gif", "image/webp"];
@@ -20,9 +22,18 @@ export async function POST(req: NextRequest) {
   if ((req.headers.get("content-type") ?? "").startsWith("multipart/form-data")) {
     const image = (await req.formData()).get("image");
     if (!(image instanceof File)) return NextResponse.json({ error: "image is required" }, { status: 400 });
-    let data = Buffer.from(await image.arrayBuffer());
+    if (image.size > MAX_UPLOAD_BYTES) return NextResponse.json({ error: "image too large" }, { status: 413 });
+    let data: Buffer = Buffer.from(await image.arrayBuffer());
     let mimeType = image.type as VisionImage["mimeType"];
-    if (!VISION_TYPES.includes(mimeType)) {
+    if (isHeic(image.name, image.type)) {
+      // An iPhone photo: converted as the vault converts an attached one.
+      try {
+        data = await heicToJpeg(data);
+        mimeType = "image/jpeg";
+      } catch {
+        return NextResponse.json({ error: "not a readable image" }, { status: 415 });
+      }
+    } else if (!VISION_TYPES.includes(mimeType)) {
       // Anything else sharp can read (TIFF, BMP from some clipboards) goes as PNG.
       try {
         data = await sharp(data).png().toBuffer();

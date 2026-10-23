@@ -43,6 +43,7 @@ export function NoteComposer({
       placeholder={PLACEHOLDER}
       mentionTargets={mentionTargets}
       autoFocus={autoFocus}
+      fullScreenDrop={scope.kind === "inbox"}
     />
   );
 }

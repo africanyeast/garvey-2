@@ -4,13 +4,12 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ChangeEvent, type 
 import { ArrowUp, Paperclip, X } from "lucide-react";
 import type { Attachment } from "@/app/lib/writing-os/types";
 import { searchMentionTargets, type MentionTarget } from "@/app/lib/writing-os/mentions";
+import { ATTACHMENT_ACCEPT, MAX_UPLOAD_FILES, pastedFiles, rejectionNotice } from "@/app/lib/writing-os/fileDrop";
 import { MentionResults } from "@/app/components/shared/MentionResults";
 import { NoteTag } from "@/app/components/shared/NoteTag";
+import { useFileDrop } from "@/app/components/shared/useFileDrop";
 
 export type { MentionTarget };
-
-const ACCEPTED_FILE_TYPES =
-  "image/*,audio/*,video/*,.pdf,.epub,.doc,.docx,.md,.markdown";
 
 /** A pasted (or dropped-in) clipboard payload that's nothing but a URL —
  * treated as "attach this link" rather than dumped into the text as a raw
@@ -142,6 +141,7 @@ export function IntentComposer({
   submitAlwaysEnabled = false,
   submitLabel = "Add",
   disabled = false,
+  fullScreenDrop = false,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -172,13 +172,24 @@ export function IntentComposer({
    * out both the arrow button and Enter-to-submit so a slow request can't be
    * re-fired by an impatient extra press. */
   disabled?: boolean;
+  /** True where this composer is the page's own drop target (the Inbox):
+   * a file dragged anywhere over the window drops into it. In a side panel
+   * the box alone is the target. */
+  fullScreenDrop?: boolean;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const highlightRef = useRef<HTMLDivElement>(null);
-  const fileInputRef = useRef<HTMLInputElement>(null);
   const [mentionQuery, setMentionQuery] = useState<string | null>(null);
   const [mentionStart, setMentionStart] = useState<number | null>(null);
   const [uploading, setUploading] = useState(false);
+  // What the last drop or upload left out, shown under the box.
+  const [notice, setNotice] = useState<string | null>(null);
+  // Uploads finish after later renders (two drops can overlap): each adds
+  // to the attachments as they are then, not as they were when it began.
+  const attachmentsRef = useRef(attachments);
+  useEffect(() => {
+    attachmentsRef.current = attachments;
+  });
 
   const autoResize = () => {
     const el = textareaRef.current;
@@ -252,24 +263,50 @@ export function IntentComposer({
     onAttachmentsChange?.((attachments ?? []).filter((a) => a.url !== url));
   };
 
-  const uploadFiles = async (files: FileList | File[]) => {
-    const list = Array.from(files);
-    if (list.length === 0 || !onAttachmentsChange) return;
+  const uploadFiles = async (files: File[]) => {
+    if (files.length === 0 || !onAttachmentsChange) return;
     setUploading(true);
     try {
       const form = new FormData();
-      for (const file of list) form.append("files", file);
+      for (const file of files) form.append("files", file);
       const res = await fetch("/api/uploads", { method: "POST", body: form });
-      if (!res.ok) return;
+      if (!res.ok) {
+        setNotice("Couldn't attach the files. Try again.");
+        return;
+      }
       const uploaded: Attachment[] = await res.json();
-      onAttachmentsChange([...(attachments ?? []), ...uploaded]);
+      onAttachmentsChange([...(attachmentsRef.current ?? []), ...uploaded]);
+    } catch {
+      setNotice("Couldn't attach the files. Try again.");
     } finally {
       setUploading(false);
     }
   };
 
+  // Files dropped (on the box, or anywhere with `fullScreenDrop`) or picked
+  // with the paperclip. Pastes are handled below, so a paste with text never
+  // becomes an attachment.
+  const drop = useFileDrop({
+    onDrop: (accepted, rejected) => {
+      setNotice(rejectionNotice(rejected, "not a type a note can carry"));
+      void uploadFiles(accepted);
+    },
+    accept: ATTACHMENT_ACCEPT,
+    maxFiles: MAX_UPLOAD_FILES,
+    disabled: !onAttachmentsChange,
+    fullScreen: fullScreenDrop,
+    label: "Drop to attach",
+  });
+
   const handlePaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
     if (!onAttachmentsChange) return;
+    const files = pastedFiles(e.clipboardData);
+    if (files.length > 0) {
+      e.preventDefault();
+      setNotice(null);
+      void uploadFiles(files);
+      return;
+    }
     const text = e.clipboardData.getData("text");
     const url = soleUrl(text);
     if (!url) return;
@@ -312,7 +349,8 @@ export function IntentComposer({
           ))}
         </div>
       )}
-      <div className="bg-[var(--surface-raised)] border border-[var(--border-strong)] rounded-md p-[9px]">
+      <div {...drop.rootProps} className="relative bg-[var(--surface-raised)] border border-[var(--border-strong)] rounded-md p-[9px]">
+        {drop.overlay}
         {(fixedChip || (attachments?.length ?? 0) > 0) && (
           <div className="flex flex-wrap gap-[4px] mb-[8px]">
             {fixedChip && (
@@ -343,19 +381,9 @@ export function IntentComposer({
         <div className="flex items-center gap-[10px]">
           {onAttachmentsChange && (
             <>
-              <input
-                ref={fileInputRef}
-                type="file"
-                multiple
-                accept={ACCEPTED_FILE_TYPES}
-                onChange={(e) => {
-                  if (e.target.files) uploadFiles(e.target.files);
-                  e.target.value = "";
-                }}
-                className="hidden"
-              />
+              <input {...drop.inputProps} />
               <button
-                onClick={() => fileInputRef.current?.click()}
+                onClick={drop.open}
                 title="Attach files"
                 disabled={uploading}
                 className="w-[28px] h-[28px] rounded-full bg-transparent border-none text-[var(--text-muted)] cursor-pointer flex items-center justify-center shrink-0 disabled:opacity-50"
@@ -403,6 +431,11 @@ export function IntentComposer({
           </button>
         </div>
       </div>
+      {(uploading || notice) && (
+        <p role="status" className="mt-[6px] mb-[0] text-xs font-medium text-[var(--text-muted)]">
+          {uploading ? "Attaching…" : notice}
+        </p>
+      )}
     </div>
   );
 }

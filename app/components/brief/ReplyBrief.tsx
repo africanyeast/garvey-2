@@ -9,6 +9,8 @@ import { DropdownMenu } from "@/app/components/shared/DropdownMenu";
 import { MenuRow } from "@/app/components/shared/MenuRow";
 import { useClickOutside } from "@/app/hooks/useClickOutside";
 import { useWritingOS } from "@/app/lib/writing-os/context";
+import { useFileDrop } from "@/app/components/shared/useFileDrop";
+import { IMAGE_ACCEPT, pastedFiles, rejectionNotice } from "@/app/lib/writing-os/fileDrop";
 import { guessChannel, xPost } from "@/app/lib/writing-os/replySource";
 import { REPLY_CHANNELS, projectDisplayTitle, replyChannelLabel, type Project, type ReplyChannel } from "@/app/lib/writing-os/types";
 
@@ -20,7 +22,8 @@ type PasteState =
   | { status: "idle" }
   | { status: "reading"; what: "post" | "image" }
   | { status: "failed-post" }
-  | { status: "failed-image"; file: File };
+  | { status: "failed-image"; files: File[] }
+  | { status: "skipped"; notice: string };
 
 /** The one project a reply is about, picked from the live projects. Its
  * brief and its own notes then reach the writing assist. */
@@ -171,30 +174,48 @@ export function ReplyBrief({
     }
   };
 
-  // A pasted image (a screenshot of a chat) is read by the OCR plugin and
-  // its text added; if that fails, the image is held for another try.
-  const readImage = async (file: File) => {
-    setPaste({ status: "reading", what: "image" });
-    try {
-      const form = new FormData();
-      form.append("image", file);
-      const res = await fetch("/api/replies/source", { method: "POST", body: form });
-      if (!res.ok) throw new Error();
-      const { text } = (await res.json()) as { text: string };
-      if (!text.trim()) throw new Error();
-      put(text.trim(), null, guess(text));
-      setPaste({ status: "idle" });
-    } catch {
-      setPaste({ status: "failed-image", file });
+  // A pasted or dropped image (a screenshot of a chat) is read by the OCR
+  // plugin and its text added. Several are read in order, as a thread's
+  // screenshots run; if one fails, it and the rest are held for another try.
+  const readImages = async (files: File[]) => {
+    for (const [i, file] of files.entries()) {
+      setPaste({ status: "reading", what: "image" });
+      try {
+        const form = new FormData();
+        form.append("image", file);
+        const res = await fetch("/api/replies/source", { method: "POST", body: form });
+        if (!res.ok) throw new Error();
+        const { text } = (await res.json()) as { text: string };
+        if (!text.trim()) throw new Error();
+        put(text.trim(), null, guess(text));
+      } catch {
+        setPaste({ status: "failed-image", files: files.slice(i) });
+        return;
+      }
     }
+    setPaste({ status: "idle" });
   };
+
+  // Screenshots dropped anywhere on the screen. Pastes are handled in
+  // `onPaste`, so a paste with text always pastes as text.
+  const drop = useFileDrop({
+    onDrop: (accepted, rejected) => {
+      const notice = rejectionNotice(rejected, "only an image can be read here");
+      if (accepted.length > 0) void readImages(accepted);
+      else if (notice) setPaste({ status: "skipped", notice });
+    },
+    accept: IMAGE_ACCEPT,
+    fullScreen: true,
+    label: "Drop a screenshot to read it",
+    rejectLabel: "Only an image can be read here",
+  });
 
   const onPaste = (e: ClipboardEvent<HTMLTextAreaElement>) => {
     const text = e.clipboardData.getData("text/plain");
-    const image = [...e.clipboardData.files].find((f) => f.type.startsWith("image/"));
-    if (!text.trim() && image) {
+    const images = pastedFiles(e.clipboardData).filter((f) => f.type.startsWith("image/"));
+    if (images.length > 0) {
       e.preventDefault();
-      void readImage(image);
+      void readImages(images);
       return;
     }
     // Everything else pastes as it is. A post link's channel is saved with
@@ -215,8 +236,9 @@ export function ReplyBrief({
   return (
     <div className="max-w-[760px] w-full mx-auto pt-[64px] px-[52px] pb-[120px]">
       <section>
+        {drop.overlay}
         <div className="flex items-start justify-between gap-[16px]">
-          <BriefLabel hint="Paste the message, post or email, exactly as it is.">Replying to</BriefLabel>
+          <BriefLabel hint="Paste or drop the message, post, email or screenshot, exactly as it is.">Replying to</BriefLabel>
           <div role="radiogroup" aria-label="Channel" className="flex items-center gap-[2px] shrink-0">
             {REPLY_CHANNELS.map((c) => (
               <button
@@ -253,12 +275,13 @@ export function ReplyBrief({
           <p role="status" className="mt-[6px] mb-[0] text-xs font-medium text-[var(--text-muted)]">
             {paste.status === "reading" && (paste.what === "post" ? "Reading the post…" : "Reading the image…")}
             {paste.status === "failed-post" && "Couldn't read the post, so the link is kept as pasted."}
+            {paste.status === "skipped" && paste.notice}
             {paste.status === "failed-image" && (
               <>
                 Couldn&apos;t read the image.{" "}
                 <button
                   type="button"
-                  onClick={() => readImage(paste.file)}
+                  onClick={() => readImages(paste.files)}
                   className="bg-transparent border-none p-[0] cursor-pointer text-xs font-semibold text-[var(--text-link)]"
                 >
                   Try again

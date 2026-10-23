@@ -1,15 +1,14 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import path from "node:path";
 import { ulid } from "ulid";
-import heicConvert from "heic-convert";
+import { heicToJpeg, isHeic } from "@/lib/heic";
 import { UPLOADS_DIR, uploadFilePath } from "./paths";
 import type { Attachment, AttachmentKind } from "@/app/lib/writing-os/types";
 
 const IMAGE_EXT = new Set([".png", ".jpg", ".jpeg", ".gif", ".webp", ".svg"]);
-const HEIC_EXT = new Set([".heic", ".heif"]);
 
-function kindFor(ext: string, mimeType: string): AttachmentKind {
-  if (mimeType.startsWith("image/") || IMAGE_EXT.has(ext) || HEIC_EXT.has(ext)) return "image";
+function kindFor(name: string, ext: string, mimeType: string): AttachmentKind {
+  if (mimeType.startsWith("image/") || IMAGE_EXT.has(ext) || isHeic(name)) return "image";
   if (ext === ".pdf" || mimeType === "application/pdf") return "pdf";
   return "file";
 }
@@ -27,23 +26,23 @@ function kindFor(ext: string, mimeType: string): AttachmentKind {
 export async function saveUpload(originalName: string, mimeType: string, data: Buffer): Promise<Attachment> {
   await mkdir(UPLOADS_DIR, { recursive: true });
   const ext = path.extname(originalName).toLowerCase();
-  const isHeic = HEIC_EXT.has(ext) || mimeType === "image/heic" || mimeType === "image/heif";
+  const heic = isHeic(originalName, mimeType);
 
   let storedData = data;
   let storedExt = ext;
   let storedMimeType = mimeType;
-  if (isHeic) {
-    storedData = Buffer.from(await heicConvert({ buffer: data, format: "JPEG", quality: 0.9 }));
+  if (heic) {
+    storedData = await heicToJpeg(data);
     storedExt = ".jpg";
     storedMimeType = "image/jpeg";
   }
 
   const safeName = originalName.replace(/[^\w.\- ]/g, "_");
-  const safeBase = isHeic ? safeName.slice(0, safeName.length - ext.length) || safeName : safeName;
-  const storedName = `${ulid()}-${safeBase}${isHeic ? storedExt : ""}`;
+  const safeBase = heic ? safeName.slice(0, safeName.length - ext.length) || safeName : safeName;
+  const storedName = `${ulid()}-${safeBase}${heic ? storedExt : ""}`;
   await writeFile(uploadFilePath(storedName), storedData);
   return {
-    kind: kindFor(ext, mimeType),
+    kind: kindFor(originalName, ext, mimeType),
     label: originalName,
     url: `/api/uploads/${encodeURIComponent(storedName)}`,
     mimeType: storedMimeType,
@@ -85,9 +84,5 @@ export async function readUpload(storedName: string): Promise<Buffer> {
  * `visionMimeTypeFor` reports for those extensions. */
 export async function readUploadTranscoded(storedName: string): Promise<Buffer> {
   const data = await readUpload(storedName);
-  const ext = path.extname(storedName).toLowerCase();
-  if (ext === ".heic" || ext === ".heif") {
-    return Buffer.from(await heicConvert({ buffer: data, format: "JPEG", quality: 0.9 }));
-  }
-  return data;
+  return isHeic(storedName) ? heicToJpeg(data) : data;
 }
