@@ -1,6 +1,6 @@
 import { PROJECT_LIKE_KINDS, SHARED_FIELDS, isProjectLike, newId, type Link, type Thing } from "@/lib/store";
 import { liveProjectBySlug, projectContents, vault } from "./store";
-import { aboutLink, toProject } from "./shapes";
+import { toProject } from "./shapes";
 import { slugify } from "./slug";
 import type { Project, ProjectKind, TrashedProject } from "@/app/lib/writing-os/types";
 import { defaultReplyTitle, projectDisplayTitle } from "@/app/lib/writing-os/types";
@@ -42,14 +42,7 @@ function briefFields(p: Omit<Project, "id" | "slug" | "createdAt" | "updatedAt">
   };
 }
 
-function writeProject(t: Thing, p: Project, aboutLabel?: string): Thing {
-  // A reply's one `about` link is its linked project.
-  if (p.kind === "reply" && p.aboutProjectId !== aboutLink(t.header.links)?.to.id) {
-    t.header.links = [
-      ...t.header.links.filter((l) => l !== aboutLink(t.header.links)),
-      ...(p.aboutProjectId ? [{ rel: "about" as const, to: { id: p.aboutProjectId }, ...(aboutLabel ? { label: aboutLabel } : {}) }] : []),
-    ];
-  }
+function writeProject(t: Thing, p: Project): Thing {
   delete t.header.order;
   delete t.header.plugin_overrides;
   delete t.header.replying_to_url;
@@ -228,14 +221,6 @@ export async function updateProject(slug: string, patch: Partial<Omit<Project, "
     if (auto && title) patch = { ...patch, title, titleCandidates: [{ text: title, current: true }] };
   }
 
-  // A reply's linked project must be a live project; anything else unlinks.
-  let aboutLabel: string | undefined;
-  if (current.kind === "reply" && patch.aboutProjectId) {
-    const target = await store.get(patch.aboutProjectId);
-    if (target?.header.kind === "project" && target.header.trashed_at === null) aboutLabel = projectDisplayTitle(toProject(target));
-    else patch = { ...patch, aboutProjectId: "" };
-  }
-
   // Every rename re-slugs to match the new title — safe because nothing
   // long-lived references a project by slug: tags and links store its id.
   // (Still a no-op unless the title actually changed.)
@@ -247,7 +232,7 @@ export async function updateProject(slug: string, patch: Partial<Omit<Project, "
 
   // A thing's id and kind never change, whatever the patch says.
   const next: Project = { ...current, ...patch, id: current.id, kind: current.kind, slug: nextSlug, updatedAt: new Date().toISOString() };
-  await store.update(p.header.id, (x) => writeProject(x, next, aboutLabel), { touch: false });
+  await store.update(p.header.id, (x) => writeProject(x, next), { touch: false });
   return next;
 }
 

@@ -1,4 +1,4 @@
-import type { Link, Thing } from "@/lib/store";
+import type { Thing } from "@/lib/store";
 import { formatRelative } from "./time";
 import { parseBody } from "./blocks";
 import { REPLY_CHANNELS, briefFromHeader, type Attachment, type BlockVariant, type Comment, type Note, type Project, type ReplyChannel } from "@/app/lib/writing-os/types";
@@ -8,10 +8,6 @@ import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 // through as links; the client reads them with lib/store/links.ts.
 
 const EPOCH = new Date(0).toISOString();
-
-/** A reply's link to the project it is about: an `about` link to a whole
- * thing, not a place in it. */
-export const aboutLink = (links: Link[]) => links.find((l) => l.rel === "about" && l.to.block === undefined);
 
 export function toProject(t: Thing): Project {
   const h = t.header as Record<string, unknown>;
@@ -35,7 +31,6 @@ export function toProject(t: Thing): Project {
           replyingTo: (h.replying_to as string) ?? "",
           replyingToUrl: (h.replying_to_url as string | undefined) || undefined,
           intent: (h.intent as string) ?? "",
-          aboutProjectId: aboutLink(t.header.links)?.to.id ?? "",
         }
       : {}),
   };

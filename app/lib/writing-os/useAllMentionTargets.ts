@@ -5,11 +5,12 @@ import { useWritingOS } from "./context";
 import { buildProjectTargets, sectionMentionTargets, blockMentionTargets, type MentionTarget } from "./mentions";
 import type { DraftBlock } from "./schema";
 
-/** Every project's own draft doc, fetched once and combined into "@"/"#"
+/** Every project's and reply's own draft doc, fetched once and combined into "@"/"#"
  * mention targets across all of them — for composers that aren't scoped to
  * one project: the Inbox composer, and an inbox item's expanded view. */
 export function useAllMentionTargets(): MentionTarget[] {
-  const { projectsList } = useWritingOS();
+  const { projectsList: projects, repliesList } = useWritingOS();
+  const projectsList = useMemo(() => [...projects, ...repliesList], [projects, repliesList]);
   const [docsBySlug, setDocsBySlug] = useState<Record<string, DraftBlock[]>>({});
 
   useEffect(() => {

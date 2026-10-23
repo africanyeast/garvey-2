@@ -148,9 +148,6 @@ export interface Project {
   replyingTo?: string;
   replyingToUrl?: string;
   intent?: string;
-  /** The one project a reply is about (an `about` link), whose brief and
-   * notes the assist then sees. "" or unset for none. */
-  aboutProjectId?: string;
 }
 
 export type ProjectKind = "project" | "reply";

@@ -72,14 +72,11 @@ export function DraftEditor({
   };
 
   const togglePreview = () => {
-    if (!mode.preview) return;
     setDocMode(docMode === "edit" ? "preview" : "edit");
   };
 
-  // A reply is copied out to be sent from another app, so as plain text;
-  // a project as markdown.
   const copyDoc = () => {
-    navigator.clipboard.writeText(mode.preview ? editor.blocksToMarkdownLossy() : documentPlainText(editor.document));
+    navigator.clipboard.writeText(mode.copyAs === "markdown" ? editor.blocksToMarkdownLossy() : documentPlainText(editor.document));
     showToast("Copied");
   };
 
@@ -173,6 +170,19 @@ export function DraftEditor({
                   </span>
                 </>
               )}
+              {xPostId && (
+                <>
+                  <span className="text-[var(--text-muted)] text-sm select-none">•</span>
+                  <button
+                    onClick={() => window.open(xReplyIntent(xPostId, documentPlainText(editor.document)), "_blank", "noopener")}
+                    title="Open X's reply box with this reply filled in"
+                    className="inline-flex items-center gap-[4px] bg-transparent border-none p-[0] cursor-pointer text-subtitle text-xs whitespace-nowrap hover:text-[var(--text-primary)]"
+                  >
+                    Open reply on X
+                    <ExternalLink size={11} strokeWidth={1.8} />
+                  </button>
+                </>
+              )}
             </div>
           </div>
         </div>
@@ -184,24 +194,13 @@ export function DraftEditor({
             <FileText size={12} strokeWidth={1.7} />
             Brief
           </button>
-          {mode.notes ? (
-            <button
-              onClick={() => setPanelMode(panelMode === "collapsed" ? "docked" : "collapsed")}
-              className={`text-xs font-medium inline-flex items-center gap-[4px] bg-transparent border rounded-sm py-[4px] px-[8px] cursor-pointer whitespace-nowrap border-[var(--border-default)] text-[var(--text-secondary)]`}
-            >
-              <StickyNotes size={12} strokeWidth={1.7} />
-              Notes
-            </button>
-          ) : (
-            <button
-              onClick={copyDoc}
-              title="Copy as plain text (⌃C)"
-              className={`text-xs font-medium inline-flex items-center gap-[4px] bg-transparent border rounded-sm py-[4px] px-[8px] cursor-pointer whitespace-nowrap border-[var(--border-default)] text-[var(--text-secondary)]`}
-            >
-              <Copy size={12} strokeWidth={1.7} />
-              Copy
-            </button>
-          )}
+          <button
+            onClick={() => setPanelMode(panelMode === "collapsed" ? "docked" : "collapsed")}
+            className={`text-xs font-medium inline-flex items-center gap-[4px] bg-transparent border rounded-sm py-[4px] px-[8px] cursor-pointer whitespace-nowrap border-[var(--border-default)] text-[var(--text-secondary)]`}
+          >
+            <StickyNotes size={12} strokeWidth={1.7} />
+            Notes
+          </button>
           <button
             onClick={(e) => {
               stop(e);
@@ -213,16 +212,14 @@ export function DraftEditor({
           </button>
           {openMenu === "docmenu" && (
             <DropdownMenu>
-              {mode.preview && (
-                <MenuRow
-                  icon={docMode === "edit" ? Eye : Pencil}
-                  label={docMode === "edit" ? "Preview" : "Edit"}
-                  onClick={() => {
-                    togglePreview();
-                    closeMenu();
-                  }}
-                />
-              )}
+              <MenuRow
+                icon={docMode === "edit" ? Eye : Pencil}
+                label={docMode === "edit" ? "Preview" : "Edit"}
+                onClick={() => {
+                  togglePreview();
+                  closeMenu();
+                }}
+              />
               <MenuRow
                 icon={Copy}
                 label="Copy"
@@ -231,16 +228,6 @@ export function DraftEditor({
                   closeMenu();
                 }}
               />
-              {xPostId && (
-                <MenuRow
-                  icon={ExternalLink}
-                  label="Open reply on X"
-                  onClick={() => {
-                    window.open(xReplyIntent(xPostId, documentPlainText(editor.document)), "_blank", "noopener");
-                    closeMenu();
-                  }}
-                />
-              )}
               {mode.duplicate && (
                 <MenuRow
                   icon={CopyPlus}

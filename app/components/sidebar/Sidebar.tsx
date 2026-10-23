@@ -95,114 +95,118 @@ export function Sidebar() {
   };
 
   return (
-    <div className="w-[252px] shrink-0 bg-neutral-0 border-r border-[var(--border-default)] flex flex-col py-[20px] px-[14px] gap-[22px] overflow-y-auto overscroll-contain relative">
+    // Full height: the top (name, Inbox, Search, Plugins) and the bottom
+    // (Style, Trash) stay put; only Projects and Replies scroll between them.
+    <div className="w-[252px] h-full shrink-0 bg-neutral-0 border-r border-[var(--border-default)] flex flex-col relative">
       {menuOpenSlug && <div className="fixed inset-0 z-[9]" onClick={() => setMenuOpenSlug(null)} />}
-      <div className="flex items-center gap-[8px] px-[6px]">
-        <span className={`text-xs font-bold uppercase tracking-[0.08em] text-[var(--text-muted)]`}>
-          Garvey
-        </span>
-      </div>
-
-      <div className="flex flex-col gap-[2px]">
-        <Link
-          href="/inbox"
-          className={`flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer ${isInbox ? "border border-[var(--border-default)]" : "bg-transparent"}`}
-        >
-          <Inbox size={17} className="text-[var(--text-secondary)]" />
-          <span className={`text-[12px] font-semibold text-[var(--text-secondary)] flex-1`}>Inbox</span>
-        </Link>
-
-        <button
-          onClick={() => setSearchOpen(true)}
-          className="flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer bg-transparent border-none text-left"
-        >
-          <Search size={17} className="text-[var(--text-secondary)]" />
-          <span className="text-[12px] font-semibold text-[var(--text-secondary)] flex-1">Search</span>
-        </button>
-        <Link
-          href="/plugins"
-          className={`flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer ${isInspector ? "border border-[var(--border-default)]" : "bg-transparent"}`}
-        >
-          <Sparkles size={16} className="text-[var(--text-secondary)]" />
-          <span className={`text-[12px] font-semibold text-[var(--text-secondary)]`}>Plugins</span>
-        </Link>
-      </div>
-
-      <div className="flex flex-col gap-[2px]">
-        <div className={`text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] px-[10px] mb-[6px]`}>
-          Projects
+      <div className="shrink-0 flex flex-col gap-[22px] pt-[20px] px-[14px] pb-[22px]">
+        <div className="flex items-center gap-[8px] px-[6px]">
+          <span className={`text-xs font-bold uppercase tracking-[0.08em] text-[var(--text-muted)]`}>
+            Garvey
+          </span>
         </div>
 
-        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-          <SortableContext items={projects.map((p) => p.slug)} strategy={verticalListSortingStrategy}>
-            {projects.map((project) => (
-              <SortableProjectRow
-                key={project.slug}
-                project={project}
-                active={activeSlug === project.slug}
-                menuOpen={menuOpenSlug === project.slug}
-                onToggleMenu={() => setMenuOpenSlug(menuOpenSlug === project.slug ? null : project.slug)}
-                onDelete={() => {
-                  setMenuOpenSlug(null);
-                  setConfirmProject(project);
-                }}
-                onClickCapture={(e) => {
-                  if (justDraggedSlug.current === project.slug) {
-                    e.preventDefault();
-                    justDraggedSlug.current = null;
-                  }
-                }}
-              />
-            ))}
-          </SortableContext>
-        </DndContext>
+        <div className="flex flex-col gap-[2px]">
+          <Link
+            href="/inbox"
+            className={`flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer ${isInbox ? "border border-[var(--border-default)]" : "bg-transparent"}`}
+          >
+            <Inbox size={17} className="text-[var(--text-secondary)]" />
+            <span className={`text-[12px] font-semibold text-[var(--text-secondary)] flex-1`}>Inbox</span>
+          </Link>
 
-        <button
-          onClick={() => createProject("project")}
-          className="flex items-center gap-[8px] py-[9px] px-[10px] mt-[4px] cursor-pointer text-[var(--text-muted)] bg-transparent border-none text-left"
-        >
-          <Plus size={15} strokeWidth={1.8} />
-          <span className={"text-xs font-semibold"}>New Project</span>
-        </button>
+          <button
+            onClick={() => setSearchOpen(true)}
+            className="flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer bg-transparent border-none text-left"
+          >
+            <Search size={17} className="text-[var(--text-secondary)]" />
+            <span className="text-[12px] font-semibold text-[var(--text-secondary)] flex-1">Search</span>
+          </button>
+          <Link
+            href="/plugins"
+            className={`flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer ${isInspector ? "border border-[var(--border-default)]" : "bg-transparent"}`}
+          >
+            <Sparkles size={16} className="text-[var(--text-secondary)]" />
+            <span className={`text-[12px] font-semibold text-[var(--text-secondary)]`}>Plugins</span>
+          </Link>
+        </div>
       </div>
 
-      {/* Replies: newest first, never dragged, otherwise rows like projects'. */}
-      <div className="flex flex-col gap-[2px]">
-        <div className={`text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] px-[10px] mb-[6px]`}>
-          Replies
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain flex flex-col gap-[22px] px-[14px] pb-[14px]">
+        <div className="flex flex-col gap-[2px]">
+          <div className={`text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] px-[10px] mb-[6px]`}>
+            Projects
+          </div>
+
+          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+            <SortableContext items={projects.map((p) => p.slug)} strategy={verticalListSortingStrategy}>
+              {projects.map((project) => (
+                <SortableProjectRow
+                  key={project.slug}
+                  project={project}
+                  active={activeSlug === project.slug}
+                  menuOpen={menuOpenSlug === project.slug}
+                  onToggleMenu={() => setMenuOpenSlug(menuOpenSlug === project.slug ? null : project.slug)}
+                  onDelete={() => {
+                    setMenuOpenSlug(null);
+                    setConfirmProject(project);
+                  }}
+                  onClickCapture={(e) => {
+                    if (justDraggedSlug.current === project.slug) {
+                      e.preventDefault();
+                      justDraggedSlug.current = null;
+                    }
+                  }}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
+
+          <button
+            onClick={() => createProject("project")}
+            className="flex items-center gap-[8px] py-[9px] px-[10px] mt-[4px] cursor-pointer text-[var(--text-muted)] bg-transparent border-none text-left"
+          >
+            <Plus size={15} strokeWidth={1.8} />
+            <span className={"text-xs font-semibold"}>New Project</span>
+          </button>
         </div>
 
-        <DndContext>
-          <SortableContext items={replies.map((p) => p.slug)}>
-            {replies.map((reply) => (
-              <SortableProjectRow
-                key={reply.slug}
-                project={reply}
-                sortable={false}
-                active={activeSlug === reply.slug}
-                menuOpen={menuOpenSlug === reply.slug}
-                onToggleMenu={() => setMenuOpenSlug(menuOpenSlug === reply.slug ? null : reply.slug)}
-                onDelete={() => {
-                  setMenuOpenSlug(null);
-                  setConfirmProject(reply);
-                }}
-              />
-            ))}
-          </SortableContext>
-        </DndContext>
+        {/* Replies: newest first, never dragged, otherwise rows like projects'. */}
+        <div className="flex flex-col gap-[2px]">
+          <div className={`text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] px-[10px] mb-[6px]`}>
+            Replies
+          </div>
 
-        <button
-          onClick={() => createProject("reply")}
-          className="flex items-center gap-[8px] py-[9px] px-[10px] mt-[4px] cursor-pointer text-[var(--text-muted)] bg-transparent border-none text-left"
-        >
-          <Plus size={15} strokeWidth={1.8} />
-          <span className={"text-xs font-semibold"}>New Reply</span>
-        </button>
+          <DndContext>
+            <SortableContext items={replies.map((p) => p.slug)}>
+              {replies.map((reply) => (
+                <SortableProjectRow
+                  key={reply.slug}
+                  project={reply}
+                  sortable={false}
+                  active={activeSlug === reply.slug}
+                  menuOpen={menuOpenSlug === reply.slug}
+                  onToggleMenu={() => setMenuOpenSlug(menuOpenSlug === reply.slug ? null : reply.slug)}
+                  onDelete={() => {
+                    setMenuOpenSlug(null);
+                    setConfirmProject(reply);
+                  }}
+                />
+              ))}
+            </SortableContext>
+          </DndContext>
+
+          <button
+            onClick={() => createProject("reply")}
+            className="flex items-center gap-[8px] py-[9px] px-[10px] mt-[4px] cursor-pointer text-[var(--text-muted)] bg-transparent border-none text-left"
+          >
+            <Plus size={15} strokeWidth={1.8} />
+            <span className={"text-xs font-semibold"}>New Reply</span>
+          </button>
+        </div>
       </div>
 
-      <div className="flex-1" />
-
-      <div className="flex flex-col gap-[2px] border-t border-[var(--border-default)] pt-[14px]">
+      <div className="shrink-0 flex flex-col gap-[2px] border-t border-[var(--border-default)] pt-[14px] pb-[20px] px-[14px]">
         <Link
           href="/style"
           className={`flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer ${isStyle ? "border border-[var(--border-default)]" : "bg-transparent"}`}

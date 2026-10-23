@@ -10,19 +10,18 @@ export interface DraftMode {
   /** Which brief the Brief button opens. */
   brief: ProjectKind;
   subtitle: boolean;
-  /** The Notes button and the notes panel. */
-  notes: boolean;
   /** Section and heading tools: the slash menu items, the side menu's
    * "Move into section", the toolbar's heading options. */
   sections: boolean;
-  /** Preview in the doc menu; off, Copy (as plain text) takes its place. */
-  preview: boolean;
+  /** What Copy puts on the clipboard: a project as markdown, a reply as
+   * plain text, since it is pasted into another app to be sent. */
+  copyAs: "markdown" | "plain";
   duplicate: boolean;
 }
 
 export const DRAFT_MODES: Record<ProjectKind, DraftMode> = {
-  project: { brief: "project", subtitle: true, notes: true, sections: true, preview: true, duplicate: true },
-  reply: { brief: "reply", subtitle: false, notes: false, sections: false, preview: false, duplicate: false },
+  project: { brief: "project", subtitle: true, sections: true, copyAs: "markdown", duplicate: true },
+  reply: { brief: "reply", subtitle: false, sections: false, copyAs: "plain", duplicate: false },
 };
 
 const DraftModeContext = createContext<DraftMode>(DRAFT_MODES.project);

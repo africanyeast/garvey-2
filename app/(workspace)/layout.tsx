@@ -8,7 +8,7 @@ export default function WorkspaceLayout({ children }: { children: React.ReactNod
     <WritingOSProvider>
       <LastPathTracker />
       <FileDropGuard />
-      <div className="flex w-full min-h-[900px] h-dvh bg-[var(--surface-app)] overflow-hidden font-sans">
+      <div className="flex w-full h-dvh bg-[var(--surface-app)] overflow-hidden font-sans">
         <Sidebar />
         <div className="flex-1 min-w-0 overflow-y-auto overscroll-contain relative">{children}</div>
       </div>

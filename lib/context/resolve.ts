@@ -106,8 +106,6 @@ export interface ContextManifest {
   cursor: Cursor;
   /** What the cursor is in: a project's draft or a reply's. */
   thingKind?: "project" | "reply";
-  /** A reply's linked project, when it has one. */
-  about?: { id: string; title: string };
   /** Where the document text came from: the editor's live copy, or the
    * vault (the last save). */
   documentSource: "editor" | "vault" | "none";
@@ -249,8 +247,6 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
   // same for both uses `project`; where a reply differs, `reply` says so.
   const project = isProjectLike(thing?.header.kind) ? thing : undefined;
   const reply = project?.header.kind === "reply";
-  const aboutId = reply ? project.header.links.find((l) => l.rel === "about" && l.to.block === undefined)?.to.id : undefined;
-  const about = aboutId ? live.find((t) => t.header.id === aboutId && t.header.kind === "project") : undefined;
 
   const needsProject = decl.include.some((p) => p !== "style");
   if (needsProject && !project) throw new ContextError("this plugin needs a cursor in a project's or reply's draft");
@@ -280,20 +276,10 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
   if (wants.has("style") && input.style) {
     items.push({ step: 1, kind: "style", title: "Style profile", why: "global style", text: input.style });
   }
-  // 2. Brief: a reply's own, then the project it is about. 3. Outline.
+  // 2. Brief. 3. Outline.
   if (project && wants.has("brief")) {
     if (reply) {
       items.push({ step: 2, kind: "brief", id: project.header.id, title: `Reply brief: ${titleOfProject(project)}`, why: "the reply's brief", text: replyBriefText(project) });
-      if (about) {
-        items.push({
-          step: 2,
-          kind: "brief",
-          id: about.header.id,
-          title: `Brief: ${titleOfProject(about)}`,
-          why: "the brief of the project this reply is about",
-          text: `The project this reply is about:\n${briefText(about)}`,
-        });
-      }
     } else {
       items.push({ step: 2, kind: "brief", id: project.header.id, title: `Brief: ${titleOfProject(project)}`, why: "the project's brief", text: briefText(project) });
     }
@@ -314,29 +300,21 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
     .filter((t) => t.header.kind === "note" && !(t.header.resolved as boolean | undefined))
     .sort((a, b) => a.header.id.localeCompare(b.header.id));
 
-  // 4. A reply's linked project's own notes: those linked to the project
-  // alone, never to a place in its draft. A reply has no notes of its own.
-  if (about && wants.has("project-material")) {
-    for (const n of liveNotes) {
-      const links = n.header.links.filter((l) => NOTE_RELS.has(l.rel) && l.to.id === about.header.id);
-      if (!links.length || links.some((l) => l.to.block !== undefined)) continue;
-      items.push({ step: 4, kind: "note", id: n.header.id, title: noteTitle(n), why: `linked to "${titleOfProject(about)}", the project this reply is about`, text: noteText(n) });
-    }
-  }
-
-  // 4–6. Notes, by how they are linked to this project. A note linked to
-  // a place in the project is scoped to that place; one linked to the
-  // project alone reaches every section (decision 3).
+  // 4–6. Notes, by how they are linked to this project or reply. A note
+  // linked to a place in it is scoped to that place; one linked to it
+  // alone reaches every section (decision 3). A note linked to a reply and
+  // a project is how the two are connected: it reaches both, and nothing
+  // else of the project comes with it.
   if (project) {
     const P = project.header.id;
-    for (const n of reply ? [] : liveNotes) {
+    for (const n of liveNotes) {
       const links = n.header.links.filter((l) => NOTE_RELS.has(l.rel) && l.to.id === P);
       if (!links.length) continue;
       const places = links.filter((l) => l.to.block !== undefined);
       const title = noteTitle(n);
       const make = (step: Step, why: string): BundleItem => ({ step, kind: "note", id: n.header.id, title, why, text: noteText(n) });
       if (!places.length) {
-        if (wants.has("project-material")) items.push(make(4, "linked to the project, not to a place in it"));
+        if (wants.has("project-material")) items.push(make(4, `linked to the ${reply ? "reply" : "project"}, not to a place in it`));
         continue;
       }
       const onBlock = cursor && places.find((l) => l.to.block === cursor.block);
@@ -476,7 +454,6 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
     manifest: {
       cursor: cursor ?? { block: "" },
       ...(project ? { thingKind: reply ? ("reply" as const) : ("project" as const) } : {}),
-      ...(about ? { about: { id: about.header.id, title: titleOfProject(about) } } : {}),
       documentSource,
       section: sectionId ? { id: sectionId, title: sectionBlock ? blockPlainText(sectionBlock).trim() : sectionId } : null,
       ...(at

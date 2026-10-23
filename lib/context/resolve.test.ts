@@ -322,7 +322,7 @@ describe("bundle for a cursor in a reply", () => {
     resolveBundle({ things: [...things, r, onR1, onR2, altR1], style: "STYLE", cursor: { thing: R, block: "r1" }, declaration: decl });
   const fromP = new Set([P, ...Object.values(N).map((t) => t.header.id), ...Object.values(C).map((t) => t.header.id), variant.header.id]);
 
-  test("unlinked: style, its brief, its block's comments and versions, its draft; no project at all", () => {
+  test("style, its brief, its block's comments and versions, its draft; no project at all", () => {
     const b = run(reply([]));
     expect(b.items.map((x) => [x.step, x.kind, x.id])).toEqual([
       [1, "style", undefined],
@@ -335,41 +335,31 @@ describe("bundle for a cursor in a reply", () => {
       "This is a WhatsApp reply: plain text, conversational.\n\nReplying to:\n@sam: guest post next month?\n\nWhat I want to say: say yes, ask the length"
     );
     expect(b.manifest.thingKind).toBe("reply");
-    expect(b.manifest.about).toBeUndefined();
     for (const x of b.items) expect(fromP.has(x.id ?? "")).toBe(false);
     expect(b.manifest.unanchored).toEqual([]);
   });
 
-  test("linked: the project's brief after its own, and that project's own notes only", () => {
-    const b = run(reply([{ rel: "about", to: { id: P } }]));
-    expect(idsAt(b, 2)).toEqual([R, P]);
-    expect(b.items.find((x) => x.id === P)?.text).toBe("The project this reply is about:\nTitle: Paper\nProblem: Why it matters\n\nArguments:\n- one");
-    // Notes on places in P (sections, blocks) and P's outline never come.
-    expect(idsAt(b, 4)).toEqual([N.project.header.id, N.aboutP.header.id]);
-    expect(idsAt(b, 3)).toEqual([]);
-    expect(idsAt(b, 5)).toEqual([]);
-    expect(b.manifest.about).toEqual({ id: P, title: "Paper" });
+  test("its notes: one on the reply in step 4, one on a block of it in step 6", () => {
+    const own = note("on the reply", [fu({ id: R })]);
+    const onBlock = note("on r1", [about({ id: R, block: "r1" })]);
+    const onOther = note("on r2", [about({ id: R, block: "r2" })]);
+    const b = resolveBundle({ things: [...things, reply([]), own, onBlock, onOther], style: "", cursor: { thing: R, block: "r1" }, declaration: everything });
+    expect(idsAt(b, 4)).toEqual([own.header.id]);
+    expect(b.items.find((x) => x.id === own.header.id)?.why).toBe("linked to the reply, not to a place in it");
+    expect(idsAt(b, 6)).toContain(onBlock.header.id);
+    expect(idsAt(b, 6)).not.toContain(onOther.header.id);
   });
 
-  test("its linked project's notes are what a tight budget drops first", () => {
-    const full = run(reply([{ rel: "about", to: { id: P } }]));
-    const notes = full.items.filter((x) => x.step === 4).reduce((n, x) => n + x.text.length, 0);
-    const b = run(reply([{ rel: "about", to: { id: P } }]), { ...withVersions, budget: full.manifest.chars - notes });
-    expect(b.manifest.dropped.map((x) => x.id)).toEqual([N.project.header.id, N.aboutP.header.id]);
-    expect(b.manifest.overBudget).toBe(false);
-    expect(idsAt(b, 2)).toEqual([R, P]);
-  });
-
-  test("a link to a trashed project, or to something that is not a project, brings nothing", () => {
-    const trashedP: Thing = { ...projectP, header: { ...projectP.header, trashed_at: "2026-09-30T02:00:00.000Z" } };
-    const b = resolveBundle({ things: [trashedP, ...Object.values(N), reply([{ rel: "about", to: { id: P } }])], style: "", cursor: { thing: R, block: "r1" }, declaration: everything });
-    expect(b.items.map((x) => [x.kind, x.id])).toEqual([["brief", R], ["draft", R]]);
-    const toNote = run(reply([{ rel: "about", to: { id: N.project.header.id } }]));
-    expect(idsAt(toNote, 2)).toEqual([R]);
+  test("a note linking the reply and a project reaches the reply, and nothing else of that project does", () => {
+    const both = note("links the two", [fu({ id: R }), about({ id: P })]);
+    const b = resolveBundle({ things: [...things, reply([]), both], style: "", cursor: { thing: R, block: "r1" }, declaration: everything });
+    expect(idsAt(b, 4)).toEqual([both.header.id]);
+    expect(idsAt(b, 2)).toEqual([R]);
+    for (const x of b.items) expect(fromP.has(x.id ?? "")).toBe(false);
   });
 
   test("renders under reply headings", () => {
-    const b = run(reply([{ rel: "about", to: { id: P } }]));
+    const b = run(reply([]));
     expect(renderSystem("DO IT", b, [2])).toStartWith("STYLE\n\nDO IT\n\nReply brief:\nThis is a WhatsApp reply");
   });
 });

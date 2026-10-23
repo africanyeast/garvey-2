@@ -98,8 +98,10 @@ interface WritingOSState {
    * it happened. */
   projectsList: Project[];
   /** Every reply, newest first, for the sidebar's Replies group. Kept
-   * apart from `projectsList` so nothing that lists projects (the "@"
-   * picker) picks up replies. `addProjectToList` and the rest handle both. */
+   * apart from `projectsList` so the sidebar's Projects group never mixes
+   * in replies; the "@" picker offers both, so a note
+   * can connect a reply to a project. `addProjectToList` and the rest
+   * handle both. */
   repliesList: Project[];
   refreshProjects: () => void;
   addProjectToList: (p: Project) => void;

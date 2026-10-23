@@ -195,14 +195,28 @@ describe("replies, a special kind of project", () => {
     expect((await V.listVariants(r.slug)).length).toBe(1);
   });
 
-  test("it is trashed and restored with its comments", async () => {
+  test("a note can be filed under it and tagged with a project, which connects the two", async () => {
+    const project = await P.createProject({ title: "Panel prep" });
+    const note = await N.createNote({
+      body: para("they asked about the panel") as never,
+      links: [{ rel: "filed-under", to: { id: r.id } }, { rel: "about", to: { id: project.id } }],
+    });
+    expect(note.links).toEqual([
+      { rel: "filed-under", to: { id: r.id }, label: "Tola's panel" },
+      { rel: "about", to: { id: project.id }, label: "Panel prep" },
+    ]);
+  });
+
+  test("it is trashed and restored with its comments and notes", async () => {
     await P.deleteProject(r.slug);
     expect(await P.getProject(r.slug)).toBeNull();
     expect((await P.listTrashedProjects()).find((t) => t.id === r.id)?.kind).toBe("reply");
     expect((await C.listComments()).some((c) => c.text === "too blunt?")).toBe(false);
+    expect((await N.listNotes()).some((n) => n.links.some((l) => l.to.id === r.id))).toBe(false);
     const back = await P.restoreProject(r.id);
     expect(back?.kind).toBe("reply");
     expect((await C.listComments()).some((c) => c.text === "too blunt?")).toBe(true);
     expect((await V.listVariants(back!.slug)).length).toBe(1);
+    expect((await N.listNotes()).some((n) => n.links.some((l) => l.to.id === r.id))).toBe(true);
   });
 });

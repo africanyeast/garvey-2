@@ -138,7 +138,6 @@ function DraftScreenInner({
     replyingTo: project.replyingTo ?? "",
     replyingToUrl: project.replyingToUrl ?? "",
     intent: project.intent ?? "",
-    aboutProjectId: project.aboutProjectId ?? "",
   });
   const mode = DRAFT_MODES[project.kind];
   const [updatedAt, setUpdatedAt] = useState(project.updatedAt);
@@ -285,7 +284,7 @@ function DraftScreenInner({
   // The main document always stays visible — an expanded block/note takes
   // over the right dock (in place of the notes panel) rather than replacing
   // the document, so it's only ever fully hidden if the user goes fullscreen.
-  const panelOpen = (mode.notes && panelMode !== "collapsed") || !!expandedItem;
+  const panelOpen = panelMode !== "collapsed" || !!expandedItem;
   // A focused section mounts the draft's one editor inside the expand
   // shell, so the page's copy steps aside while it's open.
   const sectionFocus = expandedItem?.kind === "section";
@@ -320,9 +319,9 @@ function DraftScreenInner({
         <PdfViewerPanel />
       ) : expandedItem ? (
         <ExpandedView item={expandedItem} />
-      ) : mode.notes ? (
+      ) : (
         <SidePanel />
-      ) : null}
+      )}
 
       {/* Brief and Preview are both read/reference overlays, not part of the
        * dockable panel set — they only ever appear fullscreen, with a single
@@ -357,7 +356,6 @@ function DraftScreenInner({
               channel={reply.channel}
               replyingTo={reply.replyingTo}
               intent={reply.intent}
-              aboutProjectId={reply.aboutProjectId}
               onChange={(patch) => trackBriefSave(applyReplyBrief(patch))}
             />
           ) : (
@@ -387,7 +385,7 @@ function DraftScreenInner({
         </PanelShell>
       )}
 
-      {mode.preview && docMode === "preview" && (
+      {docMode === "preview" && (
         <PanelShell mode="fullscreen" onClose={() => setDocMode("edit")}>
           <DraftPreview title={title} subtitle={subtitle} document={draftDoc} />
         </PanelShell>

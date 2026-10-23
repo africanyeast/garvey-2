@@ -1,20 +1,15 @@
 "use client";
 
 import { useEffect, useRef, useState, type ClipboardEvent } from "react";
-import { FileText, X } from "lucide-react";
 import { BriefLabel } from "@/app/components/brief/ProjectBrief";
 import { AutoTextarea } from "@/app/components/shared/AutoTextarea";
 import { AUTOSAVE_DELAY } from "@/app/components/shared/FormFields";
-import { DropdownMenu } from "@/app/components/shared/DropdownMenu";
-import { MenuRow } from "@/app/components/shared/MenuRow";
-import { useClickOutside } from "@/app/hooks/useClickOutside";
-import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useFileDrop } from "@/app/components/shared/useFileDrop";
 import { IMAGE_ACCEPT, pastedFiles, rejectionNotice } from "@/app/lib/writing-os/fileDrop";
 import { guessChannel, xPost } from "@/app/lib/writing-os/replySource";
-import { REPLY_CHANNELS, projectDisplayTitle, replyChannelLabel, type Project, type ReplyChannel } from "@/app/lib/writing-os/types";
+import { REPLY_CHANNELS, replyChannelLabel, type Project, type ReplyChannel } from "@/app/lib/writing-os/types";
 
-export type ReplyBriefPatch = Partial<Pick<Project, "channel" | "replyingTo" | "replyingToUrl" | "intent" | "aboutProjectId">>;
+export type ReplyBriefPatch = Partial<Pick<Project, "channel" | "replyingTo" | "replyingToUrl" | "intent">>;
 
 /** What "Replying to" is doing with a paste it is still reading, or how
  * that ended when it could not. */
@@ -24,54 +19,6 @@ type PasteState =
   | { status: "failed-post" }
   | { status: "failed-image"; files: File[] }
   | { status: "skipped"; notice: string };
-
-/** The one project a reply is about, picked from the live projects. Its
- * brief and its own notes then reach the writing assist. */
-function AboutProject({ value, onChange }: { value: string; onChange: (id: string) => void }) {
-  const { projectsList } = useWritingOS();
-  const [open, setOpen] = useState(false);
-  const ref = useRef<HTMLDivElement>(null);
-  useClickOutside(open, [ref], () => setOpen(false));
-  const current = projectsList.find((p) => p.id === value);
-  const pick = (id: string) => {
-    setOpen(false);
-    if (id !== value) onChange(id);
-  };
-
-  return (
-    <div ref={ref} className="relative inline-flex items-center gap-[4px]">
-      <button
-        type="button"
-        onClick={() => setOpen((o) => !o)}
-        className={`inline-flex items-center gap-[6px] text-[15px] bg-transparent border-none cursor-pointer py-[5px] px-[0] ${
-          current ? "text-[var(--text-primary)]" : "text-[var(--text-muted)] hover:text-[var(--text-primary)]"
-        }`}
-      >
-        {current && <FileText size={14} strokeWidth={1.7} className="text-[var(--text-secondary)]" />}
-        {current ? projectDisplayTitle(current) : "Link a project…"}
-      </button>
-      {current && (
-        <button
-          type="button"
-          onClick={() => pick("")}
-          title="Unlink"
-          aria-label="Unlink the project"
-          className="bg-transparent border-none text-[var(--text-muted)] hover:text-[var(--text-primary)] cursor-pointer p-[4px] rounded-[4px] flex"
-        >
-          <X size={13} strokeWidth={1.8} />
-        </button>
-      )}
-      {open && (
-        <DropdownMenu className="left-[0] right-auto w-[260px] max-h-[300px] overflow-y-auto">
-          {projectsList.length === 0 && <div className="text-xs font-medium text-[var(--text-muted)] py-[7px] px-[10px]">No projects yet.</div>}
-          {projectsList.map((p) => (
-            <MenuRow key={p.id} icon={FileText} label={projectDisplayTitle(p)} active={p.id === value} onClick={() => pick(p.id)} />
-          ))}
-        </DropdownMenu>
-      )}
-    </div>
-  );
-}
 
 /** A text that saves `AUTOSAVE_DELAY` after the last keystroke, on leaving
  * the field, and on closing the brief while it still has focus. */
@@ -119,13 +66,11 @@ export function ReplyBrief({
   channel,
   replyingTo,
   intent,
-  aboutProjectId,
   onChange,
 }: {
   channel: ReplyChannel;
   replyingTo: string;
   intent: string;
-  aboutProjectId: string;
   onChange: (patch: ReplyBriefPatch) => void;
 }) {
   // An emptied message forgets the link it was pasted as.
@@ -302,11 +247,6 @@ export function ReplyBrief({
           placeholder="e.g. decline politely, offer next month"
           className="w-full border-none outline-none bg-transparent py-[5px] text-[15px] leading-[1.5] text-[var(--text-primary)] placeholder:text-[var(--text-muted)]"
         />
-      </section>
-
-      <section className="mt-[40px] pt-[32px] border-t border-t-[var(--border-default)]">
-        <BriefLabel hint="Optional. Its brief and notes then inform the writing assist.">About a project</BriefLabel>
-        <AboutProject value={aboutProjectId} onChange={(id) => onChange({ aboutProjectId: id })} />
       </section>
     </div>
   );

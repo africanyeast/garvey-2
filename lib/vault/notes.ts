@@ -1,8 +1,10 @@
 import {
+  PROJECT_LIKE_KINDS,
   StoreError,
   blockText,
   filedUnder,
   findBlock,
+  isProjectLike,
   isValidId,
   labelSnippet,
   parseBlocks,
@@ -46,7 +48,9 @@ function readLink(raw: unknown): Link {
  * a live project; duplicates are dropped. */
 async function checkNoteLinks(store: Store, raw: unknown): Promise<Link[]> {
   if (!Array.isArray(raw)) throw new StoreError("links must be an array");
-  const projects = new Map((await store.list({ kind: "project", trashed: "any" })).map((p) => [p.header.id, p]));
+  // A reply is a special kind of project: a note can be filed under or
+  // tagged with one, which is how a reply and a project are connected.
+  const projects = new Map((await store.list({ kind: PROJECT_LIKE_KINDS, trashed: "any" })).map((p) => [p.header.id, p]));
   const title = (p: Thing) => projectDisplayTitle({ title: (p.header.title as string) ?? "", slug: p.header.slug as string });
   const links = raw.map(readLink);
   const filed = links.filter((l) => l.rel === "filed-under");
@@ -153,7 +157,7 @@ export async function restoreNote(id: string): Promise<Note | null> {
   if (!t || t.header.kind !== "note" || t.header.trashed_at === null || t.header.trashed_with !== null) return null;
   const fu = filedUnder(t.header.links);
   const home = fu ? await store.get(fu.to.id) : null;
-  const homeIsLive = !!home && home.header.kind === "project" && home.header.trashed_at === null;
+  const homeIsLive = !!home && isProjectLike(home.header.kind) && home.header.trashed_at === null;
   const links =
     fu && !homeIsLive
       ? await checkNoteLinks(store, [
