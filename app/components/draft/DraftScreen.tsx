@@ -86,8 +86,16 @@ export function DraftScreen({
   // The single draft-wide BlockNote editor (and everything downstream that
   // reads/writes it — the main document, the side panel's block list, the
   // expanded-block panel, the preview) lives behind this one provider.
+  // The editor is created once per mount from `initialDocument`, so `key`
+  // remounts it on project switch — otherwise a newly opened project shows
+  // (and autosaves over itself with) the previous project's draft.
   return (
-    <DraftEditorProvider projectSlug={slug} projectId={project.id} initialDocument={initialDocument}>
+    <DraftEditorProvider
+      key={project.id}
+      projectSlug={slug}
+      projectId={project.id}
+      initialDocument={initialDocument}
+    >
       {/* What this kind of project shows: a reply hides parts of the screen. */}
       <DraftModeProvider value={DRAFT_MODES[project.kind]}>
         {/* `key` forces a remount on project switch so title/subtitle state
