@@ -59,6 +59,10 @@ export interface TypeDeclaration {
   briefReader?: BriefReader;
   /** How the writing assist should write for this type. */
   assistLine?: string;
+  /** Writing-assist skills that are off by default for this type
+   * (WRITING_ASSIST_SPEC.md, decision 16). A writing's own switch for the
+   * skill still turns it back on. */
+  skillsOff?: string[];
 }
 
 export interface TypeManifest {

@@ -17,5 +17,7 @@ export const manifest: TypeManifest = {
       return handle ? `Reply to @${handle}` : firstWords(brief);
     },
     assistLine: "This is a message (WhatsApp, Telegram, SMS or the like): plain text, short and conversational.",
+    // Its title is only a label, made from the brief.
+    skillsOff: ["suggest-title"],
   },
 };

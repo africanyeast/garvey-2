@@ -38,5 +38,7 @@ export const manifest: TypeManifest = {
       context: (read) => `Replying to this post on X (${read.key}):\n${read.text ?? "(it couldn't be read)"}`,
     },
     assistLine: "This is a post on X: plain text, at most 280 characters.",
+    // Its title is only a label, made from the brief.
+    skillsOff: ["suggest-title"],
   },
 };

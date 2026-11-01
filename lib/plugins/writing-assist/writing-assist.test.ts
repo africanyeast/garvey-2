@@ -2,7 +2,8 @@ import { describe, expect, test } from "bun:test";
 import { migrateToSkills } from "@/lib/vault/config";
 import { parseSkill } from "./skill";
 import { builtInSkills } from "./skills";
-import { currentRunId, isSkillOn, readOverrides } from "./switches";
+import { currentRunId, isSkillOn, readOverrides, skillState } from "./switches";
+import { TYPE_PLUGINS } from "../writing-types";
 
 const FILE = `---
 id: tighten
@@ -42,6 +43,20 @@ describe("a skill file", () => {
 
   test("every built-in skill loads, with the old plugins' ids", () => {
     expect(builtInSkills().map((s) => s.id).sort()).toEqual(["alternate", "compose", "contextual-suggest", "next-block", "refine", "suggest-title", "tab-completion"]);
+  });
+});
+
+describe("type defaults", () => {
+  const tweetOff = TYPE_PLUGINS.tweet.type.skillsOff ?? [];
+
+  test("a tweet has Suggest titles off unless the writing turns it on", () => {
+    expect(skillState("suggest-title", {}, ["writing-assist"], [], tweetOff)).toEqual({ on: false, by: "type" });
+    expect(isSkillOn("suggest-title", { "writing-assist/suggest-title": true }, ["writing-assist"], [], tweetOff)).toBe(true);
+    expect(isSkillOn("refine", {}, ["writing-assist"], [], tweetOff)).toBe(true);
+  });
+
+  test("the plugin being off still wins over the type", () => {
+    expect(skillState("suggest-title", {}, [], [], tweetOff)).toEqual({ on: false, by: "plugin" });
   });
 });
 

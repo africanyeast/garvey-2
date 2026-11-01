@@ -61,6 +61,7 @@ import { draftSchema, type DraftEditor } from "@/app/lib/writing-os/schema";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useSectionPage } from "@/app/lib/writing-os/sectionPage";
 import type { ComposeScope } from "@/app/lib/writing-os/writingAssist";
+import { useSkillOffered } from "@/app/lib/writing-os/assistSkills";
 
 /** The draft editor's writing assist, where there is one (not in a note's
  * editor or a version's). */
@@ -112,6 +113,7 @@ function DraftSideMenu() {
   const sideMenu = useExtension(SideMenuExtension);
   const withSections = useDraftMode().editor.sections;
   const block = useExtensionState(SideMenuExtension, { selector: (s) => s?.block });
+  const offered = useSkillOffered(useWritingOS().activeProjectId);
   const [open, setOpen] = useState<"down" | "up" | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const close = () => {
@@ -132,7 +134,7 @@ function DraftSideMenu() {
     close();
   };
   // Compose this block, or every block of a selection it is part of.
-  const compose = isSection ? undefined : assistOf(editor)?.askCompose;
+  const compose = isSection || !offered("compose") ? undefined : assistOf(editor)?.askCompose;
   const composeScope = (): ComposeScope => {
     const selected = composableIds(editor);
     return { kind: "blocks", ids: selected.includes(block.id) ? selected : [block.id] };
@@ -221,6 +223,7 @@ function DraftSlashMenu({ findWord }: { findWord: boolean }) {
   const popover = useContext(SuggestPopoverContext);
   // Only the draft's editor has the writing assist.
   const assist = assistOf(editor);
+  const offered = useSkillOffered(activeProjectId);
   // A section is a page of the writing, made from the writing's own page
   // (one level: not inside a section's page), and opened once made.
   const { openSection } = useSectionPage();
@@ -254,7 +257,7 @@ function DraftSlashMenu({ findWord }: { findWord: boolean }) {
                   },
                 ]
               : []),
-            ...(assist?.askNextBlock
+            ...(assist?.askNextBlock && offered("next-block")
               ? [
                   {
                     key: "continue-writing",
@@ -267,7 +270,7 @@ function DraftSlashMenu({ findWord }: { findWord: boolean }) {
                   },
                 ]
               : []),
-            ...(assist?.askCompose && composeScope()
+            ...(assist?.askCompose && offered("compose") && composeScope()
               ? [
                   {
                     key: "compose",
@@ -286,7 +289,7 @@ function DraftSlashMenu({ findWord }: { findWord: boolean }) {
                 ]
               : []),
             // Needs the popover host, which only a commentable editor renders.
-            ...(findWord && popover
+            ...(findWord && popover && offered("contextual-suggest")
               ? [
                   {
                     key: "find-word",
@@ -740,6 +743,7 @@ function SynonymMenuItem() {
   const editor = useBlockNoteEditor(draftSchema);
   const formattingToolbar = useExtension(FormattingToolbarExtension, { editor });
   const popover = useContext(SuggestPopoverContext)!;
+  const offered = useSkillOffered(activeProjectId);
   // Synonyms are for one word; a longer selection is Refine's.
   const oneWord = useEditorState({
     editor,
@@ -761,7 +765,7 @@ function SynonymMenuItem() {
     await fetchSuggestions(editor, popover, { selection }, signal, activeProjectId);
   }
 
-  if (!oneWord) return null;
+  if (!oneWord || !offered("contextual-suggest")) return null;
   return <MenuRow icon={BookA} label="Suggest synonyms" onClick={open} />;
 }
 
@@ -775,6 +779,7 @@ function RefineMenuItem() {
   const editor = useBlockNoteEditor(draftSchema);
   const formattingToolbar = useExtension(FormattingToolbarExtension, { editor });
   const refine = editor.getExtension(RefineExtension);
+  const offered = useSkillOffered(useWritingOS().activeProjectId);
   const inOneBlock = useEditorState({
     editor,
     selector: ({ editor }) => {
@@ -782,7 +787,7 @@ function RefineMenuItem() {
       return !empty && $from.sameParent($to);
     },
   });
-  if (!refine || !inOneBlock) return null;
+  if (!refine || !inOneBlock || !offered("refine")) return null;
   return (
     <MenuRow
       icon={Sparkles}
@@ -803,6 +808,7 @@ function ComposeMenuItem() {
   const editor = useBlockNoteEditor(draftSchema);
   const formattingToolbar = useExtension(FormattingToolbarExtension, { editor });
   const compose = assistOf(editor)?.askCompose;
+  const offered = useSkillOffered(useWritingOS().activeProjectId);
   const acrossBlocks = useEditorState({
     editor,
     selector: ({ editor }) => {
@@ -810,7 +816,7 @@ function ComposeMenuItem() {
       return !empty && !$from.sameParent($to);
     },
   });
-  if (!compose || !acrossBlocks) return null;
+  if (!compose || !acrossBlocks || !offered("compose")) return null;
   return (
     <MenuRow
       icon={Wand2}

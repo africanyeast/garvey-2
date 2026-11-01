@@ -11,7 +11,7 @@ export interface TabItem<K extends string> {
 
 /**
  * The one tab strip for every page that switches between views of itself
- * (a plugin's History/Configuration, Trash's Projects/Inbox): plain labels
+ * (a plugin's History/Settings/Details, Trash's Projects/Inbox): plain labels
  * on a hairline, the current one darker and underlined. Arrow keys move
  * between tabs, as a tablist should.
  */

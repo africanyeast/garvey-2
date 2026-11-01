@@ -354,7 +354,7 @@ function DraftScreenInner({
               onOpenShortcuts={() => setShortcutsOpen(true)}
               brief={brief}
               typePicker={!type && !hasText ? <TypePicker types={pickable} onPick={setType} /> : undefined}
-              suggestFor={isSkillOn("suggest-title", pluginOverrides, enabledPlugins, skillsOff) ? project.id : undefined}
+              suggestFor={isSkillOn("suggest-title", pluginOverrides, enabledPlugins, skillsOff, mode.skillsOff) ? project.id : undefined}
             />
           </div>
         </div>
@@ -411,7 +411,7 @@ function DraftScreenInner({
 
         {pluginsOpen && (
           <PanelShell mode="fullscreen" onClose={() => setPluginsOpen(false)}>
-            <ProjectPlugins overrides={pluginOverrides} onChange={savePluginOverrides} />
+            <ProjectPlugins overrides={pluginOverrides} onChange={savePluginOverrides} typeLabel={mode.label} typeSkillsOff={mode.skillsOff ?? []} />
           </PanelShell>
         )}
 

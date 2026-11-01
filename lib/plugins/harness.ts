@@ -5,7 +5,8 @@ import { effectiveSettings } from "./settings";
 import { ContextError, CURSOR_MARK, resolveContext, type Cursor } from "@/lib/context";
 import { recordRun } from "@/lib/context/runs";
 import { getPlugin } from "./registry";
-import { readOverrides } from "./writing-assist/switches";
+import { WRITING_ASSIST, readOverrides } from "./writing-assist/switches";
+import { isTypeOn, isWritingType, typeDeclaration } from "./writing-types";
 import { missingPermissions } from "./prompt";
 import type { Plugin, PluginContext, PluginResult } from "./types";
 import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
@@ -72,10 +73,17 @@ export async function runPlugin<TInput, TData>(pluginId: string, input: TInput, 
   // A project's own switches, if it has them, beat the global ones: the
   // task's (a skill's) first, then the plugin's.
   let overrides: Record<string, boolean> = {};
+  // Skills the writing's type has off by default (decision 16), while
+  // its type plugin is on.
+  let typeOff: string[] = [];
   const projectId = place.project ?? place.cursor?.thing;
   if (projectId) {
     const thing = await (await vault()).get(projectId);
-    if (thing?.header.kind === "project") overrides = readOverrides(thing.header.plugin_overrides);
+    if (thing?.header.kind === "project") {
+      overrides = readOverrides(thing.header.plugin_overrides);
+      const type = thing.header.type;
+      if (isWritingType(type) && isTypeOn(type, overrides, config.plugins)) typeOff = typeDeclaration(type).skillsOff ?? [];
+    }
   }
   const taskKey = place.task ? `${pluginId}/${place.task}` : undefined;
   const own = taskKey !== undefined ? overrides[taskKey] : undefined;
@@ -84,6 +92,9 @@ export async function runPlugin<TInput, TData>(pluginId: string, input: TInput, 
     if (overrides[pluginId] === false) return { ok: false, error: `Plugin "${pluginId}" is switched off for this project` };
     if (overrides[pluginId] === undefined && !config.plugins.includes(pluginId)) {
       return { ok: false, error: `Plugin "${pluginId}" is not enabled in .os/config.yaml` };
+    }
+    if (pluginId === WRITING_ASSIST && place.task && typeOff.includes(place.task)) {
+      return { ok: false, error: `"${place.task}" is off for this type of writing` };
     }
     if (taskKey && config.skills_off?.includes(taskKey)) return { ok: false, error: `"${place.task}" is switched off` };
   }
