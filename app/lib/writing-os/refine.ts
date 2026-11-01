@@ -12,8 +12,9 @@ import type { DraftEditor } from "./schema";
  * `RefinePopover` for an optional instruction; the suggestion then shows
  * beside the selected words, struck through — both as ProseMirror
  * decorations, never as document content or direct DOM writes (see the
- * `comment-highlight-mutation-observer-loop` memory). Tab takes it, Esc
- * drops it, and a new instruction reshapes it (or Enter alone tries again).
+ * `comment-highlight-mutation-observer-loop` memory). ⌘↵ or Tab takes it,
+ * Esc drops it, and a new instruction reshapes it (or Enter alone tries
+ * again).
  *
  * Registered on the draft's editor and on each version editor in the
  * expanded block; the owner's `setPlace` says which draft block a selection
@@ -254,6 +255,7 @@ export const RefineExtension = createExtension(
         // Only while a suggestion shows; otherwise Tab and Esc do what they
         // always do.
         Tab: () => accept(),
+        "Mod-Enter": () => accept(),
         Escape: () => {
           if (!store.state.refining) return false;
           close("dismissed");

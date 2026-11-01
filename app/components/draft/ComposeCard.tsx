@@ -42,6 +42,7 @@ export function ComposeCard({ editor }: { editor: DraftEditor }) {
       instruction={pending.instruction}
       labels={{
         ask: "How should it read? Optional — Enter just composes it",
+        go: "Compose",
         refine: "Say what to change, or try again",
         accept: ACCEPT[pending.scope.kind],
       }}
