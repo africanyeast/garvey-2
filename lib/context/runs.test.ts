@@ -26,7 +26,7 @@ const manifest: ContextManifest = {
   overBudget: false,
 };
 
-const base = { plugin: "continue-writing", task: "next-block", ok: true, model: "claude-haiku-4-5", ms: { resolve: 19, run: 4300 }, context: manifest };
+const base = { plugin: "writing-assist", task: "next-block", ok: true, model: "claude-haiku-4-5", ms: { resolve: 19, run: 4300 }, context: manifest };
 
 beforeAll(async () => {
   tmp = await mkdtemp(path.join(os.tmpdir(), "runs-test-"));
@@ -69,10 +69,10 @@ describe("run record", () => {
     expect(lines[0].length).toBeLessThan(700);
   });
 
-  test("a reply's run keeps what it was in", async () => {
-    const reply = { ...manifest, thingKind: "reply" as const };
-    const run = await R.recordRun({ ...base, context: reply });
-    expect((await R.getRun(run.id))?.context).toEqual(reply);
+  test("a run keeps the type of writing it was in", async () => {
+    const tweet = { ...manifest, writingType: "tweet" as const };
+    const run = await R.recordRun({ ...base, context: tweet });
+    expect((await R.getRun(run.id))?.context).toEqual(tweet);
   });
 
   test("an outcome is attached to its run, and the first one wins", async () => {

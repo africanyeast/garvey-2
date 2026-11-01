@@ -1,7 +1,7 @@
 "use client";
 
 import { useWritingOS, type NoteScope } from "@/app/lib/writing-os/context";
-import { useDraftEditor } from "@/app/lib/writing-os/editor-context";
+import { useDraftHost } from "@/app/lib/writing-os/editor-context";
 import { useProjectMentionTargets } from "@/app/lib/writing-os/useProjectMentionTargets";
 import { blockIdsIn } from "@/app/lib/writing-os/sections";
 import { isListedIn } from "@/lib/store/links";
@@ -25,7 +25,7 @@ export function PlaceNotes({ kind, id }: { kind: "section" | "block"; id: string
     setNoteAttachmentTranscription,
     activeProjectId,
   } = useWritingOS();
-  const { document: draftDoc } = useDraftEditor();
+  const { document: draftDoc } = useDraftHost();
   const mentionTargets = useProjectMentionTargets();
   // An untitled section or empty block isn't a "#" target, but can still
   // be tagged from its own view.

@@ -91,18 +91,13 @@ interface WritingOSState {
    * never `activeProjectSlug`, so the tag survives a later rename. */
   activeProjectId: string | null;
   setActiveProjectId: (id: string | null) => void;
-  /** Every project, for the composer's "@" mention picker and the sidebar —
+  /** Every writing, in sidebar order, for the composer's "@" mention
+   * picker and the sidebar's Writing list —
    * independent of `activeProject`, which is just whichever one is
    * currently open. Single source of truth so creating/renaming/deleting/
    * restoring a project shows up everywhere immediately, not just wherever
    * it happened. */
   projectsList: Project[];
-  /** Every reply, newest first, for the sidebar's Replies group. Kept
-   * apart from `projectsList` so the sidebar's Projects group never mixes
-   * in replies; the "@" picker offers both, so a note
-   * can connect a reply to a project. `addProjectToList` and the rest
-   * handle both. */
-  repliesList: Project[];
   refreshProjects: () => void;
   addProjectToList: (p: Project) => void;
   removeProjectFromList: (slug: string) => void;
@@ -113,12 +108,6 @@ interface WritingOSState {
   panelMode: PanelPresentation;
   openMenu: string | number | null;
   expandedItem: ExpandedItem | null;
-  /** A block/section id to scroll into view in the main draft document, set
-   * once by a "#section" tag's click-through and cleared right after the
-   * scroll happens — unlike `expandedItem`, this never opens any panel, it
-   * just brings the target into view inline where it already lives. */
-  scrollToBlockId: string | null;
-  setScrollToBlockId: (id: string | null) => void;
   /** A note composer's unsent text/tags/files, kept here per scope so a
    * draft survives the panel closing or the view changing. A scope with no
    * draft yet starts auto-tagged with where it sits. */
@@ -155,9 +144,8 @@ interface WritingOSState {
   addReply: (key: string) => void;
   /** Submits the composer draft for `scope` as a new note. */
   addNote: (scope: NoteScope) => void;
-  /** Adds a note created or restored *outside* the composers (the
-   * `insert-content` agent filing one from the transcription panel, a
-   * restore from Trash) to the list, so every screen showing it updates. */
+  /** Adds a note created or restored *outside* the composers (a restore
+   * from Trash) to the list, so every screen showing it updates. */
   addNoteToList: (note: Note) => void;
   setDocMode: (m: DocMode) => void;
 
@@ -178,11 +166,7 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
   const [activeProject, setActiveProject] = useState("");
   const [activeProjectSlug, setActiveProjectSlug] = useState<string | null>(null);
   const [activeProjectId, setActiveProjectId] = useState<string | null>(null);
-  // Projects and replies, in one list: every add/remove/patch below works
-  // on either kind. Split by kind for consumers.
-  const [allProjects, setProjectsList] = useState<Project[]>([]);
-  const projectsList = useMemo(() => allProjects.filter((p) => p.kind !== "reply"), [allProjects]);
-  const repliesList = useMemo(() => allProjects.filter((p) => p.kind === "reply"), [allProjects]);
+  const [projectsList, setProjectsList] = useState<Project[]>([]);
   // One debounce timer per variant id — a fast typist firing an unbounced
   // PATCH per keystroke against the same JSON file is exactly what produced
   // the interleaved-write corruption that silently dropped alt versions on
@@ -270,7 +254,6 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
   const [panelMode, setPanelMode] = useState<PanelPresentation>("collapsed");
   const [openMenu, setOpenMenu] = useState<string | number | null>(null);
   const [expandedItem, setExpandedItem] = useState<ExpandedItem | null>(null);
-  const [scrollToBlockId, setScrollToBlockId] = useState<string | null>(null);
   const [noteDrafts, setNoteDrafts] = useState<Record<string, NoteDraft>>({});
   const [docMode, setDocMode] = useState<DocMode>("edit");
   const [replyDrafts, setReplyDrafts] = useState<Record<string, string>>({});
@@ -510,7 +493,7 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
   };
 
   const projectFor = (id: string): ProjectLookup | undefined => {
-    const p = allProjects.find((p) => p.id === id);
+    const p = projectsList.find((p) => p.id === id);
     return p ? { slug: p.slug, title: p.title } : undefined;
   };
   const enrichNote = (n: Note): EnrichedNote => ({ ...n, tags: resolveTags(n.links, projectFor) });
@@ -537,7 +520,6 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     activeProjectId,
     setActiveProjectId,
     projectsList,
-    repliesList,
     refreshProjects,
     addProjectToList,
     removeProjectFromList,
@@ -546,8 +528,6 @@ export function WritingOSProvider({ children }: { children: ReactNode }) {
     panelMode,
     openMenu,
     expandedItem,
-    scrollToBlockId,
-    setScrollToBlockId,
     noteDraft,
     setNoteDraft,
     docMode,

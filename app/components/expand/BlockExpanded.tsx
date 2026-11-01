@@ -94,7 +94,8 @@ export function BlockExpanded({ id }: { id: string }) {
     addReply,
     resolveComment,
   } = useWritingOS();
-  const { editor, syncDocument } = useDraftEditor();
+  // `document` is the whole writing, every page of it.
+  const { editor, syncDocument, document: draftDoc } = useDraftEditor();
 
   const b = editor.getBlock(id);
   if (!b) return null;
@@ -108,7 +109,7 @@ export function BlockExpanded({ id }: { id: string }) {
   };
 
   // Refining words in any version reads this block's place in the draft.
-  const place = () => (activeProjectId ? { thing: activeProjectId, block: b.id, document: editor.document } : null);
+  const place = () => (activeProjectId ? { thing: activeProjectId, block: b.id, document: draftDoc } : null);
 
   // Display order: variants above the active one, the active one, the rest.
   const sorted = [...alts].sort((x, y) => x.order - y.order || x.id.localeCompare(y.id));
@@ -172,7 +173,7 @@ export function BlockExpanded({ id }: { id: string }) {
       <AlternateComposer
         projectId={activeProjectId}
         blockId={b.id}
-        document={editor.document}
+        document={draftDoc}
         onAddBlank={() => addVariant(b.id, shape(""))}
         onAdd={(text) => addVariant(b.id, shape(text))}
       />

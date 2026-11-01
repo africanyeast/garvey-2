@@ -1,21 +1,85 @@
-import type { DraftBlock, DraftEditor } from "./schema";
+import { blockPlainText } from "./blockText";
+import type { DraftBlock } from "./schema";
 
 /**
- * Sections aren't a parallel data structure here — a top-level `section`
- * block (`blocks/section.ts`) *is* a section, and its `children` *are* that
- * section's blocks (the same nesting BlockNote already uses for a nested
- * list item). Regular `heading` blocks are still available for sub-
- * structure *within* a section, but never count as a section boundary
- * themselves. This is the only place that walks the document to answer
- * "which section is this block in", so every consumer (notes composer,
- * expanded-block panel) agrees by construction instead of by convention.
+ * Sections, as data.
+ *
+ * On disk (and in the joined document the rest of the app reads) a
+ * section is a top-level `section` block: its text is its title, its
+ * children are its blocks. Nothing about that changed.
+ *
+ * What changed is how it is edited. Each page of a writing has its own
+ * editor holding only that page's blocks (`editor-context.tsx`):
+ * - the writing's page: its top-level blocks, each section a
+ *   `sectionLink` row (an atom: title in a prop, no text, no children);
+ * - a section's page: that section's blocks, at the top level of their
+ *   own editor.
+ *
+ * So a section's blocks are never nested under anything in an editor, and
+ * nothing a key does in one page's editor can reach another page's text.
+ * `splitDocument` and `joinDocument` convert between the two shapes.
  */
 
-/** The section a block is nested in (or the block itself, if it is a
- * section). Walks the whole tree since a block may be several levels deep
- * under a section (e.g. inside a list). A block that sits beside a section
- * rather than under it — before the first one, or between two — belongs to
- * none. */
+/** A writing split into its pages. */
+export interface SplitDocument {
+  /** The writing's page: top-level blocks, sections as `sectionLink`s. */
+  writing: DraftBlock[];
+  /** Each section's blocks, by section id. */
+  sections: Record<string, DraftBlock[]>;
+}
+
+/** A stored `section` block's title as plain text (a title takes no marks). */
+export const sectionTitle = (b: DraftBlock): string => blockPlainText(b).replace(/\s+/g, " ").trim();
+
+/** The writing's page block for a stored section. */
+function linkFor(b: DraftBlock): DraftBlock {
+  return {
+    id: b.id,
+    type: "sectionLink",
+    props: { ...(b.props as object), title: sectionTitle(b) },
+    content: undefined,
+    children: [],
+  } as unknown as DraftBlock;
+}
+
+/** The stored section for a writing page's link and its blocks. */
+function sectionFor(link: DraftBlock, blocks: DraftBlock[]): DraftBlock {
+  const { title, ...props } = link.props as { title: string } & Record<string, unknown>;
+  return {
+    id: link.id,
+    type: "section",
+    props,
+    content: title ? [{ type: "text", text: title, styles: {} }] : [],
+    children: blocks,
+  } as unknown as DraftBlock;
+}
+
+/** The stored document as pages. A section nested below the top level
+ * (never made by the app) is left where it is, as ordinary content. */
+export function splitDocument(doc: DraftBlock[]): SplitDocument {
+  const sections: Record<string, DraftBlock[]> = {};
+  const writing = doc.map((b) => {
+    if (b.type !== "section") return b;
+    sections[b.id] = (b.children ?? []) as DraftBlock[];
+    return linkFor(b);
+  });
+  return { writing, sections };
+}
+
+/** Pages back into the stored document. A link's own children (an editor
+ * can't give it any, but just in case) follow it at the top level rather
+ * than being lost. */
+export function joinDocument({ writing, sections }: SplitDocument): DraftBlock[] {
+  return writing.flatMap((b) => {
+    if (b.type !== "sectionLink") return [b];
+    const stray = (b.children ?? []) as DraftBlock[];
+    return [sectionFor({ ...b, children: [] } as DraftBlock, sections[b.id] ?? []), ...stray];
+  });
+}
+
+/** The section a block is in (or the block itself, if it is a section), in
+ * the stored document. A block beside a section rather than in it — before
+ * the first one, or between two — belongs to none. */
 export function nearestSectionId(document: DraftBlock[], blockId: string): string | null {
   const walk = (blocks: DraftBlock[], section: string | null): string | null | undefined => {
     for (const b of blocks) {
@@ -51,53 +115,4 @@ export function blockIdsIn(document: DraftBlock[], blockId: string): Set<string>
   };
   if (!find(document)) ids.add(blockId);
   return ids;
-}
-
-/** Moves an existing block (with whatever it has nested under it) to just
- * before/after another block, by id — the side panel's own drag-reorder
- * affordance, expressed as the same two primitives (`removeBlocks` +
- * `insertBlocks`) BlockNote's own internal `moveBlocks` command composes,
- * since the public editor API doesn't expose a move-by-id method directly. */
-export function moveBlockTo(editor: DraftEditor, dragId: string, anchorId: string, placement: "before" | "after" = "before") {
-  if (dragId === anchorId) return;
-  const block = editor.getBlock(dragId);
-  if (!block) return;
-  editor.removeBlocks([dragId]);
-  editor.insertBlocks([block], anchorId, placement);
-}
-
-/** The section a block sits in (at any depth), or null. */
-export function sectionIdOf(editor: DraftEditor, blockId: string): string | null {
-  let parent = editor.getParentBlock(blockId);
-  while (parent) {
-    if (parent.type === "section") return parent.id;
-    parent = editor.getParentBlock(parent.id);
-  }
-  return null;
-}
-
-/** Moves a block, with its children and id (so its comments follow), to
- * the start or end of a section. BlockNote opens a collapsed section when a
- * child is added, so the block stays in view. One undo step. */
-export function moveIntoSection(editor: DraftEditor, blockId: string, sectionId: string, at: "start" | "end" = "end") {
-  const block = editor.getBlock(blockId);
-  if (!block || block.type === "section" || blockId === sectionId) return;
-  editor.transact(() => {
-    editor.removeBlocks([blockId]);
-    const children = editor.getBlock(sectionId)?.children ?? [];
-    if (!children.length) editor.updateBlock(sectionId, { children: [block] });
-    else if (at === "start") editor.insertBlocks([block], children[0].id, "before");
-    else editor.insertBlocks([block], children[children.length - 1].id, "after");
-  });
-}
-
-/** Moves a block out of its section, to just after it. One undo step. */
-export function moveOutOfSection(editor: DraftEditor, blockId: string) {
-  const block = editor.getBlock(blockId);
-  const sectionId = sectionIdOf(editor, blockId);
-  if (!block || !sectionId) return;
-  editor.transact(() => {
-    editor.removeBlocks([blockId]);
-    editor.insertBlocks([block], sectionId, "after");
-  });
 }

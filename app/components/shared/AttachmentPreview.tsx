@@ -85,8 +85,9 @@ export function AttachmentList({
   onSetTranscription?: (attachmentUrl: string, transcription: AttachmentTranscription | null) => void;
 }) {
   const [lightboxIndex, setLightboxIndex] = useState<number | null>(null);
-  // Never open by default — the lightbox is for viewing, the panel is an
-  // opt-in extra reached via its own toolbar toggle (see `toolbar` below).
+  // Open with an image that has a transcript, so it is seen with the image;
+  // otherwise an opt-in extra, reached with its own toolbar toggle (see
+  // `toolbar` below).
   const [panelOpen, setPanelOpen] = useState(false);
   // TranscriptionPanel remounts (`key={active.url}`) every time you page to
   // a different image while it's docked — that's deliberate, it's a fresh
@@ -110,8 +111,9 @@ export function AttachmentList({
   const rows = shown.length > 2 ? "grid-rows-2" : "grid-rows-1";
   const active = lightboxIndex !== null ? images[lightboxIndex] : null;
 
+  const transcribed = (index: number) => !!onSetTranscription && !!images[index]?.transcription;
   const openLightbox = (index: number) => {
-    setPanelOpen(false);
+    setPanelOpen(transcribed(index));
     setLightboxIndex(index);
   };
 
@@ -158,7 +160,14 @@ export function AttachmentList({
             <Lightbox
               plugins={[Inline]}
               index={lightboxIndex}
-              on={{ view: ({ index }) => setLightboxIndex(index) }}
+              on={{
+                view: ({ index }) => {
+                  setLightboxIndex(index);
+                  // Paging to a transcribed image shows its transcript; to
+                  // one without, the panel stays as the writer left it.
+                  if (transcribed(index)) setPanelOpen(true);
+                },
+              }}
               slides={images.map((img) => ({ src: img.url, alt: img.label }))}
               carousel={{ finite: true }}
               render={images.length <= 1 ? { buttonPrev: () => null, buttonNext: () => null } : {}}

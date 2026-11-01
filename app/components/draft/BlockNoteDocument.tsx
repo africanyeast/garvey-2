@@ -23,11 +23,12 @@ import {
 import { BlockNoteView } from "@blocknote/ariakit";
 import {
   ArrowUpLeft,
+  Plus,
   CornerDownRight,
   Trash2,
   Bold,
   BookA,
-  ChevronsUpDown,
+  FileText,
   GripVertical,
   Heading1,
   Heading2,
@@ -45,6 +46,7 @@ import {
   Strikethrough,
   Text,
   Underline,
+  Wand2,
 } from "lucide-react";
 import { createContext, useContext, useEffect, useRef, useState, type ContextType } from "react";
 import { createPortal } from "react-dom";
@@ -54,9 +56,19 @@ import { MenuRow } from "@/app/components/shared/MenuRow";
 import { DropdownMenu } from "@/app/components/shared/DropdownMenu";
 import { useClickOutside } from "@/app/hooks/useClickOutside";
 import { blockPlainText } from "@/app/lib/writing-os/blockText";
-import { moveIntoSection, moveOutOfSection, sectionIdOf } from "@/app/lib/writing-os/sections";
+import { addBlockAfter, draftPageOf, fullDocumentOf, removingSections, takeBlocks } from "@/app/lib/writing-os/draftPage";
 import { draftSchema, type DraftEditor } from "@/app/lib/writing-os/schema";
 import { useWritingOS } from "@/app/lib/writing-os/context";
+import { useSectionPage } from "@/app/lib/writing-os/sectionPage";
+import type { ComposeScope } from "@/app/lib/writing-os/writingAssist";
+
+/** The draft editor's writing assist, where there is one (not in a note's
+ * editor or a version's). */
+type AssistApi = { askNextBlock?: () => void; askCompose?: (scope: ComposeScope) => void };
+const assistOf = (editor: DraftEditor) => editor.getExtension("wosWritingAssist") as AssistApi | undefined;
+/** The selected blocks Compose can take: not a section's row (a section
+ * is composed on its own page). */
+const composableIds = (editor: DraftEditor) => (editor.getSelection()?.blocks ?? []).filter((b) => b.type !== "sectionLink").map((b) => b.id);
 import { useDraftMode } from "@/app/lib/writing-os/draftMode";
 import { RefineExtension } from "@/app/lib/writing-os/refine";
 import { RefinePopover } from "@/app/components/draft/RefinePopover";
@@ -87,16 +99,18 @@ const SIDE_MENU_POSITION = {
 };
 
 /**
- * The block grip: drag it to move the block, or click it for a menu that
- * moves the block into any section or out of its own (keeping its id, so
- * comments follow), or deletes it. Dragging across nesting levels is
- * fiddly in BlockNote; the menu is the reliable way in and out.
+ * The block grip: drag it to move the block, or click it for a menu. A
+ * block moves into any section, or out of the one whose page it is on (to
+ * just after its row on the writing's page), keeping its id so comments
+ * and notes follow. A section's row adds a block below it or deletes the
+ * section (clicking the row opens it). Every block, row or not, has a "+"
+ * beside its grip that starts a new block just after it.
  */
 function DraftSideMenu() {
   const Components = useComponentsContext()!;
   const editor = useBlockNoteEditor(draftSchema);
   const sideMenu = useExtension(SideMenuExtension);
-  const { sections: withSections } = useDraftMode();
+  const withSections = useDraftMode().editor.sections;
   const block = useExtensionState(SideMenuExtension, { selector: (s) => s?.block });
   const [open, setOpen] = useState<"down" | "up" | null>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -107,16 +121,36 @@ function DraftSideMenu() {
   useClickOutside(!!open, [menuRef], close);
 
   if (!block) return null;
-  const isSection = block.type === "section";
-  const inSection = isSection || !withSections ? null : sectionIdOf(editor, block.id);
-  const sections = isSection || !withSections ? [] : editor.document.filter((b) => b.type === "section" && b.id !== inSection);
+  // The draft's own pages; a note's or a version's editor has none.
+  const draftPage = draftPageOf(editor);
+  const host = draftPage?.host;
+  const here = draftPage?.page ?? null;
+  const isSection = block.type === "sectionLink";
+  const sections = isSection || !withSections || !host ? [] : host.sectionList().filter((s) => s.id !== here);
   const act = (fn: () => void) => {
     fn();
     close();
   };
+  // Compose this block, or every block of a selection it is part of.
+  const compose = isSection ? undefined : assistOf(editor)?.askCompose;
+  const composeScope = (): ComposeScope => {
+    const selected = composableIds(editor);
+    return { kind: "blocks", ids: selected.includes(block.id) ? selected : [block.id] };
+  };
 
   return (
     <Components.SideMenu.Root className="bn-side-menu">
+      <Components.SideMenu.Button
+        label="Add a block below"
+        onClick={() => {
+          // An empty paragraph is already the place to write: into it.
+          const blank = block.type === "paragraph" && Array.isArray(block.content) && !block.content.length;
+          if (!blank) return addBlockAfter(editor, block.id);
+          editor.setTextCursorPosition(block.id, "start");
+          editor.focus();
+        }}
+        icon={<Plus size={14} strokeWidth={1.7} />}
+      />
       <div className="relative" ref={menuRef}>
         <Components.SideMenu.Button
           label="Drag to move · click for options"
@@ -137,20 +171,33 @@ function DraftSideMenu() {
         />
         {open && (
           <DropdownMenu className={`left-[0] right-auto w-[220px] max-h-[320px] overflow-y-auto ${open === "up" ? "top-auto bottom-[26px]" : "top-[26px]"}`}>
-            {inSection && <MenuRow icon={ArrowUpLeft} label="Move out of section" onClick={() => act(() => moveOutOfSection(editor, block.id))} />}
-            {sections.length > 0 && (
-              <div className="px-[8px] pt-[6px] pb-[2px] font-sans text-[11px] font-semibold text-[var(--text-muted)]">Move into section</div>
+            {isSection ? (
+              <>
+                <MenuRow icon={Plus} label="Add block below" onClick={() => act(() => addBlockAfter(editor, block.id))} />
+                <MenuRow icon={Trash2} label="Delete section" onClick={() => act(() => removingSections(editor, () => editor.removeBlocks([block.id])))} />
+              </>
+            ) : (
+              <>
+                {here && host && (
+                  <MenuRow icon={ArrowUpLeft} label="Move out of section" onClick={() => act(() => host.addAfterSection(here, takeBlocks(editor, [block.id])))} />
+                )}
+                {sections.length > 0 && (
+                  <div className="px-[8px] pt-[6px] pb-[2px] font-sans text-[11px] font-semibold text-[var(--text-muted)]">Move into section</div>
+                )}
+                {host &&
+                  sections.map((s) => (
+                    <MenuRow
+                      key={s.id}
+                      icon={CornerDownRight}
+                      label={s.title || "Untitled section"}
+                      onClick={() => act(() => host.addToSection(s.id, takeBlocks(editor, [block.id]), "end"))}
+                    />
+                  ))}
+                {(here || sections.length > 0) && <div className="h-px bg-[var(--border-default)] my-[4px]" />}
+                {compose && <MenuRow icon={Wand2} label="Compose" onClick={() => act(() => compose(composeScope()))} />}
+                <MenuRow icon={Trash2} label="Delete block" onClick={() => act(() => editor.removeBlocks([block.id]))} />
+              </>
             )}
-            {sections.map((s) => (
-              <MenuRow
-                key={s.id}
-                icon={CornerDownRight}
-                label={blockPlainText(s).trim() || "Untitled section"}
-                onClick={() => act(() => moveIntoSection(editor, block.id, s.id))}
-              />
-            ))}
-            {(inSection || sections.length > 0) && <div className="h-px bg-[var(--border-default)] my-[4px]" />}
-            <MenuRow icon={Trash2} label={isSection ? "Delete section" : "Delete block"} onClick={() => act(() => editor.removeBlocks([block.id]))} />
           </DropdownMenu>
         )}
       </div>
@@ -169,11 +216,24 @@ function DraftSideMenu() {
 function DraftSlashMenu({ findWord }: { findWord: boolean }) {
   const { activeProjectId } = useWritingOS();
   // A reply is flat prose: no sections or headings to offer.
-  const { sections: withSections } = useDraftMode();
+  const withSections = useDraftMode().editor.sections;
   const editor = useBlockNoteEditor(draftSchema);
   const popover = useContext(SuggestPopoverContext);
   // Only the draft's editor has the writing assist.
-  const assist = editor.getExtension("wosWritingAssist") as { askNextBlock?: () => void } | undefined;
+  const assist = assistOf(editor);
+  // A section is a page of the writing, made from the writing's own page
+  // (one level: not inside a section's page), and opened once made.
+  const { openSection } = useSectionPage();
+  const draftPage = draftPageOf(editor);
+  const sectionId = draftPage?.page ?? null;
+  const offerSection = withSections && !!draftPage && draftPage.page === null;
+  // Compose: a section's page composes that section; a writing without
+  // sections, or an empty one, composes the whole writing.
+  const composeScope = (): ComposeScope | null => {
+    if (sectionId) return { kind: "section", id: sectionId };
+    const empty = editor.document.every((b) => b.type !== "sectionLink" && !blockPlainText(b).trim() && !b.children.length);
+    return !withSections || empty ? { kind: "draft" } : null;
+  };
 
   return (
     <SuggestionMenuController
@@ -181,16 +241,16 @@ function DraftSlashMenu({ findWord }: { findWord: boolean }) {
       getItems={async (query) =>
         filterSuggestionItems(
           [
-            ...(withSections
+            ...(offerSection
               ? [
                   {
                     key: "section",
                     title: "Section",
-                    subtext: "A collapsible group of blocks",
-                    aliases: ["toggle", "group", "collapse", "heading"],
+                    subtext: "A page inside this writing",
+                    aliases: ["page", "group", "chapter", "heading"],
                     group: "Structure",
-                    icon: <ChevronsUpDown size={18} />,
-                    onItemClick: () => insertOrUpdateBlockForSlashMenu(editor, { type: "section" }),
+                    icon: <FileText size={18} />,
+                    onItemClick: () => openSection(insertOrUpdateBlockForSlashMenu(editor, { type: "sectionLink" }).id),
                   },
                 ]
               : []),
@@ -204,6 +264,24 @@ function DraftSlashMenu({ findWord }: { findWord: boolean }) {
                     group: "Writing assist",
                     icon: <Sparkles size={18} />,
                     onItemClick: () => assist.askNextBlock!(),
+                  },
+                ]
+              : []),
+            ...(assist?.askCompose && composeScope()
+              ? [
+                  {
+                    key: "compose",
+                    title: sectionId ? "Compose section" : "Compose",
+                    subtext: sectionId
+                      ? "Turn this section's rough notes into finished writing"
+                      : "Write the whole piece from your brief, notes and sketch",
+                    aliases: ["ai", "draft", "rewrite", "clean", "polish", "notes"],
+                    group: "Writing assist",
+                    icon: <Wand2 size={18} />,
+                    onItemClick: () => {
+                      const scope = composeScope();
+                      if (scope) assist.askCompose!(scope);
+                    },
                   },
                 ]
               : []),
@@ -409,7 +487,7 @@ function typographyKeyOf(block: { type: string; props?: Record<string, unknown> 
 
 function TypographyMenuItem() {
   const editor = useBlockNoteEditor(draftSchema);
-  const { sections: withSections } = useDraftMode();
+  const withSections = useDraftMode().editor.sections;
   const options = TYPOGRAPHY_OPTIONS.filter((o) => withSections || !o.key.startsWith("heading"));
   const [open, setOpen] = useState(false);
   const activeKey = useEditorState({
@@ -473,7 +551,7 @@ const SuggestPopoverContext = createContext<{
 } | null>(null);
 
 /**
- * Runs the `contextual-suggest` plugin and puts the outcome in the popover.
+ * Runs the writing assist's `contextual-suggest` skill and puts the outcome in the popover.
  * A selection alone asks for synonyms; an instruction ("an idiom for being
  * stuck between two bad options") asks for what the writer describes. Either
  * way the harness reads only the cursor's block, from this editor's live
@@ -488,10 +566,10 @@ async function fetchSuggestions(
 ) {
   const cursor = { block: editor.getTextCursorPosition().block.id };
   try {
-    const res = await fetch("/api/plugins/contextual-suggest", {
+    const res = await fetch("/api/plugins/writing-assist", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ ...request, projectId, cursor, document: editor.document }),
+      body: JSON.stringify({ skill: "contextual-suggest", ...request, projectId, cursor, document: fullDocumentOf(editor) }),
       signal,
     });
     if (!res.ok) throw new Error();
@@ -651,7 +729,7 @@ function SuggestPopover({
 }
 
 /**
- * "Suggest synonyms" — the `contextual-suggest` plugin's selection-triggered
+ * "Suggest synonyms" — the `contextual-suggest` skill's selection-triggered
  * variant. Just the trigger row: the fetch's result lives in
  * `SuggestPopoverContext` (see above) rather than local state, and
  * `SuggestPopoverHost` — a sibling of the toolbar, not a descendant — is what
@@ -717,6 +795,37 @@ function RefineMenuItem() {
 }
 
 /**
+ * "Compose" — for a selection across several blocks (one block's words are
+ * Refine's): the blocks it touches, rewritten as finished writing in a card
+ * under them.
+ */
+function ComposeMenuItem() {
+  const editor = useBlockNoteEditor(draftSchema);
+  const formattingToolbar = useExtension(FormattingToolbarExtension, { editor });
+  const compose = assistOf(editor)?.askCompose;
+  const acrossBlocks = useEditorState({
+    editor,
+    selector: ({ editor }) => {
+      const { $from, $to, empty } = editor.prosemirrorState.selection;
+      return !empty && !$from.sameParent($to);
+    },
+  });
+  if (!compose || !acrossBlocks) return null;
+  return (
+    <MenuRow
+      icon={Wand2}
+      label="Compose"
+      onClick={() => {
+        const ids = composableIds(editor);
+        if (!ids.length) return;
+        formattingToolbar.store.setState(false);
+        compose({ kind: "blocks", ids });
+      }}
+    />
+  );
+}
+
+/**
  * Renders the synonym popover from `SuggestPopoverContext`, as a sibling of
  * `FormattingToolbarController` rather than inside it — see the context's
  * own comment for why that placement matters.
@@ -770,6 +879,7 @@ function CommentFormattingToolbar() {
         <ColorMenuItem />
         <div className="h-px bg-[var(--border-default)] my-[4px]" />
         <RefineMenuItem />
+        <ComposeMenuItem />
         <SynonymMenuItem />
         {/* "Comment" row disabled for now — selection-anchored comments are
          * being simplified into a single block-level thread system. The

@@ -76,7 +76,8 @@ export function PluginConfig({ details, onChange }: { details: PluginDetails; on
             </Row>
           ))}
           <Row large name="Data">
-            <div>Every call: when, how long, what it was given, and what it returned.</div>
+            {details.entries.length > 0 && <div>Every call: when, how long, what it was given, and what it returned.</div>}
+            {details.entries.length === 0 && details.data.length === 0 && <div>Nothing.</div>}
             {details.data.map((d) => (
               <div key={d.what}>
                 {d.what} <span className="text-[var(--text-muted)]">— {d.where}</span>
@@ -86,7 +87,7 @@ export function PluginConfig({ details, onChange }: { details: PluginDetails; on
         </div>
       </section>
 
-      <section>
+      {details.entries.length > 0 && <section>
         <div className={`${label} mb-[4px]`}>What it is given</div>
         <div className="divide-y divide-[var(--border-default)]">
           {details.entries.map((e) => (
@@ -102,15 +103,15 @@ export function PluginConfig({ details, onChange }: { details: PluginDetails; on
             </Row>
           ))}
         </div>
-      </section>
+      </section>}
 
       <section>
         <div className={`${label} mb-[4px]`}>Settings</div>
         <div className="divide-y divide-[var(--border-default)]">
           <Row name="Status">
             <span className="inline-flex items-center gap-[10px]">
-              <Switch on={details.enabled} disabled={saving} label={`${details.name} on or off`} onChange={(enabled) => save({ enabled })} />
-              <span className="text-[var(--text-secondary)]">{details.enabled ? "On" : "Off"}</span>
+              <Switch on={details.enabled} disabled={saving || details.alwaysOn} label={`${details.name} on or off`} onChange={(enabled) => save({ enabled })} />
+              <span className="text-[var(--text-secondary)]">{details.alwaysOn ? "Always on" : details.enabled ? "On" : "Off"}</span>
             </span>
           </Row>
           {details.entries.map((e) => {
@@ -119,6 +120,9 @@ export function PluginConfig({ details, onChange }: { details: PluginDetails; on
             return (
               <Row key={e.key ?? "main"} name={e.label || "Model"}>
                 <div className="flex gap-[8px] flex-wrap items-center">
+                  {e.on !== undefined && (
+                    <Switch on={e.on && details.enabled} disabled={saving || !details.enabled} label={`${e.label} on or off`} onChange={(enabled) => save(body({ enabled }))} />
+                  )}
                   <Select value={e.settings.model} disabled={saving} onChange={(model) => save(body({ model }))}>
                     {details.models.map((m) => (
                       <option key={m} value={m}>

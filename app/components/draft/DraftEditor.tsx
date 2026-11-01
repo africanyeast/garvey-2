@@ -1,14 +1,16 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { Copy, CopyPlus, EllipsisVertical, ExternalLink, Eye, FileText, Keyboard, Pencil, Sparkles, StickyNotes, Can } from "lucide-react";
+import { ChevronRight, Copy, CopyPlus, EllipsisVertical, ExternalLink, Eye, FileText, Keyboard, Pencil, Sparkles, StickyNotes, Can, Wand2 } from "lucide-react";
+import { WritingAssistExtension } from "@/app/lib/writing-os/writingAssist";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useDraftEditor } from "@/app/lib/writing-os/editor-context";
 import { useDraftMode } from "@/app/lib/writing-os/draftMode";
-import { documentPlainText } from "@/app/lib/writing-os/blockText";
-import { xReplyIntent } from "@/app/lib/writing-os/replySource";
+import { blockPlainText, documentPlainText } from "@/app/lib/writing-os/blockText";
+import { useSectionPage } from "@/app/lib/writing-os/sectionPage";
 import { DraftDocument } from "@/app/components/draft/DraftDocument";
+import { TitleSuggest } from "@/app/components/draft/TitleSuggest";
 import { MenuRow } from "@/app/components/shared/MenuRow";
 import { DropdownMenu } from "@/app/components/shared/DropdownMenu";
 import { ConfirmDialog } from "@/app/components/shared/ConfirmDialog";
@@ -25,8 +27,9 @@ export function DraftEditor({
   onOpenBrief,
   onOpenPlugins,
   onOpenShortcuts,
-  charLimit,
-  xPostId,
+  brief,
+  typePicker,
+  suggestFor,
 }: {
   title: string;
   subtitle: string;
@@ -36,12 +39,20 @@ export function DraftEditor({
   onOpenBrief: () => void;
   onOpenPlugins: () => void;
   onOpenShortcuts: () => void;
-  /** Shows a character counter against this limit (a reply on X). */
-  charLimit?: number;
-  /** The X post a reply answers: adds "Open reply on X". */
-  xPostId?: string;
+  /** The brief, for the type's actions (a tweet's "Open reply on X"). */
+  brief: string;
+  /** A new writing's type choices, shown in place of its body until one
+   * is picked. */
+  typePicker?: ReactNode;
+  /** The writing's id, while "Suggest titles" is on for it: a "Suggest"
+   * beside the title (and a document's subtitle). */
+  suggestFor?: string;
 }) {
+  // The type's switches, counter and actions; a plain writing's while its
+  // type plugin is off.
   const mode = useDraftMode();
+  const { charLimit } = mode.editor;
+  const hasSubtitle = mode.fields.subtitle !== undefined;
   const {
     openMenu,
     toggleMenu,
@@ -57,6 +68,11 @@ export function DraftEditor({
   } = useWritingOS();
   const { editor, document: draftDoc } = useDraftEditor();
   const router = useRouter();
+  // On a section's page the header is a breadcrumb back to the writing;
+  // the section's title is the page's heading, above its text
+  // (`DraftDocument`).
+  const { sectionId, openWriting } = useSectionPage();
+  const section = sectionId ? draftDoc.find((b) => b.id === sectionId) : undefined;
 
   // Re-render every 30s so "2 min ago" keeps advancing without a refresh.
   const [, forceTick] = useState(0);
@@ -75,13 +91,15 @@ export function DraftEditor({
     setDocMode(docMode === "edit" ? "preview" : "edit");
   };
 
+  // On a section's page, that section: its title and its text.
   const copyDoc = () => {
-    navigator.clipboard.writeText(mode.copyAs === "markdown" ? editor.blocksToMarkdownLossy() : documentPlainText(editor.document));
+    const blocks = section ? [section] : draftDoc;
+    navigator.clipboard.writeText(mode.editor.copyAs === "markdown" ? editor.blocksToMarkdownLossy(blocks) : documentPlainText(blocks));
     showToast("Copied");
   };
 
   const duplicateDoc = () => {
-    if (!activeProjectSlug || !mode.duplicate) return;
+    if (!activeProjectSlug || !mode.editor.duplicate) return;
     fetch(`/api/projects/${activeProjectSlug}/duplicate`, { method: "POST" })
       .then((res) => (res.ok ? res.json() : undefined))
       .then((project: Project | undefined) => {
@@ -121,7 +139,7 @@ export function DraftEditor({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [docMode, activeProjectSlug, editor, addProjectToList, router, mode]);
+  }, [docMode, activeProjectSlug, editor, addProjectToList, router, mode, section, draftDoc]);
 
   const charCount = charLimit ? documentPlainText(draftDoc).length : 0;
 
@@ -129,31 +147,54 @@ export function DraftEditor({
     <>
       <div className="flex items-start flex-wrap justify-between gap-y-[14px] gap-x-[20px] mb-[30px]">
         <div className="flex items-start gap-[14px] min-w-[200px] flex-[1_1_260px]">
+          {section ? (
+            <nav className="min-w-[0] flex-1 flex items-center gap-[6px] pt-[4px] text-sm text-[var(--text-muted)]">
+              <button
+                onClick={openWriting}
+                title="Back to the writing"
+                className="min-w-[0] truncate bg-transparent border-none p-[0] cursor-pointer text-sm font-medium text-[var(--text-secondary)] hover:text-[var(--text-primary)]"
+              >
+                {title || "Untitled"}
+              </button>
+              <ChevronRight size={13} strokeWidth={1.8} className="shrink-0" />
+              <span className="min-w-[0] truncate">{blockPlainText(section).trim() || "Untitled section"}</span>
+            </nav>
+          ) : (
           <div className="min-w-[0] flex-1">
-            <div
-              contentEditable
-              suppressContentEditableWarning
-              data-placeholder="Untitled"
-              onBlur={(e) => onTitleChange(e.currentTarget.textContent ?? "")}
-              className="font-sans text-3xl font-semibold leading-tight w-[100%] border-none outline-none bg-transparent text-[var(--text-primary)] p-[0] mt-[0] mx-[0] mb-[6px] break-words"
-            >
-              {title}
+            <div className="group relative mb-[6px]">
+              {/* Keyed by the text so a picked suggestion, or a title the
+               * server set, replaces whatever was typed into the DOM. */}
+              <div
+                key={title}
+                contentEditable
+                suppressContentEditableWarning
+                data-placeholder="Untitled"
+                onBlur={(e) => onTitleChange(e.currentTarget.textContent ?? "")}
+                className="font-sans text-3xl font-semibold leading-tight w-[100%] border-none outline-none bg-transparent text-[var(--text-primary)] p-[0] m-[0] break-words"
+              >
+                {title}
+              </div>
+              {suggestFor && <TitleSuggest project={suggestFor} slot="title" current={title} onPick={onTitleChange} top={7} />}
             </div>
             <div className="flex items-center flex-wrap gap-x-[8px]">
-              {mode.subtitle && (
-                <div
-                  contentEditable
-                  suppressContentEditableWarning
-                  data-placeholder="Add a subtitle"
-                  onBlur={(e) => onSubtitleChange(e.currentTarget.textContent ?? "")}
-                  className="text-subtitle border-none outline-none bg-transparent p-[0] break-words"
-                >
-                  {subtitle}
-                </div>
+              {hasSubtitle && (
+                <span className="group relative min-w-[0]">
+                  <div
+                    key={subtitle}
+                    contentEditable
+                    suppressContentEditableWarning
+                    data-placeholder="Add a subtitle"
+                    onBlur={(e) => onSubtitleChange(e.currentTarget.textContent ?? "")}
+                    className="text-subtitle border-none outline-none bg-transparent p-[0] break-words"
+                  >
+                    {subtitle}
+                  </div>
+                  {suggestFor && <TitleSuggest project={suggestFor} slot="subtitle" current={subtitle} onPick={onSubtitleChange} />}
+                </span>
               )}
               {updatedAt && (
                 <>
-                  {mode.subtitle && <span className="text-[var(--text-muted)] text-sm select-none">•</span>}
+                  {hasSubtitle && <span className="text-[var(--text-muted)] text-sm select-none">•</span>}
                   <span className="text-subtitle text-xs whitespace-nowrap">
                     {formatRelativeClient(updatedAt)}
                   </span>
@@ -170,21 +211,22 @@ export function DraftEditor({
                   </span>
                 </>
               )}
-              {xPostId && (
-                <>
+              {mode.actions?.map((action) => (
+                <span key={action.id} className="contents">
                   <span className="text-[var(--text-muted)] text-sm select-none">•</span>
                   <button
-                    onClick={() => window.open(xReplyIntent(xPostId, documentPlainText(editor.document)), "_blank", "noopener")}
-                    title="Open X's reply box with this reply filled in"
+                    onClick={() => window.open(action.href({ brief, text: documentPlainText(draftDoc) }), "_blank", "noopener")}
+                    title={action.title}
                     className="inline-flex items-center gap-[4px] bg-transparent border-none p-[0] cursor-pointer text-subtitle text-xs whitespace-nowrap hover:text-[var(--text-primary)]"
                   >
-                    Open reply on X
+                    {action.label({ brief })}
                     <ExternalLink size={11} strokeWidth={1.8} />
                   </button>
-                </>
-              )}
+                </span>
+              ))}
             </div>
           </div>
+          )}
         </div>
         <div className="flex items-center gap-[12px] shrink-0 ml-[auto] relative">
           <button
@@ -222,13 +264,13 @@ export function DraftEditor({
               />
               <MenuRow
                 icon={Copy}
-                label="Copy"
+                label={section ? "Copy section" : "Copy"}
                 onClick={() => {
                   copyDoc();
                   closeMenu();
                 }}
               />
-              {mode.duplicate && (
+              {mode.editor.duplicate && (
                 <MenuRow
                   icon={CopyPlus}
                   label="Duplicate"
@@ -247,6 +289,17 @@ export function DraftEditor({
                 }}
               />
               <div className="h-px bg-[var(--border-default)] my-[4px]" />
+              {/* The page being shown: this section, or the whole writing. */}
+              {docMode === "edit" && !typePicker && (
+                <MenuRow
+                  icon={Wand2}
+                  label={section ? "Compose section" : "Compose writing"}
+                  onClick={() => {
+                    editor.getExtension(WritingAssistExtension)?.askCompose(sectionId ? { kind: "section", id: sectionId } : { kind: "draft" });
+                    closeMenu();
+                  }}
+                />
+              )}
               <MenuRow
                 icon={Sparkles}
                 label="Plugins"
@@ -268,7 +321,7 @@ export function DraftEditor({
         </div>
       </div>
 
-      <DraftDocument />
+      {typePicker ?? <DraftDocument />}
       <Toast message={toast} />
       {deleteConfirmOpen && (
         <ConfirmDialog

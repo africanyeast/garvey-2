@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOSConfig, updateOSConfig, type OSConfig, type PluginOverride } from "@/lib/vault/config";
-import { getPlugin } from "@/lib/plugins/registry";
+import { getPlugin, getTypePlugin } from "@/lib/plugins/registry";
+import type { TypeManifest } from "@/lib/plugins/writing-type";
 import { effectiveSettings } from "@/lib/plugins/settings";
 import { PLUGIN_EFFORTS, PLUGIN_MODELS, type PluginManifest } from "@/lib/plugins/types";
 
@@ -16,6 +17,8 @@ async function describe(manifest: PluginManifest) {
     context: context ?? null,
     defaults: { model: base.model, effort: base.effort },
     settings: effectiveSettings(manifest, config, key ?? undefined),
+    // A task (a skill) has its own switch, under the plugin's.
+    ...(key ? { on: !config.skills_off?.includes(`${manifest.id}/${key}`) } : {}),
   });
   return {
     id: manifest.id,
@@ -35,18 +38,51 @@ async function describe(manifest: PluginManifest) {
   };
 }
 
+/** A type plugin in the same shape: no calls, so nothing to tune. */
+async function describeType(m: TypeManifest) {
+  const config = await getOSConfig();
+  return {
+    id: m.id,
+    name: m.name,
+    description: m.description,
+    trigger: "type",
+    kind: "type",
+    permissions: m.permissions,
+    data: m.data ?? [],
+    enabled: !!m.alwaysOn || config.plugins.includes(m.id),
+    alwaysOn: !!m.alwaysOn,
+    entries: [],
+    models: [],
+    efforts: [],
+  };
+}
+
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const type = getTypePlugin(id);
+  if (type) return NextResponse.json(await describeType(type));
   const plugin = getPlugin(id);
   if (!plugin) return NextResponse.json({ error: "no such plugin" }, { status: 404 });
   return NextResponse.json(await describe(plugin.manifest));
 }
 
-/** `{ enabled }` turns it on or off. `{ task?, model?, effort? }` sets the
+/** `{ enabled }` turns it on or off, `{ task, enabled }` one of its tasks
+ * (a skill). `{ task?, model?, effort? }` sets the
  * model and/or effort for the plugin (or one of its tasks); `null` resets
  * one to the manifest's. Only differences from the manifest are stored. */
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
+  const type = getTypePlugin(id);
+  if (type) {
+    // A type plugin only turns on and off; Document never turns off.
+    const body = await req.json().catch(() => ({}));
+    if (typeof body.enabled !== "boolean") return NextResponse.json({ error: "a type plugin only turns on or off" }, { status: 400 });
+    if (type.alwaysOn && !body.enabled) return NextResponse.json({ error: `${type.name} is always on` }, { status: 400 });
+    const config = await getOSConfig();
+    const plugins = body.enabled ? [...new Set([...config.plugins, id])] : config.plugins.filter((p) => p !== id);
+    if (!type.alwaysOn) await updateOSConfig({ plugins });
+    return NextResponse.json(await describeType(type));
+  }
   const plugin = getPlugin(id);
   if (!plugin) return NextResponse.json({ error: "no such plugin" }, { status: 404 });
   const { manifest } = plugin;
@@ -54,11 +90,17 @@ export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id
   const config = await getOSConfig();
   const patch: Partial<OSConfig> = {};
 
-  if (typeof body.enabled === "boolean") {
+  if (typeof body.enabled === "boolean" && typeof body.task === "string") {
+    // One task's (a skill's) own switch.
+    if (!manifest.tasks?.[body.task]) return NextResponse.json({ error: "task does not match this plugin" }, { status: 400 });
+    const key = `${id}/${body.task}`;
+    const off = (config.skills_off ?? []).filter((k) => k !== key);
+    patch.skills_off = body.enabled ? (off.length ? off : undefined) : [...off, key];
+  } else if (typeof body.enabled === "boolean") {
     patch.plugins = body.enabled ? [...new Set([...config.plugins, id])] : config.plugins.filter((p) => p !== id);
   }
 
-  if ("model" in body || "effort" in body) {
+  if (("model" in body || "effort" in body) && !("enabled" in body)) {
     const task: string | undefined = typeof body.task === "string" ? body.task : undefined;
     if (manifest.tasks ? !task || !manifest.tasks[task] : task !== undefined) {
       return NextResponse.json({ error: "task does not match this plugin" }, { status: 400 });

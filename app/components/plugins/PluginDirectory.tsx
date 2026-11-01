@@ -11,6 +11,7 @@ export interface DirectoryEntry {
   name: string;
   description: string;
   enabled: boolean;
+  alwaysOn: boolean;
   calls: number;
   lastAt: string | null;
 }
@@ -63,7 +64,7 @@ export function PluginDirectory({ initial }: { initial: DirectoryEntry[] }) {
             >
               <div className="flex items-center gap-[12px]">
                 <span className="flex-1 min-w-0 text-[15px] font-semibold text-[var(--text-primary)] truncate">{p.name}</span>
-                <Switch on={p.enabled} label={`${p.name} on or off`} onChange={(next) => toggle(p.id, next)} />
+                <Switch on={p.enabled} disabled={p.alwaysOn} label={p.alwaysOn ? `${p.name} is always on` : `${p.name} on or off`} onChange={(next) => toggle(p.id, next)} />
               </div>
               <div className="text-[13px] leading-[1.45] text-[var(--text-secondary)] line-clamp-2 min-h-[2.9em]">{p.description}</div>
               <div className="text-xs text-[var(--text-muted)] tabular-nums">

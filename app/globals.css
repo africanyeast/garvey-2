@@ -179,6 +179,27 @@ input {
 }
 
 /* Writing OS interaction helpers */
+
+/* One row for every list of places and things: the sidebar's rows and a
+   new writing's types. Quiet until hovered; the current one keeps the
+   hover's background. Icons take the text's colour. */
+.wos-list-row {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  color: var(--text-secondary);
+  background-color: transparent;
+  border: none;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background-color 120ms ease-out, color 120ms ease-out;
+}
+.wos-list-row:hover,
+.wos-list-row[aria-current="page"] {
+  color: var(--text-primary);
+  background-color: var(--surface-hover);
+}
+
 .wos-row .wos-reveal {
   opacity: 0;
   transition: opacity 130ms ease-out;
@@ -193,59 +214,105 @@ input {
 .wos-dragging {
   opacity: 0.4;
 }
-/* A section's title (the `section` custom block, `writing-os/blocks/
-   section.ts`): organisation that stays out of the writing's way. Small,
-   muted sans, as typed, with a little more room above than a paragraph
-   break. The room is margin on the outer row, not padding, so the grip
-   still centres on the title's line. */
-.bn-block-outer:has(> .bn-block > .bn-block-content[data-content-type="section"]) {
-  margin-top: 18px;
-}
-.bn-editor > .bn-block-group > .bn-block-outer:first-child {
-  margin-top: 0;
-}
+/* A section in Preview (the stored `section` block, `writing-os/blocks/
+   section.ts`): a small, muted label over its text. */
 .wos-section-label {
   font-family: var(--font-sans);
   font-size: 12.5px;
   font-weight: 600;
   letter-spacing: 0.01em;
   color: var(--text-muted);
-  opacity: 0.7;
-  transition: opacity 150ms ease-out;
 }
-.bn-block-outer:hover > .bn-block > .bn-block-content .wos-section-label,
-.wos-section-drop > .bn-block > .bn-block-content .wos-section-label {
-  opacity: 1;
+.wos-section-label :is(strong, b) {
+  font-weight: inherit;
 }
-/* Holding a dragged block over a section's title: drop lands inside it. */
-.wos-section-drop > .bn-block > .bn-block-content[data-content-type="section"] {
-  background: var(--fill-highlight-subtle);
-  border-radius: var(--radius-xs, 4px);
-  transition: background 120ms ease-out;
+
+/* Section pages (artifacts/SECTION_PAGES_SPEC.md). On the writing's page
+   each section is a link row (`blocks/sectionLink.ts`): page icon and
+   title. Clicking it opens the section's page. */
+.bn-block-outer:has(> .bn-block > .bn-block-content[data-content-type="sectionLink"]) {
+  margin-top: 18px;
+}
+.bn-editor > .bn-block-group > .bn-block-outer:first-child {
+  margin-top: 0;
+}
+/* Rows in a run sit together, like a list of pages. */
+.bn-block-outer:has(> .bn-block > .bn-block-content[data-content-type="sectionLink"]) + .bn-block-outer:has(> .bn-block > .bn-block-content[data-content-type="sectionLink"]) {
+  margin-top: 2px;
+}
+.bn-block-content[data-content-type="sectionLink"] {
+  cursor: pointer;
+  user-select: none;
+  border-radius: 6px;
+  padding-top: 5px;
+  padding-bottom: 5px;
+  transition: background-color 120ms ease-out;
+}
+.bn-block-content[data-content-type="sectionLink"]:hover {
+  background: var(--surface-hover);
+}
+/* Selected (Backspace from the block below, or arrowed onto). */
+.ProseMirror-selectednode > .wos-section-link,
+.bn-block-content[data-content-type="sectionLink"].ProseMirror-selectednode {
+  background: var(--surface-hover);
+}
+.wos-section-link {
+  display: flex;
+  align-items: center;
+  min-width: 0;
+}
+.wos-section-link-icon {
+  display: flex;
+  flex-shrink: 0;
+  margin: 0 10px 0 4px;
+  color: var(--text-muted);
+}
+/* Lines on the page when the section has text; a blank page when it has
+   none (`wos-section-empty`, from `draftPage.ts`), a shade quieter. */
+.wos-section-link-icon .wos-section-icon-empty,
+.wos-section-empty .wos-section-link-icon .wos-section-icon-full {
+  display: none;
+}
+.wos-section-empty .wos-section-link-icon .wos-section-icon-empty {
+  display: block;
+}
+.wos-section-empty .wos-section-link-icon {
+  opacity: 0.6;
+}
+.wos-section-link-title {
+  min-width: 0;
+  font-family: var(--font-sans);
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  text-decoration: underline;
+  text-decoration-color: var(--border-default);
+  text-underline-offset: 4px;
+}
+.wos-section-link-title[data-untitled] {
+  color: var(--text-muted);
+}
+/* Holding a dragged block over a section's row: the drop goes into it. */
+.wos-section-drop > .bn-block > .bn-block-content[data-content-type="sectionLink"] {
+  background: var(--surface-hover);
 }
 /* ...and BlockNote's between-blocks drop line hides, since it would point
    somewhere else. */
 body:has(.wos-section-drop) .prosemirror-dropcursor-block {
   display: none;
 }
-/* BlockNote's "Empty toggle. Click to add a block." under an open, empty
-   section: keep it, but as quiet as the title. */
-.bn-block-content[data-content-type="section"] .bn-toggle-add-block-button {
+/* A section's page: its title, at the writing title's scale, above an
+   editor holding only the section's text (`DraftDocument`). */
+.wos-section-title {
   font-family: var(--font-sans);
-  font-size: 12px;
-  color: var(--text-muted);
-  opacity: 0.5;
-}
-/* BlockNote's own toggle chevron defaults to a 18px icon sized for a
-   heading-sized toggle — shrink it and mute its color to match the
-   section label's own small/quiet treatment instead. */
-.bn-block-content[data-content-type="section"] .bn-toggle-button {
-  padding: 2px;
-  color: var(--text-muted);
-}
-.bn-block-content[data-content-type="section"] .bn-toggle-button > svg {
-  width: 12px;
-  height: 12px;
+  font-size: 30px;
+  font-weight: 600;
+  line-height: 1.25;
+  letter-spacing: -0.01em;
+  color: var(--text-primary);
+  outline: none;
+  padding-bottom: 18px;
+  overflow-wrap: anywhere;
 }
 
 /* BlockNote editor — inherit the app's own type/color instead of its
@@ -336,10 +403,8 @@ body:has(.wos-section-drop) .prosemirror-dropcursor-block {
 }
 /* BlockNote's own side menu (drag handle + "+") is a fixed 30px-tall
    horizontal strip by default (`.bn-side-menu{height:30px;display:flex}`,
-   no flex-direction — built for exactly two icons side by side). The
-   original design stacks those two vertically in a narrow left column
-   instead — match that here rather than fighting the library's default
-   sizing assumptions block by block. BlockNote positions this menu flush
+   no flex-direction — built for exactly two icons side by side), which
+   is how "+" and the grip sit here too. BlockNote positions this menu flush
    with the top of the hovered block, so it also needs to track the
    `.bn-block-content` top padding above (doubled from BlockNote's own 3px
    default to this app's 6px) — without a matching margin here, the drag
@@ -348,8 +413,10 @@ body:has(.wos-section-drop) .prosemirror-dropcursor-block {
    13px icon needs its own top offset on top of the padding match, so the
    number here is measured against the rendered icon/text position rather
    than derived from the padding diff alone. */
+/* "+" and the grip sit side by side, on the block's first line. */
 .bn-side-menu {
-  flex-direction: column;
+  flex-direction: row;
+  align-items: center;
   height: auto;
   gap: 2px;
 }
@@ -556,4 +623,11 @@ body:has(.wos-section-drop) .prosemirror-dropcursor-block {
   border-radius: 2px;
   white-space: pre-wrap;
   pointer-events: none;
+}
+
+/* What an open Compose card would replace: muted, so the writer sees the
+   card's reach (`writingAssist.ts`). */
+.wos-compose-scope > .bn-block > .bn-block-content {
+  opacity: 0.45;
+  transition: opacity 150ms ease-out;
 }

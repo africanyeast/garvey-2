@@ -1,17 +1,19 @@
 import { describe, expect, test } from "bun:test";
 import { effectiveSettings } from "./settings";
-import { manifest as continueWriting } from "./continue-writing/manifest";
+import { writingAssistPlugin } from "./writing-assist";
 import { manifest as ocr } from "./ocr/manifest";
+
+const assist = writingAssistPlugin.manifest;
 
 describe("effective plugin settings", () => {
   test("no override: the manifest's own", () => {
     expect(effectiveSettings(ocr, {})).toEqual({ model: "claude-sonnet-5", effort: "low", thinking: false });
-    expect(effectiveSettings(continueWriting, {}, "next-block").model).toBe("claude-sonnet-5");
+    expect(effectiveSettings(assist, {}, "next-block").model).toBe("claude-sonnet-5");
   });
   test("a task's override applies to that task only", () => {
-    const config = { plugin_settings: { "continue-writing": { tasks: { "next-block": { model: "claude-sonnet-5", effort: "medium" } } } } };
-    expect(effectiveSettings(continueWriting, config, "next-block")).toMatchObject({ model: "claude-sonnet-5", effort: "medium" });
-    expect(effectiveSettings(continueWriting, config, "alternate")).toMatchObject({ model: "claude-sonnet-5", effort: "low" });
+    const config = { plugin_settings: { "writing-assist": { tasks: { "next-block": { model: "claude-sonnet-5", effort: "medium" } } } } };
+    expect(effectiveSettings(assist, config, "next-block")).toMatchObject({ model: "claude-sonnet-5", effort: "medium" });
+    expect(effectiveSettings(assist, config, "alternate")).toMatchObject({ model: "claude-sonnet-5", effort: "low" });
   });
   test("a plugin without tasks takes its top-level override", () => {
     expect(effectiveSettings(ocr, { plugin_settings: { ocr: { model: "claude-haiku-4-5" } } }).model).toBe("claude-haiku-4-5");

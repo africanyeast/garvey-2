@@ -5,7 +5,6 @@ import { useCreateBlockNote } from "@blocknote/react";
 import type { Attachment, AttachmentTranscription } from "@/app/lib/writing-os/types";
 import type { MentionTarget, ResolvedTag } from "@/app/lib/writing-os/mentions";
 import { AttachmentList } from "@/app/components/shared/AttachmentPreview";
-import { CheckSquare } from "@/app/components/shared/CheckSquare";
 import { NoteTag } from "@/app/components/shared/NoteTag";
 import { NoteMoreMenu } from "@/app/components/shared/NoteMoreMenu";
 import { TagPicker } from "@/app/components/shared/TagPicker";
@@ -41,8 +40,8 @@ interface NoteDetailProps {
 
 /**
  * The full, editable counterpart to NoteRow — same idea, same layout order
- * (resolve toggle, text, attachments, then tag and time together at the
- * bottom), so the two read as the same design rather than two different
+ * (text, attachments, then tags and time together at the bottom). Closing
+ * it is in its ⋮ menu rather than a check box., so the two read as the same design rather than two different
  * ones. Just roomier: the text is edited in place and grows with its
  * content — no fixed height or internal scrollbar — same as a block in the
  * main document, and nothing is truncated.
@@ -89,16 +88,9 @@ export function NoteDetail({
     <div
       className="wos-row relative w-full"
     >
-      <NoteMoreMenu onDelete={onDelete} reveal={false} className="absolute top-[12px] right-[0]" />
-      <div className="flex items-start gap-[12px] pr-[24px]">
-        <CheckSquare
-          checked={resolved}
-          onToggle={onToggleResolved}
-          title={resolved ? "Mark unresolved" : "Resolve"}
-          size="md"
-          className="mt-[3px]"
-        />
-        <div className="min-w-0 flex-1">
+      <NoteMoreMenu onDelete={onDelete} resolved={resolved} onToggleResolved={onToggleResolved} reveal={false} className="absolute top-[12px] right-[0]" />
+      <div className="pr-[24px]">
+        <div className="min-w-0">
           {/* No `wos-version-editor` here — that class zeroes block-padding
            * for `BlockVersionEditor`'s single-block mini-editors (so their
            * drag grip aligns with the text), which is wrong for a note: a

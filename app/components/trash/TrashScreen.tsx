@@ -68,7 +68,6 @@ export function TrashScreen() {
               <div key={project.id} className="flex items-center gap-[10px] py-[13px]">
                 <Can size={15} className="shrink-0 text-[var(--text-muted)]" />
                 <span className="text-[13px] font-semibold text-[var(--text-primary)] flex-1 truncate">{project.title}</span>
-                {project.kind === "reply" && <span className="text-xs font-medium text-[var(--text-muted)] shrink-0">Reply</span>}
                 {project.trashedAt && <span className="text-xs font-medium text-[var(--text-muted)] shrink-0">{formatDate(project.trashedAt)}</span>}
                 <button
                   onClick={() => restoreProject(project)}

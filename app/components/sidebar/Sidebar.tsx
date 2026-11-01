@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { EllipsisVertical, FileText, Inbox, Plus, Reply, Search, Can, GripVertical, Sparkles, UserPen } from "lucide-react";
+import { EllipsisVertical, Inbox, Plus, Search, Can, GripVertical, Sparkles, UserPen } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -19,8 +19,9 @@ import {
   arrayMove,
 } from "@dnd-kit/sortable";
 import { CSS } from "@dnd-kit/utilities";
-import type { Project, ProjectKind } from "@/app/lib/writing-os/types";
+import type { Project } from "@/app/lib/writing-os/types";
 import { projectDisplayTitle } from "@/app/lib/writing-os/types";
+import { TYPE_PLUGINS } from "@/lib/plugins/writing-types";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { RowIconButton } from "@/app/components/shared/RowIconButton";
 import { DropdownMenu } from "@/app/components/shared/DropdownMenu";
@@ -32,8 +33,7 @@ export function Sidebar() {
   const pathname = usePathname();
   const router = useRouter();
   const {
-    projectsList: projects,
-    repliesList: replies,
+    projectsList,
     addProjectToList,
     removeProjectFromList,
     reorderProjectsInList,
@@ -42,15 +42,42 @@ export function Sidebar() {
   const [confirmProject, setConfirmProject] = useState<Project | null>(null);
   const [searchOpen, setSearchOpen] = useState(false);
 
+  // A new blank writing, opened. Its type is picked on its page.
+  const creating = useRef(false);
+  const createProject = async () => {
+    if (creating.current) return;
+    creating.current = true;
+    try {
+      const res = await fetch("/api/projects", { method: "POST" });
+      if (!res.ok) return;
+      const project: Project = await res.json();
+      addProjectToList(project);
+      router.push(`/${project.slug}`);
+    } finally {
+      creating.current = false;
+    }
+  };
+  const latest = useRef(createProject);
+  useEffect(() => {
+    latest.current = createProject;
+  });
+
+  // ⌘K / ⌃K search. ⌃N a new writing, from anywhere, the editor included
+  // (⌘N never reaches the page: the browser keeps it).
   useEffect(() => {
     const onKeyDown = (e: KeyboardEvent) => {
-      if ((e.metaKey || e.ctrlKey) && e.key.toLowerCase() === "k") {
+      const key = e.key.toLowerCase();
+      if ((e.metaKey || e.ctrlKey) && key === "k") {
         e.preventDefault();
         setSearchOpen(true);
+      } else if (e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && key === "n") {
+        e.preventDefault();
+        e.stopPropagation();
+        void latest.current();
       }
     };
-    window.addEventListener("keydown", onKeyDown);
-    return () => window.removeEventListener("keydown", onKeyDown);
+    window.addEventListener("keydown", onKeyDown, { capture: true });
+    return () => window.removeEventListener("keydown", onKeyDown, { capture: true });
   }, []);
   const sensors = useSensors(useSensor(PointerSensor, { activationConstraint: { distance: 4 } }));
   // A drag that actually moved the item ends in a native "click" on the
@@ -61,11 +88,11 @@ export function Sidebar() {
   const handleDragEnd = (e: DragEndEvent) => {
     const { active, over } = e;
     if (!over || active.id === over.id) return;
-    const oldIndex = projects.findIndex((p) => p.slug === active.id);
-    const newIndex = projects.findIndex((p) => p.slug === over.id);
+    const oldIndex = projectsList.findIndex((p) => p.slug === active.id);
+    const newIndex = projectsList.findIndex((p) => p.slug === over.id);
     if (oldIndex === -1 || newIndex === -1) return;
     justDraggedSlug.current = active.id as string;
-    reorderProjectsInList(arrayMove(projects, oldIndex, newIndex).map((p) => p.slug));
+    reorderProjectsInList(arrayMove(projectsList, oldIndex, newIndex).map((p) => p.slug));
   };
 
   const isInbox = pathname === "/inbox" || pathname === "/";
@@ -75,17 +102,25 @@ export function Sidebar() {
   const activeSlug =
     !isInbox && !isStyle && !isTrash && !isInspector ? pathname?.split("/").filter(Boolean)[0] : null;
 
-  const createProject = async (kind: ProjectKind) => {
-    const res = await fetch("/api/projects", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ kind }),
-    });
-    if (!res.ok) return;
-    const project: Project = await res.json();
-    addProjectToList(project);
-    router.push(`/${project.slug}`);
-  };
+  const row = (project: Project) => (
+    <SortableProjectRow
+      key={project.slug}
+      project={project}
+      active={activeSlug === project.slug}
+      menuOpen={menuOpenSlug === project.slug}
+      onToggleMenu={() => setMenuOpenSlug(menuOpenSlug === project.slug ? null : project.slug)}
+      onDelete={() => {
+        setMenuOpenSlug(null);
+        setConfirmProject(project);
+      }}
+      onClickCapture={(e) => {
+        if (justDraggedSlug.current === project.slug) {
+          e.preventDefault();
+          justDraggedSlug.current = null;
+        }
+      }}
+    />
+  );
 
   const deleteProject = async (project: Project) => {
     const res = await fetch(`/api/projects/${project.slug}`, { method: "DELETE" });
@@ -96,7 +131,8 @@ export function Sidebar() {
 
   return (
     // Full height: the top (name, Inbox, Search, Plugins) and the bottom
-    // (Style, Trash) stay put; only Projects and Replies scroll between them.
+    // (Style, Trash) stay put, with no rule between; only the Writing list
+    // scrolls between them.
     <div className="w-[252px] h-full shrink-0 bg-neutral-0 border-r border-[var(--border-default)] flex flex-col relative">
       {menuOpenSlug && <div className="fixed inset-0 z-[9]" onClick={() => setMenuOpenSlug(null)} />}
       <div className="shrink-0 flex flex-col gap-[22px] pt-[20px] px-[14px] pb-[22px]">
@@ -109,117 +145,62 @@ export function Sidebar() {
         <div className="flex flex-col gap-[2px]">
           <Link
             href="/inbox"
-            className={`flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer ${isInbox ? "border border-[var(--border-default)]" : "bg-transparent"}`}
+            aria-current={isInbox ? "page" : undefined}
+            className="wos-list-row py-[9px] px-[10px] rounded-sm"
           >
-            <Inbox size={17} className="text-[var(--text-secondary)]" />
-            <span className={`text-[12px] font-semibold text-[var(--text-secondary)] flex-1`}>Inbox</span>
+            <Inbox size={17} />
+            <span className="text-[12px] font-semibold flex-1">Inbox</span>
           </Link>
 
           <button
             onClick={() => setSearchOpen(true)}
-            className="flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer bg-transparent border-none text-left"
+            className="wos-list-row py-[9px] px-[10px] rounded-sm text-left"
           >
-            <Search size={17} className="text-[var(--text-secondary)]" />
-            <span className="text-[12px] font-semibold text-[var(--text-secondary)] flex-1">Search</span>
+            <Search size={17} />
+            <span className="text-[12px] font-semibold flex-1">Search</span>
           </button>
           <Link
             href="/plugins"
-            className={`flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer ${isInspector ? "border border-[var(--border-default)]" : "bg-transparent"}`}
+            aria-current={isInspector ? "page" : undefined}
+            className="wos-list-row py-[9px] px-[10px] rounded-sm"
           >
-            <Sparkles size={16} className="text-[var(--text-secondary)]" />
-            <span className={`text-[12px] font-semibold text-[var(--text-secondary)]`}>Plugins</span>
+            <Sparkles size={16} />
+            <span className="text-[12px] font-semibold">Plugins</span>
           </Link>
         </div>
       </div>
 
-      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain flex flex-col gap-[22px] px-[14px] pb-[14px]">
-        <div className="flex flex-col gap-[2px]">
-          <div className={`text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] px-[10px] mb-[6px]`}>
-            Projects
-          </div>
-
-          <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
-            <SortableContext items={projects.map((p) => p.slug)} strategy={verticalListSortingStrategy}>
-              {projects.map((project) => (
-                <SortableProjectRow
-                  key={project.slug}
-                  project={project}
-                  active={activeSlug === project.slug}
-                  menuOpen={menuOpenSlug === project.slug}
-                  onToggleMenu={() => setMenuOpenSlug(menuOpenSlug === project.slug ? null : project.slug)}
-                  onDelete={() => {
-                    setMenuOpenSlug(null);
-                    setConfirmProject(project);
-                  }}
-                  onClickCapture={(e) => {
-                    if (justDraggedSlug.current === project.slug) {
-                      e.preventDefault();
-                      justDraggedSlug.current = null;
-                    }
-                  }}
-                />
-              ))}
-            </SortableContext>
-          </DndContext>
-
-          <button
-            onClick={() => createProject("project")}
-            className="flex items-center gap-[8px] py-[9px] px-[10px] mt-[4px] cursor-pointer text-[var(--text-muted)] bg-transparent border-none text-left"
-          >
-            <Plus size={15} strokeWidth={1.8} />
-            <span className={"text-xs font-semibold"}>New Project</span>
-          </button>
+      <div className="flex-1 min-h-0 overflow-y-auto overscroll-contain flex flex-col gap-[2px] px-[14px] pb-[14px]">
+        <div className="flex items-center px-[10px] mb-[6px]">
+          <span className="flex-1 text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)]">Writing</span>
+          <RowIconButton icon={<Plus size={15} strokeWidth={1.8} />} label="New writing (⌃N)" onClick={() => void createProject()} />
         </div>
 
-        {/* Replies: newest first, never dragged, otherwise rows like projects'. */}
-        <div className="flex flex-col gap-[2px]">
-          <div className={`text-[10px] font-semibold uppercase tracking-[0.08em] text-[var(--text-muted)] px-[10px] mb-[6px]`}>
-            Replies
-          </div>
+        <DndContext sensors={sensors} collisionDetection={closestCenter} onDragEnd={handleDragEnd}>
+          <SortableContext items={projectsList.map((p) => p.slug)} strategy={verticalListSortingStrategy}>
+            {/* Every writing in one list, each row marked by its type's icon. */}
+            {projectsList.map(row)}
+          </SortableContext>
+        </DndContext>
 
-          <DndContext>
-            <SortableContext items={replies.map((p) => p.slug)}>
-              {replies.map((reply) => (
-                <SortableProjectRow
-                  key={reply.slug}
-                  project={reply}
-                  sortable={false}
-                  active={activeSlug === reply.slug}
-                  menuOpen={menuOpenSlug === reply.slug}
-                  onToggleMenu={() => setMenuOpenSlug(menuOpenSlug === reply.slug ? null : reply.slug)}
-                  onDelete={() => {
-                    setMenuOpenSlug(null);
-                    setConfirmProject(reply);
-                  }}
-                />
-              ))}
-            </SortableContext>
-          </DndContext>
-
-          <button
-            onClick={() => createProject("reply")}
-            className="flex items-center gap-[8px] py-[9px] px-[10px] mt-[4px] cursor-pointer text-[var(--text-muted)] bg-transparent border-none text-left"
-          >
-            <Plus size={15} strokeWidth={1.8} />
-            <span className={"text-xs font-semibold"}>New Reply</span>
-          </button>
-        </div>
       </div>
 
-      <div className="shrink-0 flex flex-col gap-[2px] border-t border-[var(--border-default)] pt-[14px] pb-[20px] px-[14px]">
+      <div className="shrink-0 flex flex-col gap-[2px] pt-[14px] pb-[20px] px-[14px]">
         <Link
           href="/style"
-          className={`flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer ${isStyle ? "border border-[var(--border-default)]" : "bg-transparent"}`}
+          aria-current={isStyle ? "page" : undefined}
+          className="wos-list-row py-[9px] px-[10px] rounded-sm"
         >
-          <UserPen size={16} className="text-[var(--text-secondary)]" />
-          <span className={`text-[12px] font-semibold text-[var(--text-secondary)]`}>Style</span>
+          <UserPen size={16} />
+          <span className="text-[12px] font-semibold">Style</span>
         </Link>
         <Link
           href="/trash"
-          className={`flex items-center gap-[10px] py-[9px] px-[10px] rounded-sm cursor-pointer ${isTrash ? "border border-[var(--border-default)]" : "bg-transparent"}`}
+          aria-current={isTrash ? "page" : undefined}
+          className="wos-list-row py-[9px] px-[10px] rounded-sm"
         >
-          <Can size={16} className="text-[var(--text-secondary)]" />
-          <span className={`text-[12px] font-semibold text-[var(--text-secondary)]`}>Trash</span>
+          <Can size={16} />
+          <span className="text-[12px] font-semibold">Trash</span>
         </Link>
       </div>
 
@@ -243,7 +224,6 @@ export function Sidebar() {
 
 function SortableProjectRow({
   project,
-  sortable = true,
   active,
   menuOpen,
   onToggleMenu,
@@ -251,8 +231,6 @@ function SortableProjectRow({
   onClickCapture,
 }: {
   project: Project;
-  /** Off for a reply: replies keep newest-first, with no grip. */
-  sortable?: boolean;
   active: boolean;
   menuOpen: boolean;
   onToggleMenu: () => void;
@@ -261,35 +239,38 @@ function SortableProjectRow({
 }) {
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: project.slug,
-    disabled: !sortable,
   });
-  const Icon = project.kind === "reply" ? Reply : FileText;
+  // Its type's icon, whether or not that plugin is on: it keeps its type.
+  const Icon = TYPE_PLUGINS[project.type ?? "document"].type.icon;
 
   return (
     <Link
       ref={setNodeRef}
-      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1 }}
+      style={{ transform: CSS.Transform.toString(transform), transition, opacity: isDragging ? 0.5 : 1, gap: 7 }}
       href={`/${project.slug}`}
       onClickCapture={onClickCapture}
-      className={`wos-row group relative flex items-center gap-[10px] py-[9px] pr-[8px] pl-[10px] rounded-sm cursor-pointer ${active ? "border border-[var(--border-default)]" : "bg-transparent"}`}
+      aria-current={active ? "page" : undefined}
+      className="wos-row wos-list-row group relative py-[9px] pr-[8px] pl-[10px] rounded-sm"
     >
-      {sortable && (
-        <span
-          {...attributes}
-          {...listeners}
-          className={`absolute left-[-3px] top-1/2 -translate-y-1/2 cursor-grab text-[var(--text-muted)] touch-none ${isDragging ? "" : "opacity-0 group-hover:opacity-100"}`}
-          onClick={(e) => e.preventDefault()}
-        >
-          <GripVertical size={13} strokeWidth={1.8} />
-        </span>
-      )}
-      <Icon size={17} className="shrink-0 text-[var(--text-secondary)]" />
-      <span className="text-xs font-medium flex-1 overflow-hidden text-ellipsis whitespace-nowrap text-[var(--text-primary)]">
+      <span
+        {...attributes}
+        {...listeners}
+        className={`absolute left-[-3px] top-1/2 -translate-y-1/2 cursor-grab text-[var(--text-muted)] touch-none ${isDragging ? "" : "opacity-0 group-hover:opacity-100"}`}
+        onClick={(e) => e.preventDefault()}
+      >
+        <GripVertical size={13} strokeWidth={1.8} />
+      </span>
+      {/* Small, light and muted, one stroke for every type, and close to
+       * its title (the row's gap is set inline above). */}
+      <span className="w-[15px] shrink-0 flex justify-center text-[var(--text-muted)]">
+        <Icon size={15} strokeWidth={1.6} absoluteStrokeWidth />
+      </span>
+      <span className="text-xs font-medium flex-1 overflow-hidden text-ellipsis whitespace-nowrap">
         {projectDisplayTitle(project)}
       </span>
       <RowIconButton
         icon={<EllipsisVertical size={13} strokeWidth={1.8} />}
-        label={project.kind === "reply" ? "Reply options" : "Project options"}
+        label="Writing options"
         onClick={(e) => {
           e.preventDefault();
           e.stopPropagation();

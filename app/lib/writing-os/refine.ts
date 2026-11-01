@@ -3,6 +3,8 @@ import { Plugin, PluginKey, type EditorState } from "prosemirror-state";
 import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
 import type { BlockNoteEditor } from "@blocknote/core";
 import { reportOutcome } from "./writingAssist";
+import { fullDocumentOf } from "./draftPage";
+import type { DraftEditor } from "./schema";
 
 /**
  * Refine (the `refine` plugin): the words the writer selected inside one
@@ -120,7 +122,8 @@ export const RefineExtension = createExtension(
       const block = editor.getTextCursorPosition().block;
       const found = place(block.id);
       if (!found) return false;
-      const at = { ...found, document: found.document ?? editor.document };
+      // The whole writing, every page of it, not just the editor's own.
+      const at = { ...found, document: found.document ?? fullDocumentOf(editor as unknown as DraftEditor) };
       close();
       const parent = $from.parent;
       const text = (a: number, b: number) => parent.textBetween(a, b, "\n", "￼");
@@ -153,10 +156,11 @@ export const RefineExtension = createExtension(
       const note = instruction.trim() || undefined;
       const base: Refining = { ...prev, instruction: note, rejected, text: "", runId: undefined, error: undefined };
       set({ ...base, status: "loading" });
-      fetch("/api/plugins/refine", {
+      fetch("/api/plugins/writing-assist", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({
+          skill: "refine",
           cursor: { thing: prev.place.thing, block: prev.place.block },
           document: prev.place.document,
           selection: prev.selection,

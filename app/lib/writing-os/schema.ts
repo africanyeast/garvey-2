@@ -1,12 +1,14 @@
 import { BlockNoteSchema, defaultBlockSpecs } from "@blocknote/core";
 import { createSectionBlockSpec } from "./blocks/section";
+import { createSectionLinkBlockSpec } from "./blocks/sectionLink";
 
 /**
  * The block types available in the draft editor: paragraphs, headings, the
  * three list types, `quote` (the Telegraph-style italic serif blockquote —
  * styled in globals.css), `table`, `codeBlock`, and `section` — the app's
- * own custom block (see `blocks/section.ts`) used for the document's
- * top-level, collapsible grouping. Deliberately excludes images/files/audio/
+ * own custom block (see `blocks/section.ts`): a section as stored, title and
+ * text together — and `sectionLink`, the row a section shows as on the
+ * writing's page (`blocks/sectionLink.ts`). Deliberately excludes images/files/audio/
  * video blocks for this pass — a stated scope boundary, not an oversight;
  * widen by adding more entries from `defaultBlockSpecs` when that's
  * actually needed.
@@ -23,6 +25,7 @@ export const draftSchema = BlockNoteSchema.create({
     table: defaultBlockSpecs.table,
     codeBlock: defaultBlockSpecs.codeBlock,
     section: createSectionBlockSpec(),
+    sectionLink: createSectionLinkBlockSpec(),
   },
 });
 

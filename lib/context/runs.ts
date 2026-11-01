@@ -3,6 +3,7 @@ import path from "node:path";
 import { decodeTime } from "ulid";
 import { newId } from "@/lib/store/id";
 import type { ContextManifest, ManifestEntry } from "./resolve";
+import { currentRunId } from "@/lib/plugins/writing-assist/switches";
 
 // Every plugin's history: for each call, one uniform record — its input (what
 // it was asked, and which things it was given), its output (what it
@@ -120,7 +121,8 @@ function packContext(c: ContextManifest | null) {
   if (!c) return 0;
   return {
     cu: c.cursor,
-    ...(c.thingKind === "reply" ? { tk: "reply" as const } : {}),
+    ...(c.writingType ? { wt: c.writingType } : {}),
+    ...(c.typeOff ? { to: 1 as const } : {}),
     src: c.documentSource,
     sec: c.section,
     w: c.where,
@@ -139,7 +141,9 @@ function unpackContext(c: PackedContext): ContextManifest | null {
   if (!c) return null;
   return {
     cursor: c.cu,
-    ...(c.tk ? { thingKind: c.tk } : {}),
+    // Older lines marked a reply's run `tk`; it read as a message does.
+    ...(c.wt ? { writingType: c.wt } : "tk" in c && c.tk === "reply" ? { writingType: "message" as const } : {}),
+    ...(c.to ? { typeOff: true } : {}),
     documentSource: c.src,
     section: c.sec,
     ...(c.w ? { where: c.w } : {}),
@@ -201,10 +205,11 @@ const toLine = (r: PluginRun): RunLine => ({
   ...(r.outcome ? { o: [r.outcome.status, r.outcome.at, ...(r.outcome.chars !== undefined ? [r.outcome.chars] : [])] as [OutcomeStatus, string, number?] } : {}),
 });
 
+// A run of a plugin that is now a skill of the writing assist reads as
+// the skill's, so its history stays on the assist's page.
 const fromLine = (l: RunLine): PluginRun => ({
   id: l.id,
-  plugin: l.p,
-  ...(l.t ? { task: l.t } : {}),
+  ...currentRunId(l.p, l.t),
   ...(l.ti ? { title: l.ti } : {}),
   at: l.at,
   ok: l.ok !== 0,
@@ -298,8 +303,8 @@ export async function listRuns(limit = 100, plugin?: string): Promise<PluginRun[
         // Scanning backwards: the earliest outcome for a run is seen last.
         outcomes.set(l.id, { status: l.s, at: l.at, ...(l.n !== undefined ? { chars: l.n } : {}) });
       } else {
-        if (plugin && l.p !== plugin) continue;
         const run = fromLine(l);
+        if (plugin && run.plugin !== plugin) continue;
         const outcome = run.outcome ?? outcomes.get(run.id);
         runs.push(outcome ? { ...run, outcome } : run);
       }

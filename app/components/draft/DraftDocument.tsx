@@ -1,21 +1,25 @@
 "use client";
 
-import { useLayoutEffect, useRef, useState, useMemo } from "react";
+import { useEffect, useLayoutEffect, useRef, useState, useMemo, type MouseEvent, type RefObject } from "react";
 import { Minimize2, MessageCircle, StickyNotes } from "lucide-react";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useDraftEditor } from "@/app/lib/writing-os/editor-context";
+import { useDraftMode } from "@/app/lib/writing-os/draftMode";
+import { useSectionPage } from "@/app/lib/writing-os/sectionPage";
 import { BlockNoteDocument } from "@/app/components/draft/BlockNoteDocument";
 import { NextBlockCard } from "@/app/components/draft/NextBlockCard";
+import { ComposeCard } from "@/app/components/draft/ComposeCard";
 import { RowIconButton } from "@/app/components/shared/RowIconButton";
 import { useBlockCommentHighlight } from "@/app/lib/writing-os/commentHighlight";
+import { draftPageOf } from "@/app/lib/writing-os/draftPage";
 
 /**
- * The one BlockNote editor for the whole draft — sections and blocks alike
- * are just blocks in this single document (a section is a toggleable
- * heading whose children are its blocks; see `writing-os/sections.ts`), so
- * dragging, adding, and collapsing both go through BlockNote's own native
- * system instead of the block-level and section-level halves needing their
- * own separate implementations. The custom pieces layered on top are: a
+ * The open page's editor (`editor-context.tsx`): the writing's own page,
+ * its blocks with each section a link row, or one section's page, its
+ * title above an editor holding only that section's blocks. Each page is
+ * its own document, so nothing typed on one page can reach another.
+ *
+ * The custom pieces layered on top are: a
  * top-right Expand/Comments button pair per hovered block (own hover
  * tracking, not BlockNote's — see the note below), a persistent margin
  * indicator for any block with an active comment, the whole-block-comment
@@ -34,24 +38,57 @@ import { useBlockCommentHighlight } from "@/app/lib/writing-os/commentHighlight"
  * to work with — both icons below just take the reader there.
  */
 export function DraftDocument() {
-  const { commentsData, notes, activeProjectId, openExpanded, scrollToBlockId, setScrollToBlockId } = useWritingOS();
-  const { editor, syncDocument } = useDraftEditor();
+  const { commentsData, notes, activeProjectId, openExpanded } = useWritingOS();
+  const { editor, syncDocument, page } = useDraftEditor();
+  const { openSection } = useSectionPage();
+  const pages = useDraftMode().editor.sections;
   const containerRef = useRef<HTMLDivElement>(null);
-  // A section expands into focus on itself; any other block into its
+  const titleRef = useRef<HTMLDivElement>(null);
+  // A section's row opens its page; any other block expands into its
   // versions view. Sections never take comments.
-  const isSection = (id: string) => editor.getBlock(id)?.type === "section";
-  const expand = (id: string) => openExpanded(isSection(id) ? "section" : "block", id);
+  const isSection = (id: string) => editor.getBlock(id)?.type === "sectionLink";
+  const expand = (id: string) => (isSection(id) ? openSection(id) : openExpanded("block", id));
 
-  // A "#" section tag's click-through lands here — scroll it into view
-  // inline, right where it already lives in the document, rather than
-  // opening any kind of panel or fullscreen view for it.
-  useLayoutEffect(() => {
-    if (!scrollToBlockId) return;
-    const root = editor.domElement;
-    const el = root?.querySelector<HTMLElement>(`[data-id="${scrollToBlockId}"]`);
-    el?.scrollIntoView({ behavior: "smooth", block: "center" });
-    setScrollToBlockId(null);
-  }, [editor, scrollToBlockId, setScrollToBlockId]);
+  // Into the page's title, from the start of its text (`draftPage.ts`).
+  const toTitle = () => {
+    const el = titleRef.current;
+    if (!el) return;
+    el.focus();
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.collapse(false);
+    window.getSelection()?.removeAllRanges();
+    window.getSelection()?.addRange(range);
+  };
+  // Re-pointed every render: the actions close over this render's page.
+  useEffect(() => {
+    draftPageOf(editor)?.setActions({ openSection, toTitle });
+  });
+
+  // Opening a section's page: an untitled one (just made) puts the cursor
+  // in its title, else at the end of its text. Once, as the page mounts.
+  useEffect(() => {
+    if (page === null) return;
+    const frame = requestAnimationFrame(() => {
+      if (!titleRef.current?.textContent?.trim()) return toTitle();
+      const last = editor.document[editor.document.length - 1];
+      if (last) editor.setTextCursorPosition(last.id, "end");
+      editor.focus();
+    });
+    return () => cancelAnimationFrame(frame);
+  }, [editor, page]);
+
+  // A section's row is a link, not something to put a cursor in: a click
+  // opens it.
+  const onMouseDownCapture = (e: MouseEvent) => {
+    if (page !== null || e.button !== 0) return;
+    const row = (e.target as Element).closest('.bn-block-content[data-content-type="sectionLink"]');
+    const id = row?.closest(".bn-block[data-id]")?.getAttribute("data-id");
+    if (!id) return;
+    e.preventDefault();
+    e.stopPropagation();
+    openSection(id);
+  };
 
   // Whole-block-comment mark — see `useBlockCommentHighlight`'s own doc
   // comment for why this no longer covers selection comments too.
@@ -158,12 +195,12 @@ export function DraftDocument() {
   return (
     <div
       ref={containerRef}
-      className="relative wos-doc-editor"
+      className={`relative wos-doc-editor ${page !== null ? "wos-section-page" : pages ? "wos-writing-page" : ""}`}
+      onMouseDownCapture={onMouseDownCapture}
       onMouseMove={(e) => {
         // The block is whichever row the pointer is level with, read at the
         // right edge of the text column: so the right gutter (where the
-        // buttons are) counts as the block too, and a block nested in a
-        // section resolves to itself, not the section.
+        // buttons are) counts as the block too.
         const group = editor.domElement?.querySelector(".bn-block-group");
         if (!group) return;
         const el = document.elementFromPoint(group.getBoundingClientRect().right - 2, e.clientY)?.closest<HTMLElement>("[data-id]");
@@ -171,8 +208,20 @@ export function DraftDocument() {
       }}
       onMouseLeave={() => setHoverBlockId(null)}
     >
+      {page !== null && (
+        <SectionTitle
+          id={page}
+          titleRef={titleRef}
+          onEnter={() => {
+            const first = editor.document[0];
+            if (first) editor.setTextCursorPosition(first.id, "start");
+            editor.focus();
+          }}
+        />
+      )}
       <BlockNoteDocument editor={editor} onChange={syncDocument} />
       <NextBlockCard editor={editor} />
+      <ComposeCard editor={editor} />
 
       {/* Two fixed columns in the right gutter: the block's markers (always
        * shown; the count is in their tooltips), stacked notes first, then comments; and
@@ -216,11 +265,55 @@ export function DraftDocument() {
       >
         <RowIconButton
           icon={<Minimize2 size={13} strokeWidth={1.8} />}
-          label={hoverBlockId && isSection(hoverBlockId) ? "Focus on this section" : "Expand"}
+          label={hoverBlockId && isSection(hoverBlockId) ? "Open section" : "Expand"}
           reveal={false}
           onClick={() => hoverBlockId && expand(hoverBlockId)}
         />
       </div>
+    </div>
+  );
+}
+
+/**
+ * A section's page title: the section's name, at the writing title's
+ * scale, outside the editor (the editor holds only the section's text).
+ * Edited in place; the row on the writing's page, the breadcrumb and the
+ * sidebar follow as it's typed. Enter or ArrowDown at its end goes into
+ * the text.
+ */
+function SectionTitle({ id, titleRef, onEnter }: { id: string; titleRef: RefObject<HTMLDivElement | null>; onEnter: () => void }) {
+  const { draft } = useDraftEditor();
+  // Uncontrolled: set once, so typing never has its caret reset.
+  const [initial] = useState(() => draft.host.sectionList().find((s) => s.id === id)?.title ?? "");
+  const atEnd = () => {
+    const sel = window.getSelection();
+    const el = titleRef.current;
+    if (!sel || !el || !sel.isCollapsed || !sel.focusNode) return false;
+    const range = document.createRange();
+    range.selectNodeContents(el);
+    range.setStart(sel.focusNode, sel.focusOffset);
+    return range.toString() === "";
+  };
+  return (
+    <div
+      ref={titleRef}
+      contentEditable
+      suppressContentEditableWarning
+      data-placeholder="Untitled section"
+      className="wos-section-title"
+      onInput={(e) => draft.setSectionTitle(id, (e.currentTarget.textContent ?? "").replace(/\s+/g, " "))}
+      onPaste={(e) => {
+        e.preventDefault();
+        document.execCommand("insertText", false, e.clipboardData.getData("text/plain").replace(/\s+/g, " "));
+      }}
+      onKeyDown={(e) => {
+        if (e.key === "Enter" || (e.key === "ArrowDown" && atEnd())) {
+          e.preventDefault();
+          onEnter();
+        }
+      }}
+    >
+      {initial}
     </div>
   );
 }

@@ -6,6 +6,7 @@ export const TRIGGER_LABELS: Record<string, string> = {
   selection: "When you select text",
   command: "When you ask for it",
   cursor: "At your cursor: when you pause, or when you ask",
+  type: "Always, in every writing of its type",
 };
 
 export const PERMISSION_LABELS: Record<string, string> = {
@@ -54,6 +55,8 @@ export interface PluginDetails {
   permissions: string[];
   data: Array<{ what: string; where: string }>;
   enabled: boolean;
+  /** A type plugin that can't be turned off (Document). */
+  alwaysOn?: boolean;
   entries: Array<{
     key: string | null;
     label: string;
@@ -61,6 +64,8 @@ export interface PluginDetails {
     context: { include: string[]; draft: string; budget: number } | null;
     defaults: { model: string; effort: string };
     settings: { model: string; effort: string; thinking: boolean };
+    /** A task's (a skill's) own switch; absent for a plugin without tasks. */
+    on?: boolean;
   }>;
   models: string[];
   efforts: string[];

@@ -1,11 +1,11 @@
 import { CallCancelled, type CallControl, type CallUsage } from "@/lib/ai/client";
 import { vault } from "@/lib/vault/store";
-import { isProjectLike } from "@/lib/store";
 import { getOSConfig } from "@/lib/vault/config";
 import { effectiveSettings } from "./settings";
 import { ContextError, CURSOR_MARK, resolveContext, type Cursor } from "@/lib/context";
 import { recordRun } from "@/lib/context/runs";
 import { getPlugin } from "./registry";
+import { readOverrides } from "./writing-assist/switches";
 import { missingPermissions } from "./prompt";
 import type { Plugin, PluginContext, PluginResult } from "./types";
 import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
@@ -44,7 +44,7 @@ function nearCursor(context: PluginContext["context"]): string {
 function callTitle(plugin: Plugin<any, any>, input: unknown, task: string | undefined, near: string): string {
   let title: string | undefined;
   try {
-    title = plugin.describe?.(input)?.trim();
+    title = plugin.describe?.(input, task)?.trim();
   } catch {
     // A title is a convenience; never let it fail a call.
   }
@@ -63,28 +63,34 @@ export async function runPlugin<TInput, TData>(pluginId: string, input: TInput, 
   const plugin = getPlugin(pluginId);
   if (!plugin) return { ok: false, error: `Unknown plugin: ${pluginId}` };
 
+  const { tasks } = plugin.manifest;
+  if (tasks && !(place.task && tasks[place.task])) {
+    return { ok: false, error: `Plugin "${pluginId}" needs one of these tasks: ${Object.keys(tasks).join(", ")}` };
+  }
+
   const config = await getOSConfig();
-  // A project's own switch for the plugin, if it has one, beats the global.
-  let override: boolean | undefined;
+  // A project's own switches, if it has them, beat the global ones: the
+  // task's (a skill's) first, then the plugin's.
+  let overrides: Record<string, boolean> = {};
   const projectId = place.project ?? place.cursor?.thing;
   if (projectId) {
     const thing = await (await vault()).get(projectId);
-    const mine = isProjectLike(thing?.header.kind) ? (thing.header.plugin_overrides as Record<string, unknown> | undefined)?.[pluginId] : undefined;
-    if (typeof mine === "boolean") override = mine;
+    if (thing?.header.kind === "project") overrides = readOverrides(thing.header.plugin_overrides);
   }
-  if (override === false) return { ok: false, error: `Plugin "${pluginId}" is switched off for this project` };
-  if (override === undefined && !config.plugins.includes(pluginId)) {
-    return { ok: false, error: `Plugin "${pluginId}" is not enabled in .os/config.yaml` };
+  const taskKey = place.task ? `${pluginId}/${place.task}` : undefined;
+  const own = taskKey !== undefined ? overrides[taskKey] : undefined;
+  if (own === false) return { ok: false, error: `"${place.task}" is switched off for this project` };
+  if (own === undefined) {
+    if (overrides[pluginId] === false) return { ok: false, error: `Plugin "${pluginId}" is switched off for this project` };
+    if (overrides[pluginId] === undefined && !config.plugins.includes(pluginId)) {
+      return { ok: false, error: `Plugin "${pluginId}" is not enabled in .os/config.yaml` };
+    }
+    if (taskKey && config.skills_off?.includes(taskKey)) return { ok: false, error: `"${place.task}" is switched off` };
   }
 
   const missing = missingPermissions(plugin.manifest);
   if (missing.length) {
     return { ok: false, error: `Plugin "${pluginId}" declares context it has no permission for: ${missing.join(", ")}` };
-  }
-
-  const { tasks } = plugin.manifest;
-  if (tasks && !(place.task && tasks[place.task])) {
-    return { ok: false, error: `Plugin "${pluginId}" needs one of these tasks: ${Object.keys(tasks).join(", ")}` };
   }
   const declaration = tasks ? tasks[place.task as string].context : plugin.manifest.context;
 
@@ -105,7 +111,7 @@ export async function runPlugin<TInput, TData>(pluginId: string, input: TInput, 
   let usage: CallUsage | undefined;
   const call: CallControl = { signal: place.signal, onText: place.onText, onUsage: (u) => (usage = u) };
   try {
-    const ctx: PluginContext<TInput> = { context, settings, call, input };
+    const ctx: PluginContext<TInput> = { context, settings, call, input, ...(place.task ? { task: place.task } : {}) };
     result = (await plugin.run(ctx)) as PluginResult<TData>;
   } catch (err) {
     result = { ok: false, error: err instanceof Error ? err.message : "Plugin run failed" };

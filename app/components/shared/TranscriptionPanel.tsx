@@ -7,7 +7,7 @@ import { PanelShell } from "@/app/components/panel/PanelShell";
 import { IntentComposer } from "@/app/components/shared/IntentComposer";
 import { BlockNoteDocument } from "@/app/components/draft/BlockNoteDocument";
 import { draftSchema, type DraftPartialBlock } from "@/app/lib/writing-os/schema";
-import { parseMarkdownToBlocks } from "@/app/lib/writing-os/parseMarkdown";
+import { readImageText } from "@/app/lib/writing-os/attachments";
 import { flattenBlocksToMarkdown } from "@/app/lib/writing-os/blockText";
 import type { Attachment, AttachmentTranscription } from "@/app/lib/writing-os/types";
 
@@ -86,8 +86,15 @@ export function TranscriptionPanel({
   // display" depended on however many parents re-rendered in between —
   // display should never wait on that.
   const [result, setResult] = useState(attachment.transcription ?? null);
+  // One that arrives from outside while the panel is open (a brief
+  // transcribes its screenshots as they land) is taken up too, not only the
+  // one there when it opened.
+  const [seen, setSeen] = useState(attachment.transcription);
+  if (attachment.transcription !== seen) {
+    setSeen(attachment.transcription);
+    if (attachment.transcription) setResult(attachment.transcription);
+  }
 
-  const storedName = decodeURIComponent(attachment.url.split("/").pop() ?? "");
   const transcription = result;
 
   // Always created (hooks can't be conditional) even before a first
@@ -158,16 +165,8 @@ export function TranscriptionPanel({
     setError(false);
     const signal = startCall();
     try {
-      const res = await fetch("/api/plugins/ocr", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ storedName, instructions }),
-        signal,
-      });
-      if (!res.ok) throw new Error();
-      const data = (await res.json()) as { text: string };
+      const next = await readImageText(attachment, { instructions, signal });
       if (id !== requestId.current) return;
-      const next = { blocks: parseMarkdownToBlocks(data.text), instructions, updatedAt: new Date().toISOString() };
       setResult(next);
       onSetTranscription(attachment.url, next);
       setDraft("");

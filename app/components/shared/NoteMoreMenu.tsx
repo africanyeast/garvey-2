@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import type { MouseEvent } from "react";
-import { EllipsisVertical, Can } from "lucide-react";
+import { EllipsisVertical, Can, CircleCheck, RotateCcw } from "lucide-react";
 import { RowIconButton } from "@/app/components/shared/RowIconButton";
 import { DropdownMenu } from "@/app/components/shared/DropdownMenu";
 import { MenuRow } from "@/app/components/shared/MenuRow";
@@ -20,13 +20,20 @@ import { ConfirmDialog } from "@/app/components/shared/ConfirmDialog";
  * "Move to trash" confirms through the same `ConfirmDialog` the sidebar
  * uses for deleting a project — one shared yes/no component for every
  * destructive action, not a second one-off for notes.
+ *
+ * `onToggleResolved` adds "Close note" / "Reopen note" — for the opened
+ * note, which has no check box of its own (a list row keeps its box).
  */
 export function NoteMoreMenu({
   onDelete,
+  resolved = false,
+  onToggleResolved,
   reveal = true,
   className = "relative",
 }: {
   onDelete: () => void;
+  resolved?: boolean;
+  onToggleResolved?: () => void;
   reveal?: boolean;
   className?: string;
 }) {
@@ -47,6 +54,17 @@ export function NoteMoreMenu({
       />
       {open && (
         <DropdownMenu className="right-[0] top-[24px]">
+          {onToggleResolved && (
+            <MenuRow
+              icon={resolved ? RotateCcw : CircleCheck}
+              label={resolved ? "Reopen note" : "Close note"}
+              onClick={(e) => {
+                e.stopPropagation();
+                setOpen(false);
+                onToggleResolved();
+              }}
+            />
+          )}
           <MenuRow
             icon={Can}
             label="Delete"

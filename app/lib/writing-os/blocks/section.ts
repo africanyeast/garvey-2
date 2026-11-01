@@ -1,27 +1,17 @@
 import { createBlockConfig, createBlockSpec } from "@blocknote/core";
-import { addDefaultPropsExternalHTML, createToggleWrapper, defaultProps } from "@blocknote/core/blocks";
+import { addDefaultPropsExternalHTML, defaultProps } from "@blocknote/core/blocks";
 
 /**
- * A section — the organizational grouping this app builds documents out of
- * (originally its own parallel data structure; see `writing-os/sections.ts`
- * for how the rest of the app now reads sections straight off the document
- * tree instead). It's a real block, always toggleable (no on/off prop the
- * way a regular heading has one — a section *is* a collapsible group, that's
- * the whole point of the type), rendered small and muted rather than as a
- * heading-sized headline, matching how it read in the original design:
- * organization that's there for whoever wants it, not competing with the
- * writing.
+ * A section as it is stored: a top-level `section` block whose text is its
+ * title and whose children are the section's blocks. This is the shape on
+ * disk and in the joined document the app reads (`sections.ts`), and the
+ * shape Preview, Copy and the writing assist see.
  *
- * Two render paths, matching the two things this block needs to be:
- * - **Editing** (`editor.isEditable`): reuses BlockNote's own
- *   `createToggleWrapper` — the exact mechanism behind its built-in toggle
- *   heading — so collapse/expand, the chevron, and drag-with-children all
- *   come from the library for free; only the label element's own styling is
- *   ours.
- * - **Read-only** (Preview, and `toExternalHTML` for Copy/Markdown): skips
- *   the toggle wrapper entirely — no chevron, children always shown — since
- *   a static export has no use for a collapse affordance it can't interact
- *   with anyway.
+ * It is never edited as a block. The writing's page shows each section as
+ * a `sectionLink` row, and each section's page has an editor of its own
+ * holding only its children (`editor-context.tsx`). So the one place this
+ * block renders is read-only: Preview, where its title reads as a small
+ * label over its text, and Copy/Markdown, where it is an `h2`.
  */
 export const createSectionBlockConfig = createBlockConfig(
   () =>
@@ -36,16 +26,10 @@ export const createSectionBlockSpec = createBlockSpec(createSectionBlockConfig, 
   meta: {
     isolating: false,
   },
-  render(block, editor) {
+  render() {
     const label = document.createElement("div");
     label.className = "wos-section-label";
-
-    if (!editor.isEditable) {
-      return { dom: label, contentDOM: label };
-    }
-
-    const toggleWrapper = createToggleWrapper(block, editor, label);
-    return { ...toggleWrapper, contentDOM: label };
+    return { dom: label, contentDOM: label };
   },
   toExternalHTML(block) {
     const dom = document.createElement("h2");

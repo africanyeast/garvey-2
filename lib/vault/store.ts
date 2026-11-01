@@ -1,4 +1,4 @@
-import { PROJECT_LIKE_KINDS, Store, commentOn, filedUnder, isProjectLike, linkOf, type Thing } from "@/lib/store";
+import { Store, commentOn, filedUnder, linkOf, type Thing } from "@/lib/store";
 import { ensureVault } from "./bootstrap";
 import { VAULT_DIR } from "./paths";
 
@@ -17,9 +17,9 @@ export async function vault(): Promise<Store> {
   return store;
 }
 
-/** The live project or reply at `slug` (slugs are unique across both). */
+/** The live project at `slug`. */
 export async function liveProjectBySlug(store: Store, slug: string): Promise<Thing | undefined> {
-  return (await store.list({ kind: PROJECT_LIKE_KINDS })).find((p) => p.header.slug === slug);
+  return (await store.list({ kind: "project" })).find((p) => p.header.slug === slug);
 }
 
 /** The project a thing belongs to, following its links: a note's
@@ -29,7 +29,6 @@ export async function liveProjectBySlug(store: Store, slug: string): Promise<Thi
 export function owningProject(t: Thing, lookup: (id: string) => Thing | undefined): string | null {
   switch (t.header.kind) {
     case "project":
-    case "reply":
       return t.header.id;
     case "note":
       return filedUnder(t.header.links)?.to.id ?? null;
@@ -57,7 +56,7 @@ export async function projectContents(store: Store, projectId: string, opts: { t
   return all.filter(
     (t) =>
       t.header.trashed_at === null &&
-      !isProjectLike(t.header.kind) &&
+      t.header.kind !== "project" &&
       owningProject(t, (id) => byId.get(id)) === projectId
   );
 }

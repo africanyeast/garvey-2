@@ -1,5 +1,6 @@
 import { getStyle, styleToRaw } from "@/lib/vault/style";
 import { vault } from "@/lib/vault/store";
+import { getOSConfig } from "@/lib/vault/config";
 import { resolveBundle, type ContextBundle, type ContextDeclaration, type Cursor } from "./resolve";
 import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 
@@ -16,5 +17,6 @@ export async function resolveContext(
   const store = await vault();
   const things = await store.list({ trashed: false });
   const style = declaration.include.includes("style") ? styleToRaw(await getStyle()) : null;
-  return resolveBundle({ things, style, cursor, declaration, document });
+  const enabledPlugins = (await getOSConfig()).plugins;
+  return resolveBundle({ things, style, cursor, declaration, document, enabledPlugins });
 }

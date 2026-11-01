@@ -1,5 +1,7 @@
 import type { DraftPartialBlock } from "./schema";
 import type { Link } from "@/lib/store/types";
+import type { WritingType } from "@/lib/plugins/writing-types";
+import type { BriefRead } from "@/lib/plugins/writing-type";
 
 export type { Link, Ref } from "@/lib/store/types";
 
@@ -89,19 +91,15 @@ export interface TrashedNote extends Note {
   trashedAt: string;
 }
 
-/** What the expand shell can show: a block with its versions, a section
- * in focus, or a note (a project note or an inbox capture). */
-export type ExpandedKind = "block" | "section" | "note";
+/** What the expand shell can show: a block with its versions, or a note
+ * (a project note or an inbox capture). A section is a page of its own
+ * (`sectionPage.tsx`), not an expanded view. */
+export type ExpandedKind = "block" | "note";
 
 export interface ExpandedItem {
   kind: ExpandedKind;
   key: string | number;
   backTo: ExpandedItem | null;
-}
-
-export interface TitleCandidate {
-  text: string;
-  current: boolean;
 }
 
 export interface Project {
@@ -119,9 +117,9 @@ export interface Project {
    * it is, the problem, who it's for, the argument, the goal — as one
    * freeform text, the way an assistant's memory reads. See `briefFromHeader`. */
   brief: string;
-  /** Always the current one first, then its alternatives in order. */
-  titleCandidates: TitleCandidate[];
-  subtitleCandidates: TitleCandidate[];
+  /** The brief's files and screenshots, kept in the vault like a note's;
+   * an image's read text is its `transcription`, which plugins read. */
+  attachments: Attachment[];
   status: string;
   /** ISO timestamp of the last edit to this project — brief fields, title/
    * subtitle, or the draft document itself. Drives the "Edited ... ago" in
@@ -137,35 +135,14 @@ export interface Project {
   /** Per plugin id: on or off for this project only, whatever the global
    * setting says. A plugin with no entry follows the global setting. */
   pluginOverrides?: Record<string, boolean>;
-  /** "reply" for a reply to someone else's message (artifacts/REPLY_SPEC.md):
-   * a special kind of project with its own brief (the fields below) in
-   * place of subtitle/brief/candidates, and no sections. */
-  kind: ProjectKind;
-  /** A reply's brief: where the message came from, the message exactly as
-   * pasted, the link it was pasted as (if any), and what the writer wants
-   * to say. Unset on a project. */
-  channel?: ReplyChannel;
-  replyingTo?: string;
-  replyingToUrl?: string;
-  intent?: string;
-}
-
-export type ProjectKind = "project" | "reply";
-
-export const REPLY_CHANNELS = ["x", "whatsapp", "email", "other"] as const;
-export type ReplyChannel = (typeof REPLY_CHANNELS)[number];
-export const replyChannelLabel: Record<ReplyChannel, string> = { x: "X", whatsapp: "WhatsApp", email: "Email", other: "Other" };
-/** X's post length limit, for a reply's character counter. */
-export const X_MAX_CHARS = 280;
-
-/** A reply's title until the writer gives it one: "Reply to @handle" when
- * the message starts `@handle:` or is an X post link, else its first few
- * words. */
-export function defaultReplyTitle(replyingTo: string): string {
-  const text = replyingTo.trim();
-  const handle = text.match(/^(@\w{1,30})\s*:/) ?? text.match(/^https?:\/\/(?:www\.|mobile\.)?(?:x|twitter)\.com\/(\w{1,30})\/status/i);
-  if (handle) return `Reply to ${handle[1].startsWith("@") ? handle[1] : `@${handle[1]}`}`;
-  return text.split(/\s+/).slice(0, 6).join(" ");
+  /** Document, Tweet, Email or Message (artifacts/WRITING_TYPES_SPEC.md);
+   * unset until the writer picks one, and until then it behaves as a
+   * document. Everything that differs by type is its plugin's
+   * (lib/plugins/writing-types.ts). */
+  type?: WritingType;
+  /** What the type's brief reader found and read in the brief (a tweet:
+   * the post it replies to), by type plugin id. */
+  briefReads?: Record<string, BriefRead>;
 }
 
 /** A brand-new project can be left with no title (Notion-style "Untitled").
@@ -200,7 +177,6 @@ export function briefFromHeader(h: Record<string, unknown>): string {
 
 export interface TrashedProject {
   id: string;
-  kind: ProjectKind;
   title: string;
   trashedAt: string;
 }

@@ -1,9 +1,11 @@
 import { describe, expect, test } from "bun:test";
-import { ContextError, documentParts, documentText, renderSystem, resolveBundle, type ContextDeclaration, type Cursor } from "./resolve";
+import { CURSOR_MARK, ContextError, documentParts, documentText, renderSystem, resolveBundle, type ContextDeclaration, type Cursor } from "./resolve";
 import type { Link, Thing } from "@/lib/store/types";
 import { missingPermissions } from "@/lib/plugins/prompt";
 import { listPlugins } from "@/lib/plugins/registry";
 import { blockPlainText } from "@/app/lib/writing-os/blockText";
+
+const manifests = Object.fromEntries(listPlugins().map((m) => [m.id, m]));
 
 // ULIDs sort by creation time; these are in creation order.
 const id = (n: number) => `01M3T7${String(n).padStart(20, "0")}`;
@@ -110,6 +112,15 @@ describe("bundle for a cursor in a section", () => {
     const withBrief: Thing = { ...projectP, header: { ...projectP.header, brief: "One freeform brief." } };
     const own = resolveBundle({ things: [withBrief], style: "", cursor: { thing: P, block: "bA1" }, declaration: everything });
     expect(own.items.find((x) => x.step === 2)?.text).toBe("Title: Paper\nOne freeform brief.");
+  });
+
+  test("a screenshot in the brief reaches the assist as its read text; an unread file says nothing", () => {
+    const shot = { kind: "image", label: "chat.png", url: "/api/uploads/x-chat.png", transcription: { blocks: [{ type: "paragraph", content: "Tola: are you free?" }], updatedAt: "2026-10-28T00:00:00.000Z" } };
+    const unread = { kind: "file", label: "notes.docx", url: "/api/uploads/y-notes.docx" };
+    const withShot: Thing = { ...projectP, header: { ...projectP.header, type: "document", brief: "Reply to Tola.", attachments: [shot, unread] } };
+    const got = resolveBundle({ things: [withShot], style: "", cursor: { thing: P, block: "bA1" }, declaration: everything });
+    expect(got.items.find((x) => x.step === 2)?.text).toBe("Title: Paper\nReply to Tola.\n\nTranscript of chat.png:\nTola: are you free?");
+    expect(renderSystem("DO IT", got, [2])).toContain("Transcript of chat.png:\nTola: are you free?");
   });
 
   test("a linked note brings its text and its attachments' transcripts, not what links to it", () => {
@@ -238,7 +249,7 @@ describe("declarations and the harness", () => {
   });
 
   test("the synonym plugin's prompt is what it was before the harness owned context", () => {
-    const decl = listPlugins().find((m) => m.id === "contextual-suggest")!.context!;
+    const decl = manifests["writing-assist"].tasks!["contextual-suggest"].context;
     // A note editor: no thing, just the editor's live document.
     const doc = [{ id: "k", type: "paragraph", content: text("The quick brown fox.") }];
     const b = resolveBundle({ things, style: "STYLE", cursor: { block: "k" }, declaration: decl, document: doc as never });
@@ -276,9 +287,37 @@ describe("the section around the block", () => {
   });
 });
 
+describe("Compose's span", () => {
+  const span = (block: string, blocks: string[]) => resolve({ thing: P, block, blocks }, manifests["writing-assist"].tasks!.compose.context);
+  const allOf = ["b0", "sA", "bA1", "bA2", "sA3", "bA3", "sB", "bB1", "bEnd"];
+
+  test("some blocks: them as one piece, the rest of their section around them, and each one's material", () => {
+    const b = span("bA1", ["bA1", "bA2"]);
+    expect(documentParts(b)).toEqual({ heading: "Section A", before: "", block: "Alpha one. More of alpha one.\n\nAlpha two.", after: "" });
+    expect(idsAt(b, 6)).toEqual([N.blkA1.header.id, C.onA.header.id, C.onA1.header.id]);
+    expect(documentParts(span("bA2", ["bA2"]))).toEqual({ heading: "Section A", before: "Alpha one. More of alpha one.", block: "Alpha two.", after: "" });
+  });
+
+  test("a section: its text under its title, and what is linked to it, to its blocks and to its nested sections", () => {
+    const b = span("sA", ["sA", "bA1", "bA2", "sA3", "bA3"]);
+    expect(documentParts(b)).toEqual({ heading: "Section A", before: "", block: "Alpha one. More of alpha one.\n\nAlpha two.\n\n## Nested\n\nDeep.", after: "" });
+    expect(idsAt(b, 5)).toEqual([N.secA.header.id, N.secA2.header.id, N.nested.header.id]);
+    expect(idsAt(b, 6)).toEqual([N.blkA1.header.id, C.onA.header.id, C.onA1.header.id]);
+    expect(allIds(b).has(N.secB.header.id)).toBe(false);
+  });
+
+  test("the whole writing: all of it, sections as headings, and everything linked to it", () => {
+    const b = span("", allOf);
+    expect(documentParts(b)?.block).toBe(
+      "Before any section.\n\n## Section A\n\nAlpha one. More of alpha one.\n\nAlpha two.\n\n## Nested\n\nDeep.\n\n## Section B\n\nBeta one.\n\nBeside the sections."
+    );
+    expect(idsAt(b, 5)).toEqual([N.secA.header.id, N.secA2.header.id, N.secB.header.id, N.nested.header.id]);
+    expect(allIds(b).has(C.onB.header.id)).toBe(true);
+  });
+});
+
 describe("what the writing tasks see", () => {
-  const manifests = Object.fromEntries(listPlugins().map((m) => [m.id, m]));
-  const cw = manifests["continue-writing"].tasks!;
+  const cw = manifests["writing-assist"].tasks!;
 
   test("a next paragraph and another version see the same place, and a version its siblings too", () => {
     expect(cw["next-block"].context.draft).toBe("section");
@@ -288,14 +327,26 @@ describe("what the writing tasks see", () => {
     expect(cw["next-block"].context.include).not.toContain("project-material");
   });
 
+  test("suggesting a title sees the whole draft, unmarked, and no place's material", () => {
+    const decl = cw["suggest-title"].context;
+    const b = resolve({ thing: P, block: "" }, decl);
+    const draft = documentText(b);
+    expect(draft).toContain("## Section A");
+    expect(draft).toContain("Before any section.");
+    expect(draft).toContain("Alpha two.");
+    expect(draft).not.toContain(CURSOR_MARK);
+    expect(b.items.find((x) => x.kind === "draft")?.why).toBe("the whole document");
+    expect(b.items.some((x) => x.kind === "note" || x.kind === "comment")).toBe(false);
+  });
+
   test("refine sees this place's material and the section around the block, not the outline or versions", () => {
-    const r = manifests.refine.context!;
+    const r = cw.refine.context;
     expect(r.draft).toBe("section");
     expect([...r.include].sort()).toEqual(["block-material", "brief", "comments", "section-material", "style"]);
   });
 });
 
-describe("bundle for a cursor in a reply", () => {
+describe("bundle for a cursor in a message (a writing with no sections)", () => {
   const R = id(900);
   const draftR = [
     { id: "r1", type: "paragraph", content: text("Thanks for asking."), children: [] },
@@ -303,13 +354,13 @@ describe("bundle for a cursor in a reply", () => {
   ];
   const reply = (links: Link[], extra: Record<string, unknown> = {}): Thing => ({
     header: {
-      ...thing("reply", links, "").header,
+      ...thing("project", links, "").header,
       id: R,
+      type: "message",
       slug: "reply-to-sam",
       title: "Reply to @sam",
-      channel: "whatsapp",
-      replying_to: "@sam: guest post next month?",
-      intent: "say yes, ask the length",
+      subtitle: "",
+      brief: "@sam: guest post next month?\n\nWhat I want to say: say yes, ask the length",
       ...extra,
     },
     body: JSON.stringify(draftR),
@@ -322,7 +373,7 @@ describe("bundle for a cursor in a reply", () => {
     resolveBundle({ things: [...things, r, onR1, onR2, altR1], style: "STYLE", cursor: { thing: R, block: "r1" }, declaration: decl });
   const fromP = new Set([P, ...Object.values(N).map((t) => t.header.id), ...Object.values(C).map((t) => t.header.id), variant.header.id]);
 
-  test("style, its brief, its block's comments and versions, its draft; no project at all", () => {
+  test("style, its brief, its block's comments and versions, its draft; no outline, nothing of another project", () => {
     const b = run(reply([]));
     expect(b.items.map((x) => [x.step, x.kind, x.id])).toEqual([
       [1, "style", undefined],
@@ -332,25 +383,26 @@ describe("bundle for a cursor in a reply", () => {
       [7, "draft", R],
     ]);
     expect(b.items[1].text).toBe(
-      "This is a WhatsApp reply: plain text, conversational.\n\nReplying to:\n@sam: guest post next month?\n\nWhat I want to say: say yes, ask the length"
+      "This is a message (WhatsApp, Telegram, SMS or the like): plain text, short and conversational.\n\n" +
+        "Title: Reply to @sam\n@sam: guest post next month?\n\nWhat I want to say: say yes, ask the length"
     );
-    expect(b.manifest.thingKind).toBe("reply");
+    expect(b.manifest.writingType).toBe("message");
     for (const x of b.items) expect(fromP.has(x.id ?? "")).toBe(false);
     expect(b.manifest.unanchored).toEqual([]);
   });
 
-  test("its notes: one on the reply in step 4, one on a block of it in step 6", () => {
-    const own = note("on the reply", [fu({ id: R })]);
+  test("its notes: one on the writing in step 4, one on a block of it in step 6", () => {
+    const own = note("on the writing", [fu({ id: R })]);
     const onBlock = note("on r1", [about({ id: R, block: "r1" })]);
     const onOther = note("on r2", [about({ id: R, block: "r2" })]);
     const b = resolveBundle({ things: [...things, reply([]), own, onBlock, onOther], style: "", cursor: { thing: R, block: "r1" }, declaration: everything });
     expect(idsAt(b, 4)).toEqual([own.header.id]);
-    expect(b.items.find((x) => x.id === own.header.id)?.why).toBe("linked to the reply, not to a place in it");
+    expect(b.items.find((x) => x.id === own.header.id)?.why).toBe("linked to the project, not to a place in it");
     expect(idsAt(b, 6)).toContain(onBlock.header.id);
     expect(idsAt(b, 6)).not.toContain(onOther.header.id);
   });
 
-  test("a note linking the reply and a project reaches the reply, and nothing else of that project does", () => {
+  test("a note linking it and a project reaches it, and nothing else of that project does", () => {
     const both = note("links the two", [fu({ id: R }), about({ id: P })]);
     const b = resolveBundle({ things: [...things, reply([]), both], style: "", cursor: { thing: R, block: "r1" }, declaration: everything });
     expect(idsAt(b, 4)).toEqual([both.header.id]);
@@ -358,8 +410,42 @@ describe("bundle for a cursor in a reply", () => {
     for (const x of b.items) expect(fromP.has(x.id ?? "")).toBe(false);
   });
 
-  test("renders under reply headings", () => {
+  test("renders under a writing's headings", () => {
     const b = run(reply([]));
-    expect(renderSystem("DO IT", b, [2])).toStartWith("STYLE\n\nDO IT\n\nReply brief:\nThis is a WhatsApp reply");
+    expect(renderSystem("DO IT", b, [2])).toStartWith("STYLE\n\nDO IT\n\nBrief:\nThis is a message");
+  });
+
+  test("a tweet's brief carries the post it replies to, while the brief still links it", () => {
+    const key = "https://x.com/sam/status/7";
+    const tweet = (brief: string) => reply([], { type: "tweet", brief, brief_reads: { tweet: { key, text: "@sam: guest post?" } } });
+    expect(run(tweet(`say yes ${key}`)).items[1].text).toBe(
+      `This is a post on X: plain text, at most 280 characters.\n\nTitle: Reply to @sam\nsay yes ${key}\n\nReplying to this post on X (${key}):\n@sam: guest post?`
+    );
+    expect(run(tweet("say yes")).items[1].text).not.toContain("Replying to this post");
+  });
+
+  test("with its type plugin off, it is read as a plain writing: no type line, no post, no outline", () => {
+    const key = "https://x.com/sam/status/7";
+    const off = reply([], { type: "tweet", brief: `say yes ${key}`, brief_reads: { tweet: { key, text: "@sam: guest post?" } } });
+    const b = resolveBundle({ things: [...things, off, onR1, onR2, altR1], style: "", cursor: { thing: R, block: "r1" }, declaration: everything, enabledPlugins: ["message"] });
+    expect(b.items.find((x) => x.step === 2)?.text).toBe(`Title: Reply to @sam\nsay yes ${key}`);
+    expect(b.items.some((x) => x.kind === "outline")).toBe(false);
+    expect(b.manifest.typeOff).toBe(true);
+    const back = resolveBundle({ things: [...things, off], style: "", cursor: { thing: R, block: "r1" }, declaration: everything, enabledPlugins: ["tweet"] });
+    expect(back.items.find((x) => x.step === 2)?.text).toStartWith("This is a post on X");
+  });
+
+  test("a writing's own switch beats the global one, and Document is never off", () => {
+    const own = reply([], { type: "message", plugin_overrides: { message: false } });
+    expect(resolveBundle({ things: [...things, own], style: "", cursor: { thing: R, block: "r1" }, declaration: everything, enabledPlugins: ["message"] }).manifest.typeOff).toBe(true);
+    const doc = reply([], { type: "document" });
+    expect(resolveBundle({ things: [...things, doc], style: "", cursor: { thing: R, block: "r1" }, declaration: everything, enabledPlugins: [] }).manifest.typeOff).toBeUndefined();
+  });
+
+  test("a document's brief has no type line, and keeps its subtitle", () => {
+    const b = run(reply([], { type: "document", subtitle: "A yes" }));
+    expect(b.items[1].text).toStartWith("Title: Reply to @sam\nSubtitle: A yes\n@sam:");
+    expect(b.items.some((x) => x.kind === "outline")).toBe(true);
+    expect(renderSystem("DO IT", b, [2])).toStartWith("STYLE\n\nDO IT\n\nProject brief:\nTitle:");
   });
 });

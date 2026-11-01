@@ -1,5 +1,5 @@
 import { afterAll, beforeAll, describe, expect, test } from "bun:test";
-import { mkdtemp, realpath, rm } from "node:fs/promises";
+import { mkdtemp, readFile, realpath, rm } from "node:fs/promises";
 import os from "node:os";
 import path from "node:path";
 import { StoreError } from "@/lib/store";
@@ -156,35 +156,62 @@ describe("notes, comments and trash on links", () => {
   });
 });
 
-describe("replies, a special kind of project", () => {
+describe("writings and their types", () => {
   let r: Awaited<ReturnType<typeof P.createProject>>;
 
-  test("a reply is created apart from projects, with an empty reply brief", async () => {
-    const before = (await P.listProjects()).length;
-    r = await P.createProject({ kind: "reply" });
-    expect(r.kind).toBe("reply");
-    expect([r.channel, r.replyingTo, r.intent]).toEqual(["other", "", ""]);
-    expect((await P.listProjects()).length).toBe(before);
-    expect((await P.listProjects("reply")).map((p) => p.id)).toEqual([r.id]);
-    expect((await P.listProjects("all")).some((p) => p.id === r.id)).toBe(true);
+  test("a new writing has no type and no candidates on disk", async () => {
+    r = await P.createProject({});
+    expect(r.type).toBeUndefined();
+    const raw = await readFile(path.join(tmp, "vault", "things", `${r.id}.md`), "utf8");
+    expect(raw).toContain("kind: project");
+    expect(raw).not.toContain("candidates");
+    expect(raw).not.toMatch(/^type:/m);
   });
 
-  test("its title follows the message until the writer sets one", async () => {
-    r = (await P.updateProject(r.slug, { replyingTo: "@tola: are you free on the 12th for the panel?" }))!;
+  test("a type is set once picked, and a made-up one is ignored", async () => {
+    r = (await P.updateProject(r.slug, { type: "nonsense" as never }))!;
+    expect(r.type).toBeUndefined();
+    r = (await P.updateProject(r.slug, { type: "message" }))!;
+    expect((await P.getProject(r.slug))?.type).toBe("message");
+  });
+
+  test("a message's title follows its brief until the writer sets one", async () => {
+    r = (await P.updateProject(r.slug, { brief: "@tola: are you free on the 12th for the panel?" }))!;
     expect(r.title).toBe("Reply to @tola");
     expect(r.slug).toBe("reply-to-tola");
-    r = (await P.updateProject(r.slug, { replyingTo: "Are you free on the 12th for the panel?" }))!;
+    r = (await P.updateProject(r.slug, { brief: "Are you free on the 12th for the panel?" }))!;
     expect(r.title).toBe("Are you free on the 12th");
     r = (await P.updateProject(r.slug, { title: "Tola's panel" }))!;
-    r = (await P.updateProject(r.slug, { replyingTo: "Something else", intent: "decline politely", channel: "whatsapp" }))!;
-    expect([r.title, r.replyingTo, r.intent, r.channel]).toEqual(["Tola's panel", "Something else", "decline politely", "whatsapp"]);
-    expect((await P.getProject(r.slug))?.kind).toBe("reply");
+    r = (await P.updateProject(r.slug, { brief: "Something else" }))!;
+    expect(r.title).toBe("Tola's panel");
   });
 
-  test("slugs are unique across projects and replies", async () => {
-    const project = await P.createProject({ title: "Tola's panel" });
-    expect(project.slug).not.toBe(r.slug);
-    await P.deleteProject(project.slug);
+  test("a brief keeps its files with their read text, and ignores anything that isn't one", async () => {
+    const shot = { kind: "image" as const, label: "chat.png", url: "/api/uploads/x-chat.png", transcription: { blocks: [], updatedAt: "2026-10-28T00:00:00.000Z" } };
+    r = (await P.updateProject(r.slug, { attachments: [shot] }))!;
+    expect((await P.getProject(r.slug))?.attachments).toEqual([shot]);
+    r = (await P.updateProject(r.slug, { attachments: [{ kind: "image", label: "x", url: "file:///etc/passwd" }] }))!;
+    expect((await P.getProject(r.slug))?.attachments).toEqual([shot]);
+    r = (await P.updateProject(r.slug, { attachments: [] }))!;
+    const raw = await readFile(path.join(tmp, "vault", "things", `${r.id}.md`), "utf8");
+    expect(raw).not.toContain("attachments");
+  });
+
+  test("with its type plugin off, a message's title no longer follows its brief", async () => {
+    let m = await P.createProject({});
+    m = (await P.updateProject(m.slug, { type: "message", pluginOverrides: { message: false } }))!;
+    m = (await P.updateProject(m.slug, { brief: "@sam: hi" }))!;
+    expect(m.title).toBe("");
+    m = (await P.updateProject(m.slug, { pluginOverrides: {}, brief: "@sam: hi there" }))!;
+    expect(m.title).toBe("Reply to @sam");
+    await P.deleteProject(m.slug);
+  });
+
+  test("a document's title never follows its brief", async () => {
+    let d = await P.createProject({});
+    d = (await P.updateProject(d.slug, { type: "document", brief: "@sam: hi" }))!;
+    expect(d.title).toBe("");
+    await P.deleteProject(d.slug);
   });
 
   test("its draft takes block comments and versions", async () => {
@@ -195,28 +222,13 @@ describe("replies, a special kind of project", () => {
     expect((await V.listVariants(r.slug)).length).toBe(1);
   });
 
-  test("a note can be filed under it and tagged with a project, which connects the two", async () => {
-    const project = await P.createProject({ title: "Panel prep" });
-    const note = await N.createNote({
-      body: para("they asked about the panel") as never,
-      links: [{ rel: "filed-under", to: { id: r.id } }, { rel: "about", to: { id: project.id } }],
-    });
-    expect(note.links).toEqual([
-      { rel: "filed-under", to: { id: r.id }, label: "Tola's panel" },
-      { rel: "about", to: { id: project.id }, label: "Panel prep" },
-    ]);
-  });
-
-  test("it is trashed and restored with its comments and notes", async () => {
+  test("it is trashed and restored with its comments, keeping its type", async () => {
     await P.deleteProject(r.slug);
     expect(await P.getProject(r.slug)).toBeNull();
-    expect((await P.listTrashedProjects()).find((t) => t.id === r.id)?.kind).toBe("reply");
     expect((await C.listComments()).some((c) => c.text === "too blunt?")).toBe(false);
-    expect((await N.listNotes()).some((n) => n.links.some((l) => l.to.id === r.id))).toBe(false);
     const back = await P.restoreProject(r.id);
-    expect(back?.kind).toBe("reply");
+    expect(back?.type).toBe("message");
     expect((await C.listComments()).some((c) => c.text === "too blunt?")).toBe(true);
     expect((await V.listVariants(back!.slug)).length).toBe(1);
-    expect((await N.listNotes()).some((n) => n.links.some((l) => l.to.id === r.id))).toBe(true);
   });
 });

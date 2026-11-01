@@ -157,6 +157,16 @@ function stripEchoes(raw: string): string {
     .trim();
 }
 
+/** Compose's markdown: nothing echoed around it, its headings kept (they
+ * are the structure it was asked for). */
+export function cleanMarkdown(raw: string): string {
+  return raw
+    .trim()
+    .replace(/^```[a-z]*\n?|\n?```$/g, "")
+    .replace(/^<([a-z_]+)>\s*([\s\S]*?)\s*<\/\1>$/, "$2")
+    .trim();
+}
+
 /** Another version of a block: one block of plain text (a version is one
  * block, with line breaks for its paragraphs), nothing echoed around it. */
 export function cleanBlock(raw: string): string {

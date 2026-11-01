@@ -1,7 +1,9 @@
 import type { Thing } from "@/lib/store";
+import { readOverrides } from "@/lib/plugins/writing-assist/switches";
 import { formatRelative } from "./time";
 import { parseBody } from "./blocks";
-import { REPLY_CHANNELS, briefFromHeader, type Attachment, type BlockVariant, type Comment, type Note, type Project, type ReplyChannel } from "@/app/lib/writing-os/types";
+import { briefFromHeader, type Attachment, type BlockVariant, type Comment, type Note, type Project } from "@/app/lib/writing-os/types";
+import { isWritingType } from "@/lib/plugins/writing-types";
 import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 
 // Things, in the shapes the API routes return. Relationships are passed
@@ -17,22 +19,14 @@ export function toProject(t: Thing): Project {
     title: (h.title as string) ?? "",
     subtitle: (h.subtitle as string) ?? "",
     brief: briefFromHeader(h),
-    titleCandidates: (h.title_candidates as Project["titleCandidates"]) ?? [],
-    subtitleCandidates: (h.subtitle_candidates as Project["subtitleCandidates"]) ?? [],
+    attachments: Array.isArray(h.attachments) ? (h.attachments as Attachment[]) : [],
     status: (h.status as string) ?? "active",
     updatedAt: t.header.updated_at ?? EPOCH,
     createdAt: t.header.created_at ?? EPOCH,
     order: h.order as number | undefined,
-    pluginOverrides: h.plugin_overrides && typeof h.plugin_overrides === "object" ? (h.plugin_overrides as Record<string, boolean>) : undefined,
-    kind: t.header.kind === "reply" ? "reply" : "project",
-    ...(t.header.kind === "reply"
-      ? {
-          channel: REPLY_CHANNELS.includes(h.channel as ReplyChannel) ? (h.channel as ReplyChannel) : "other",
-          replyingTo: (h.replying_to as string) ?? "",
-          replyingToUrl: (h.replying_to_url as string | undefined) || undefined,
-          intent: (h.intent as string) ?? "",
-        }
-      : {}),
+    pluginOverrides: h.plugin_overrides && typeof h.plugin_overrides === "object" ? readOverrides(h.plugin_overrides) : undefined,
+    ...(isWritingType(h.type) ? { type: h.type } : {}),
+    ...(h.brief_reads && typeof h.brief_reads === "object" ? { briefReads: h.brief_reads as Project["briefReads"] } : {}),
   };
 }
 

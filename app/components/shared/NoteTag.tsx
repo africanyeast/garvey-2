@@ -9,7 +9,9 @@ import { TAG_KIND_LABEL } from "@/app/components/shared/TagKindIcon";
  * One tag on a note — a small gray chip, just its label. The label
  * truncates; the full text and its kind (project, section, block) are in the
  * tooltip. `href`, when present, makes the chip a link
- * to the project/section/block. `onRemove` adds a "×": shown on hover, or
+ * to the project/section/block; `onSelect` takes its place (e.g. filtering
+ * a list by this tag), and `selected` marks the tag currently filtered by.
+ * `onRemove` adds a "×": shown on hover, or
  * always with `alwaysRemovable` (the composer). Omit it (e.g. once a note
  * is resolved) for a plain, non-removable chip.
  */
@@ -17,6 +19,8 @@ export function NoteTag({
   tag,
   kind,
   href,
+  onSelect,
+  selected = false,
   onRemove,
   alwaysRemovable = false,
   size = "sm",
@@ -24,20 +28,34 @@ export function NoteTag({
   tag: string;
   kind: MentionTarget["kind"];
   href?: string;
+  onSelect?: () => void;
+  selected?: boolean;
   onRemove?: () => void;
   alwaysRemovable?: boolean;
   size?: "sm" | "md";
 }) {
   const text = size === "md" ? "text-[13px]" : "text-[12px]";
   const body = <span className="truncate">{tag}</span>;
-  const chip = `inline-flex items-center min-w-0 ${text} font-bold text-[var(--text-secondary)] no-underline`;
+  const chip = `inline-flex items-center min-w-0 ${text} font-bold no-underline ${selected ? "text-[var(--text-inverse)]" : "text-[var(--text-secondary)]"}`;
 
   return (
     <span
-      title={`${TAG_KIND_LABEL[kind]}: ${tag}`}
-      className="group relative inline-flex items-center max-w-full rounded-full bg-[var(--surface-chip)] px-[10px] py-[2px]"
+      title={onSelect ? `Show only notes tagged ${tag}` : `${TAG_KIND_LABEL[kind]}: ${tag}`}
+      className={`group relative inline-flex items-center max-w-full rounded-full px-[10px] py-[2px] ${selected ? "bg-neutral-900" : "bg-[var(--surface-chip)]"}`}
     >
-      {href ? (
+      {onSelect ? (
+        <button
+          type="button"
+          aria-pressed={selected}
+          onClick={(e) => {
+            e.stopPropagation();
+            onSelect();
+          }}
+          className={`${chip} bg-transparent border-none p-0 cursor-pointer ${selected ? "" : "hover:text-[var(--text-primary)]"}`}
+        >
+          {body}
+        </button>
+      ) : href ? (
         <Link href={href} onClick={(e) => e.stopPropagation()} className={`${chip} hover:text-[var(--text-primary)]`} style={{ color: "var(--text-secondary)" }}>
           {body}
         </Link>

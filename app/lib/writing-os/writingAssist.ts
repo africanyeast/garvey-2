@@ -2,14 +2,16 @@ import { createExtension, createStore } from "@blocknote/core";
 import { Plugin, PluginKey, type EditorState, type Transaction } from "prosemirror-state";
 import { Decoration, DecorationSet, type EditorView } from "prosemirror-view";
 import { blockPlainText } from "./blockText";
-import type { DraftEditor } from "./schema";
+import type { DraftBlock, DraftEditor, DraftPartialBlock } from "./schema";
+import { draftPageOf, fullDocumentOf, removingSections } from "./draftPage";
+import { splitDocument } from "./sections";
 
 /**
  * The writing assist in the draft editor (V2_SPEC.md Phase 6), as one
  * BlockNote extension, registered on the draft's editor only:
  *
  * - **Ghost text.** After a typing pause at the end of a paragraph, asks
- *   `/api/plugins/tab-completion` for the rest of the
+ *   the tab completion skill for the rest of the
  *   sentence and shows it after the cursor as a ProseMirror decoration —
  *   never as document content, and never by writing to the DOM directly
  *   (see the `comment-highlight-mutation-observer-loop` memory). Tab
@@ -19,14 +21,19 @@ import type { DraftEditor } from "./schema";
  *   opens what was sent in the inspector.
  * - **Continue writing.** ⌃J (or "/Continue writing") opens
  *   `NextBlockCard` for an optional instruction, then asks for the next
- *   paragraph (task "next-block"); the card shows it to accept, edit,
+ *   paragraph (skill "next-block"); the card shows it to accept, edit,
  *   discard or redo with a new instruction. Accepting fills the cursor's
  *   block if it is empty, otherwise inserts ordinary blocks after it.
  *
- * Tab completion and Continue writing are separate plugins (`tab-completion`,
- * `continue-writing`), sharing only this extension and its helpers. A block's
- * "another version" (task "alternate") uses `askAssist` directly from the
- * expanded block.
+ * - **Compose.** From a block's menu, a section, the doc menu or
+ *   "/Compose": `ComposeCard` under the scope (some blocks, a section's
+ *   text, or the whole writing) asks for an optional instruction, then
+ *   shows the finished text; accepting replaces the scope with it, and
+ *   discarding leaves the scope as it was.
+ *
+ * All are skills of the writing assist (`tab-completion`, `next-block`, `compose`),
+ * sharing this extension and its helpers. A block's "another version"
+ * (skill "alternate") uses `askAssist` directly from the expanded block.
  *
  * The server resolves everything the AI sees from links; this only sends
  * where the cursor is and the editor's live copy of the draft.
@@ -87,6 +94,47 @@ export interface NextBlock {
   error?: string;
 }
 
+/** What Compose replaces: blocks (in document order), one section's text,
+ * or the whole writing. */
+export type ComposeScope = { kind: "blocks"; ids: string[] } | { kind: "section"; id: string } | { kind: "draft" };
+
+export interface Compose {
+  status: "asking" | "loading" | "ready" | "error";
+  scope: ComposeScope;
+  text: string;
+  instruction?: string;
+  rejected?: string[];
+  runId?: string;
+  error?: string;
+}
+
+/** Every block id under `blocks`, children included. */
+function allIds(blocks: DraftBlock[]): string[] {
+  return blocks.flatMap((b) => [b.id, ...allIds(b.children as DraftBlock[])]);
+}
+
+/** Compose's markdown as blocks for its scope. A writing without sections
+ * has no headings; a whole writing with them turns each `#`/`##` heading
+ * into a section holding what follows it. */
+export function composedBlocks(editor: DraftEditor, markdown: string, scope: ComposeScope, sections: boolean): DraftPartialBlock[] {
+  const parsed = editor.tryParseMarkdownToBlocks(markdown) as DraftPartialBlock[];
+  const flat = (b: DraftPartialBlock): DraftPartialBlock => (b.type === "heading" ? { ...b, type: "paragraph", props: {} } : b);
+  if (!sections) return parsed.map(flat);
+  if (scope.kind !== "draft") return parsed;
+  const out: DraftPartialBlock[] = [];
+  let section: DraftPartialBlock | null = null;
+  for (const b of parsed) {
+    const level = (b.props as { level?: number } | undefined)?.level ?? 1;
+    if (b.type === "heading" && level <= 2) {
+      // An id now: its blocks are kept by it until its page is opened.
+      section = { id: crypto.randomUUID(), type: "section", content: b.content, children: [] };
+      out.push(section);
+    } else if (section) (section.children as DraftPartialBlock[]).push(b);
+    else out.push(b);
+  }
+  return out;
+}
+
 const ghostKey = new PluginKey<Ghost | null>("wosGhostText");
 /** The block the continue-writing card sits under, or null when closed. */
 const cardKey = new PluginKey<string | null>("wosAssistCard");
@@ -106,10 +154,9 @@ function afterBlock(state: EditorState, blockId: string): number | null {
   return at;
 }
 
-/** A run's page in the inspector: ghost text is tab completion's, anything
- * the writer asked for is continue writing's. */
-function inspectorHref(runId: string, plugin: "tab-completion" | "continue-writing" | "refine" = "continue-writing") {
-  return `/plugins/${plugin}?run=${encodeURIComponent(runId)}`;
+/** A run's page in the inspector: every skill's is the writing assist's. */
+function inspectorHref(runId: string) {
+  return `/plugins/writing-assist?run=${encodeURIComponent(runId)}`;
 }
 
 function ghostWidget(ghost: Ghost): HTMLElement {
@@ -122,7 +169,7 @@ function ghostWidget(ghost: Ghost): HTMLElement {
     link.className = "wos-ghost-inspect";
     link.textContent = "↗";
     link.title = "Tab to accept · see what was sent";
-    link.href = inspectorHref(ghost.runId, "tab-completion");
+    link.href = inspectorHref(ghost.runId);
     link.target = "_blank";
     link.rel = "noopener";
     // Keep the editor's selection where it is.
@@ -134,8 +181,10 @@ function ghostWidget(ghost: Ghost): HTMLElement {
 
 export async function askAssist(
   body: {
-    task: "continue" | "next-block" | "alternate";
-    cursor: { thing: string; block: string };
+    task: "continue" | "next-block" | "alternate" | "compose";
+    cursor: { thing: string; block: string; blocks?: string[] };
+    /** Compose's scope kind. */
+    scope?: ComposeScope["kind"];
     document: unknown;
     instruction?: string;
     /** The suggestion the instruction reshapes. */
@@ -149,10 +198,13 @@ export async function askAssist(
   onText?: (soFar: string) => void
 ): Promise<{ text: string; runId?: string }> {
   const stream = !!onText && body.task !== "continue";
-  const res = await fetch(`/api/plugins/${body.task === "continue" ? "tab-completion" : "continue-writing"}`, {
+  // "continue" is the ghost text: the tab completion skill.
+  const { task, ...rest } = body;
+  const request = { ...rest, skill: task === "continue" ? "tab-completion" : task };
+  const res = await fetch("/api/plugins/writing-assist", {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify(stream ? { ...body, stream: true } : body),
+    body: JSON.stringify(stream ? { ...request, stream: true } : request),
     signal,
   });
   if (!stream || !res.ok || !res.body) {
@@ -203,7 +255,7 @@ export const WritingAssistExtension = createExtension(
     const setProjectId = (id: string) => {
       projectId = id;
     };
-    const store = createStore<{ nextBlock: NextBlock | null }>({ nextBlock: null });
+    const store = createStore<{ nextBlock: NextBlock | null; compose: Compose | null }>({ nextBlock: null, compose: null });
     // Set when the server says the plugin is off (globally, or for this
     // project): no more ghost requests until a plugin switch changes.
     let disabled = false;
@@ -232,10 +284,11 @@ export const WritingAssistExtension = createExtension(
 
     /** Opens the card for an optional instruction; nothing is sent yet. */
     const askNextBlock = () => {
+      clearCompose();
       nextBlockAbort?.abort();
       nextBlockAbort = null;
       const blockId = cursorBlock().block.id;
-      store.setState({ nextBlock: { status: "asking", blockId, text: "" } });
+      store.setState({ ...store.state, nextBlock: { status: "asking", blockId, text: "" } });
       placeCard(blockId);
     };
 
@@ -253,17 +306,18 @@ export const WritingAssistExtension = createExtension(
       nextBlockAbort = abort;
       const note = instruction.trim() || undefined;
       const base = { blockId, instruction: note, rejected };
-      store.setState({ nextBlock: { ...base, status: "loading", text: "" } });
+      store.setState({ ...store.state, nextBlock: { ...base, status: "loading", text: "" } });
       askAssist(
-        { task: "next-block", cursor: { thing: projectId, block: blockId }, document: editor.document, instruction: note, revise, rejected },
+        { task: "next-block", cursor: { thing: projectId, block: blockId }, document: fullDocumentOf(editor), instruction: note, revise, rejected },
         abort.signal,
         (soFar) => {
-          if (!abort.signal.aborted) store.setState({ nextBlock: { ...base, status: "loading", text: soFar } });
+          if (!abort.signal.aborted) store.setState({ ...store.state, nextBlock: { ...base, status: "loading", text: soFar } });
         }
       )
         .then(({ text, runId }) => {
           if (abort.signal.aborted) return;
           store.setState({
+            ...store.state,
             nextBlock: text
               ? { ...base, status: "ready", text, runId }
               : { ...base, status: "error", text: "", runId, error: "Nothing came back." },
@@ -271,15 +325,131 @@ export const WritingAssistExtension = createExtension(
         })
         .catch((err: Error) => {
           if (abort.signal.aborted) return;
-          store.setState({ nextBlock: { ...base, status: "error", text: "", error: err.message } });
+          store.setState({ ...store.state, nextBlock: { ...base, status: "error", text: "", error: err.message } });
         });
     };
 
     const clearNextBlock = () => {
       nextBlockAbort?.abort();
       nextBlockAbort = null;
-      store.setState({ nextBlock: null });
+      store.setState({ ...store.state, nextBlock: null });
       placeCard(null);
+    };
+
+    // --- Compose --------------------------------------------------------
+
+    let composeAbort: AbortController | null = null;
+
+    /** The scope's blocks in this editor as they are now, in document
+     * order. A section is composed on its own page, where its blocks are
+     * the whole editor; the whole writing, on the writing's page (its
+     * blocks and section rows; the sections' text is in `fullDocumentOf`). */
+    const scopeBlocks = (scope: ComposeScope): DraftBlock[] => {
+      if (scope.kind === "draft") return editor.document;
+      if (scope.kind === "section") return draftPageOf(editor)?.page === scope.id ? editor.document : [];
+      const wanted = new Set(scope.ids);
+      const found: DraftBlock[] = [];
+      const visit = (bs: DraftBlock[]) => bs.forEach((b) => (wanted.has(b.id) ? found.push(b) : visit(b.children as DraftBlock[])));
+      visit(editor.document);
+      return found;
+    };
+
+    /** The card goes under the scope: its last block, the section, or the
+     * writing's last block. */
+    const composeAnchor = (scope: ComposeScope): string | null => {
+      const blocks = scopeBlocks(scope);
+      return blocks[blocks.length - 1]?.id ?? null;
+    };
+
+    /** Opens the card for an optional instruction; nothing is sent yet. */
+    const askCompose = (scope: ComposeScope) => {
+      clearNextBlock();
+      clearCompose();
+      const anchor = composeAnchor(scope);
+      if (!anchor) return;
+      store.setState({ ...store.state, compose: { status: "asking", scope, text: "" } });
+      placeCard(anchor);
+    };
+
+    /** Asks for the composed text: a fresh try, or (`revise`) a reshape of
+     * the one showing. */
+    const requestCompose = (instruction = "", revise?: string) => {
+      const prev = store.state.compose;
+      if (!prev) return;
+      const shown = prev.status === "ready" ? prev.text : undefined;
+      if (shown) reportOutcome(prev.runId, "dismissed");
+      const rejected = revise ? [] : [...(prev.rejected ?? []), ...(shown ? [shown] : [])].slice(-3);
+      composeAbort?.abort();
+      const abort = new AbortController();
+      composeAbort = abort;
+      const note = instruction.trim() || undefined;
+      const base = { scope: prev.scope, instruction: note, rejected };
+      const set = (compose: Compose) => store.setState({ ...store.state, compose });
+      set({ ...base, status: "loading", text: "" });
+      const { scope } = prev;
+      const ids =
+        scope.kind === "section" ? [scope.id, ...allIds(scopeBlocks(scope))] : scope.kind === "draft" ? allIds(fullDocumentOf(editor)) : allIds(scopeBlocks(scope));
+      const block = scope.kind === "section" ? scope.id : scope.kind === "blocks" ? (ids[0] ?? "") : "";
+      askAssist(
+        { task: "compose", scope: scope.kind, cursor: { thing: projectId, block, blocks: ids }, document: fullDocumentOf(editor), instruction: note, revise, rejected },
+        abort.signal,
+        (soFar) => {
+          if (!abort.signal.aborted) set({ ...base, status: "loading", text: soFar });
+        }
+      )
+        .then(({ text, runId }) => {
+          if (abort.signal.aborted) return;
+          set(text ? { ...base, status: "ready", text, runId } : { ...base, status: "error", text: "", runId, error: "Nothing came back." });
+        })
+        .catch((err: Error) => {
+          if (abort.signal.aborted) return;
+          set({ ...base, status: "error", text: "", error: err.message });
+        });
+    };
+
+    function clearCompose() {
+      composeAbort?.abort();
+      composeAbort = null;
+      if (!store.state.compose) return;
+      store.setState({ ...store.state, compose: null });
+      placeCard(null);
+    }
+
+    const discardCompose = () => {
+      const pending = store.state.compose;
+      if (pending?.status === "ready") reportOutcome(pending.runId, "dismissed");
+      clearCompose();
+    };
+
+    /** Replaces the scope with the (possibly edited) text, and puts the
+     * cursor at its end. `sections`: whether the writing has them. */
+    const acceptCompose = (text: string, sections: boolean) => {
+      const pending = store.state.compose;
+      clearCompose();
+      if (!pending || !text.trim()) return;
+      const blocks = composedBlocks(editor, text.trim(), pending.scope, sections);
+      if (!blocks.length) return;
+      reportOutcome(pending.runId, text.trim() === pending.text.trim() ? "accepted" : "edited", text.trim().length);
+      const { scope } = pending;
+      const old = scopeBlocks(scope);
+      if (!old.length) return;
+      let inserted: DraftBlock[] = [];
+      if (scope.kind === "draft" && sections) {
+        // The whole writing: its sections become rows on this page, their
+        // text kept for their own pages.
+        const split = splitDocument(blocks as DraftBlock[]);
+        draftPageOf(editor)?.host.putSections(split.sections);
+        removingSections(editor, () => {
+          inserted = editor.replaceBlocks(old.map((b) => b.id), split.writing as DraftPartialBlock[]).insertedBlocks as DraftBlock[];
+        });
+      } else {
+        inserted = editor.replaceBlocks(old.map((b) => b.id), blocks).insertedBlocks as DraftBlock[];
+      }
+      // Into the last block's text, nested blocks included.
+      let last = inserted[inserted.length - 1];
+      while (last?.children?.length) last = last.children[last.children.length - 1] as DraftBlock;
+      if (last && last.type !== "sectionLink") editor.setTextCursorPosition(last, "end");
+      editor.focus();
     };
 
     const discardNextBlock = () => {
@@ -361,7 +531,7 @@ export const WritingAssistExtension = createExtension(
           inFlight = abort;
           const docAtRequest = state.doc;
           const pos = selection.head;
-          askAssist({ task: "continue", cursor: { thing: at.projectId, block: at.block.id }, document: editor.document }, abort.signal)
+          askAssist({ task: "continue", cursor: { thing: at.projectId, block: at.block.id }, document: fullDocumentOf(editor) }, abort.signal)
             .then(({ text, runId }) => {
               if (abort.signal.aborted) return;
               inFlight = null;
@@ -423,7 +593,21 @@ export const WritingAssistExtension = createExtension(
           const blockId = cardKey.getState(state);
           const pos = blockId && cardHost ? afterBlock(state, blockId) : null;
           if (pos === null || !cardHost) return null;
+          // What an open Compose would replace is marked, so the writer
+          // sees its reach (not the whole writing: that's everything).
+          const scope = store.state.compose?.scope;
+          const marked = new Set(scope?.kind === "blocks" ? scope.ids : scope?.kind === "section" ? scopeBlocks(scope).map((b) => b.id) : []);
+          const marks: Decoration[] = [];
+          if (marked.size) {
+            state.doc.descendants((node, at) => {
+              if (node.type.name !== "blockContainer") return true;
+              if (!marked.has(node.attrs.id)) return true;
+              marks.push(Decoration.node(at, at + node.nodeSize, { class: "wos-compose-scope" }));
+              return false;
+            });
+          }
           return DecorationSet.create(state.doc, [
+            ...marks,
             Decoration.widget(pos, () => cardHost, {
               side: 1,
               key: "wos-assist-card",
@@ -445,6 +629,10 @@ export const WritingAssistExtension = createExtension(
       requestNextBlock,
       acceptNextBlock,
       discardNextBlock,
+      askCompose,
+      requestCompose,
+      acceptCompose,
+      discardCompose,
       cardHost,
       prosemirrorPlugins: [ghostPlugin, cardPlugin],
       keyboardShortcuts: {
@@ -466,6 +654,10 @@ export const WritingAssistExtension = createExtension(
           }
           if (store.state.nextBlock) {
             discardNextBlock();
+            return true;
+          }
+          if (store.state.compose) {
+            discardCompose();
             return true;
           }
           return false;

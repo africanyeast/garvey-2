@@ -2,14 +2,9 @@
 
 import { useEffect, useRef, useState, Fragment } from "react";
 import { useRouter } from "next/navigation";
-import { Search, FileText, Inbox, Reply } from "lucide-react";
+import { Search, Inbox } from "lucide-react";
 import type { SearchResult } from "@/lib/search";
-
-const KIND_ICON: Record<SearchResult["kind"], typeof FileText> = {
-  project: FileText,
-  reply: Reply,
-  note: Inbox,
-};
+import { TYPE_PLUGINS } from "@/lib/plugins/writing-types";
 
 /** Splits `text` on case-insensitive occurrences of `query`, wrapping each
  * match in a <mark> — Notion-style highlighted search results. */
@@ -111,7 +106,7 @@ export function SearchModal({ onClose }: { onClose: () => void }) {
             </div>
           )}
           {results.map((result, i) => {
-            const Icon = KIND_ICON[result.kind];
+            const Icon = result.kind === "note" ? Inbox : TYPE_PLUGINS[result.writingType ?? "document"].type.icon;
             return (
               <button
                 key={`${result.kind}-${result.projectSlug}-${result.noteId ?? ""}-${i}`}

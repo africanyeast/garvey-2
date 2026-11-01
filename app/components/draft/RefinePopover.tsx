@@ -160,7 +160,7 @@ export function RefinePopover() {
             <>
               {" · "}
               <a
-                href={inspectorHref(refining.runId, "refine")}
+                href={inspectorHref(refining.runId)}
                 target="_blank"
                 rel="noopener"
                 className="no-underline hover:underline"

@@ -24,6 +24,11 @@ interface NoteRowProps {
   onToggleResolved: () => void;
   onRemoveTag: (tag: ResolvedTag) => void;
   onDelete: () => void;
+  /** When present, clicking a tag calls this (e.g. to filter a list by it)
+   * instead of following the tag's link. */
+  onSelectTag?: (tag: ResolvedTag) => void;
+  /** The tag a list is currently filtered by, shown as selected. */
+  selectedTag?: { kind: ResolvedTag["kind"]; tagId: string } | null;
   /** When present, an image opened straight from this row (without first
    * expanding into the full note) still docks the transcription panel
    * beside its lightbox — a click on the thumbnail stops here rather than
@@ -57,6 +62,8 @@ export function NoteRow({
   onToggleResolved,
   onRemoveTag,
   onDelete,
+  onSelectTag,
+  selectedTag,
   onSetTranscription,
 }: NoteRowProps) {
   const shownTags = tags.filter((t) => !(hideProjectTag && t.kind === "project"));
@@ -92,6 +99,8 @@ export function NoteRow({
                   tag={t.text}
                   kind={t.kind}
                   href={t.href}
+                  onSelect={onSelectTag && (() => onSelectTag(t))}
+                  selected={!!selectedTag && selectedTag.kind === t.kind && selectedTag.tagId === t.tagId}
                   onRemove={resolved ? undefined : () => onRemoveTag(t)}
                 />
               ))}

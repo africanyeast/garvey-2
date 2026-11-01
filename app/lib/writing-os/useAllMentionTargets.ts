@@ -2,15 +2,19 @@
 
 import { useEffect, useMemo, useState } from "react";
 import { useWritingOS } from "./context";
+import { useOptionalDraftEditor } from "./editor-context";
 import { buildProjectTargets, sectionMentionTargets, blockMentionTargets, type MentionTarget } from "./mentions";
 import type { DraftBlock } from "./schema";
 
-/** Every project's and reply's own draft doc, fetched once and combined into "@"/"#"
+/** Every project's own draft doc, fetched once and combined into "@"/"#"
  * mention targets across all of them — for composers that aren't scoped to
- * one project: the Inbox composer, and an inbox item's expanded view. */
+ * one project: the Inbox composer, and an inbox item's expanded view.
+ * The draft open right now (if any) is read live from its editor instead,
+ * so a section or block added a moment ago is taggable straight away — its
+ * fetched copy is only as fresh as when this mounted. */
 export function useAllMentionTargets(): MentionTarget[] {
-  const { projectsList: projects, repliesList } = useWritingOS();
-  const projectsList = useMemo(() => [...projects, ...repliesList], [projects, repliesList]);
+  const { projectsList, activeProjectId } = useWritingOS();
+  const liveDoc = useOptionalDraftEditor()?.document;
   const [docsBySlug, setDocsBySlug] = useState<Record<string, DraftBlock[]>>({});
 
   useEffect(() => {
@@ -35,9 +39,10 @@ export function useAllMentionTargets(): MentionTarget[] {
     const idBySlug = new Map(projectsList.map((p) => [p.slug, p.id]));
     const sectionsAndBlocks = Object.entries(docsBySlug).flatMap(([slug, doc]) => {
       const projectId = idBySlug.get(slug);
-      if (!projectId) return [];
+      if (!projectId || (liveDoc && projectId === activeProjectId)) return [];
       return [...sectionMentionTargets(doc, projectId), ...blockMentionTargets(doc, projectId)];
     });
-    return [...projects, ...sectionsAndBlocks];
-  }, [projectsList, docsBySlug]);
+    const live = liveDoc && activeProjectId ? [...sectionMentionTargets(liveDoc, activeProjectId), ...blockMentionTargets(liveDoc, activeProjectId)] : [];
+    return [...projects, ...live, ...sectionsAndBlocks];
+  }, [projectsList, docsBySlug, liveDoc, activeProjectId]);
 }

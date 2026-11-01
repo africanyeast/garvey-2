@@ -95,6 +95,8 @@ export interface PluginContext<TInput = unknown> {
    * on, whichever plugin it is. */
   call: CallControl;
   input: TInput;
+  /** The task this call runs, for a plugin that has `tasks`. */
+  task?: string;
 }
 
 export interface PluginResult<TData = unknown> {
@@ -114,5 +116,5 @@ export interface Plugin<TInput = unknown, TData = unknown> {
   /** A short title for a call, to recognise it by in the plugin's history
    * ("Synonyms for “bold”"). Optional: without it the history falls back to
    * the input, the words before the cursor, or the task. */
-  describe?: (input: TInput) => string | undefined;
+  describe?: (input: TInput, task?: string) => string | undefined;
 }

@@ -62,8 +62,8 @@ export function documentPlainText(blocks: DraftPartialBlock[]): string {
 }
 
 /**
- * Flattens agent-produced blocks back down to a markdown string — used to
- * hand a `ContentPlacement`'s blocks to a caller that only knows how to
+ * Flattens blocks back down to a markdown string — used to hand a
+ * transcription's blocks to a caller that only knows how to
  * insert plain text (which then re-parses it into real blocks itself, e.g.
  * `NoteDetail`'s `onInsertText`). A list item's marker is written out
  * explicitly since the reader on the other end is `tryParseMarkdownToBlocks`,

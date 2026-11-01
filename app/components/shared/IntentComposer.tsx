@@ -4,6 +4,7 @@ import { Fragment, useEffect, useMemo, useRef, useState, type ChangeEvent, type 
 import { ArrowUp, Paperclip, X } from "lucide-react";
 import type { Attachment } from "@/app/lib/writing-os/types";
 import { searchMentionTargets, type MentionTarget } from "@/app/lib/writing-os/mentions";
+import { uploadFiles } from "@/app/lib/writing-os/attachments";
 import { ATTACHMENT_ACCEPT, MAX_UPLOAD_FILES, pastedFiles, rejectionNotice } from "@/app/lib/writing-os/fileDrop";
 import { MentionResults } from "@/app/components/shared/MentionResults";
 import { NoteTag } from "@/app/components/shared/NoteTag";
@@ -263,18 +264,11 @@ export function IntentComposer({
     onAttachmentsChange?.((attachments ?? []).filter((a) => a.url !== url));
   };
 
-  const uploadFiles = async (files: File[]) => {
+  const attachFiles = async (files: File[]) => {
     if (files.length === 0 || !onAttachmentsChange) return;
     setUploading(true);
     try {
-      const form = new FormData();
-      for (const file of files) form.append("files", file);
-      const res = await fetch("/api/uploads", { method: "POST", body: form });
-      if (!res.ok) {
-        setNotice("Couldn't attach the files. Try again.");
-        return;
-      }
-      const uploaded: Attachment[] = await res.json();
+      const uploaded = await uploadFiles(files);
       onAttachmentsChange([...(attachmentsRef.current ?? []), ...uploaded]);
     } catch {
       setNotice("Couldn't attach the files. Try again.");
@@ -289,7 +283,7 @@ export function IntentComposer({
   const drop = useFileDrop({
     onDrop: (accepted, rejected) => {
       setNotice(rejectionNotice(rejected, "not a type a note can carry"));
-      void uploadFiles(accepted);
+      void attachFiles(accepted);
     },
     accept: ATTACHMENT_ACCEPT,
     maxFiles: MAX_UPLOAD_FILES,
@@ -304,7 +298,7 @@ export function IntentComposer({
     if (files.length > 0) {
       e.preventDefault();
       setNotice(null);
-      void uploadFiles(files);
+      void attachFiles(files);
       return;
     }
     const text = e.clipboardData.getData("text");

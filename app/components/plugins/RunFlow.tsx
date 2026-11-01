@@ -3,6 +3,7 @@
 import { useState, type ReactNode } from "react";
 import type { ManifestEntry } from "@/lib/context/resolve";
 import type { OutcomeStatus, PluginRun } from "@/lib/context/runs";
+import { typeDeclaration } from "@/lib/plugins/writing-types";
 import { Value } from "./Value";
 
 /**
@@ -20,14 +21,8 @@ const GROUPS: Array<{ key: string; label: string; steps: number[]; empty: string
   { key: "text", label: "What you'd written", steps: [7], empty: "none" },
 ];
 
-/** A reply's call (artifacts/REPLY_SPEC.md): its brief and its linked
- * project in place of the piece, no sections, comments on its block. */
-const REPLY_GROUPS: typeof GROUPS = [
-  GROUPS[0],
-  { key: "project", label: "The reply and its project", steps: [2, 4], empty: "nothing" },
-  { key: "spot", label: "Comments on this block", steps: [6], empty: "nothing linked" },
-  GROUPS[4],
-];
+/** A call in a writing with no sections (a tweet, email or message). */
+const FLAT_GROUPS: typeof GROUPS = [GROUPS[0], { key: "project", label: "The whole writing", steps: [2, 4], empty: "nothing" }, GROUPS[3], GROUPS[4]];
 
 export const OUTCOME_LABELS: Record<OutcomeStatus, string> = {
   accepted: "Accepted",
@@ -119,7 +114,7 @@ export function RunFlow({ run }: { run: PluginRun }) {
   if (manifest) facts.push(["Context", `${fmtChars(manifest.chars)} of ${fmtChars(manifest.budget)} chars`]);
 
   const byGroup = manifest
-    ? (manifest.thingKind === "reply" ? REPLY_GROUPS : GROUPS).map((def) => ({
+    ? (typeDeclaration(manifest.writingType, !manifest.typeOff).editor.sections ? GROUPS : FLAT_GROUPS).map((def) => ({
         def,
         entries: manifest.items.filter((x) => def.steps.includes(x.step)),
         dropped: manifest.dropped.filter((x) => def.steps.includes(x.step)),

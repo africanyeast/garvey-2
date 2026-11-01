@@ -1,23 +1,22 @@
 import { createExtension } from "@blocknote/core";
 import { Plugin, PluginKey } from "prosemirror-state";
 import { Decoration, DecorationSet } from "prosemirror-view";
-import { moveIntoSection } from "./sections";
+import { draftPageOf, takeBlocks } from "./draftPage";
 import type { DraftEditor } from "./schema";
 
 const key = new PluginKey<string | null>("wosSectionDrop");
 
-/** The section whose title row is under the pointer, if any. */
+/** The section whose row is under the pointer, if any. */
 function sectionAt(event: DragEvent): string | null {
-  const content = (event.target as Element | null)?.closest?.('.bn-block-content[data-content-type="section"]');
+  const content = (event.target as Element | null)?.closest?.('.bn-block-content[data-content-type="sectionLink"]');
   return content?.closest(".bn-block[data-id]")?.getAttribute("data-id") ?? null;
 }
 
 /**
- * Drag a block onto a section's title to drop it into that section, at the
- * top, whether the section is open, collapsed or empty. (BlockNote's own
- * drop only lands between blocks, so an empty or collapsed section had no
- * gap to drop into.) The title highlights while a block is held over it.
- * Dropping anywhere else is BlockNote's normal drop.
+ * On the writing's page: drag a block onto a section's row to move it into
+ * that section, at the top. The row highlights while a block is held over
+ * it. Dropping anywhere else is BlockNote's normal drop (between blocks).
+ * The block leaves this editor and joins the section's blocks, ids kept.
  */
 export const SectionDropExtension = createExtension(({ editor }) => ({
   key: "wosSectionDrop",
@@ -62,22 +61,24 @@ export const SectionDropExtension = createExtension(({ editor }) => ({
           const ids: string[] = [];
           slice.content.forEach((node) => node.attrs.id && ids.push(node.attrs.id));
           const draft = editor as unknown as DraftEditor;
-          // Any block drop (ours or BlockNote's) leaves the selection in the
-          // gap the block came from, which shows as a tall caret at the
-          // left. Put the cursor back in the moved block once it lands.
+          const host = draftPageOf(draft)?.host;
+          if (sectionId && moved && host && ids.length && ids.every((id) => draft.getBlock(id) && draft.getBlock(id)?.type !== "sectionLink")) {
+            event.preventDefault();
+            host.addToSection(sectionId, takeBlocks(draft, ids), "start");
+            return true;
+          }
+          // Any other block drop leaves the selection in the gap the block
+          // came from, which shows as a tall caret at the left. Put the
+          // cursor back in the moved block once it lands.
           if (ids.length) {
             setTimeout(() => {
               const last = draft.getBlock(ids[ids.length - 1]);
-              if (!last) return;
+              if (!last || last.type === "sectionLink") return;
               draft.setTextCursorPosition(last.id, "end");
               draft.focus();
             });
           }
-          if (!sectionId || !moved) return false;
-          if (!ids.length || ids.some((id) => id === sectionId || draft.getBlock(id)?.type === "section")) return false;
-          event.preventDefault();
-          [...ids].reverse().forEach((id) => moveIntoSection(draft, id, sectionId, "start"));
-          return true;
+          return false;
         },
       },
     }),

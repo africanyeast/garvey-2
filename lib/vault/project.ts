@@ -1,15 +1,17 @@
-import { PROJECT_LIKE_KINDS, SHARED_FIELDS, isProjectLike, newId, type Link, type Thing } from "@/lib/store";
+import { SHARED_FIELDS, newId, type Link, type Thing } from "@/lib/store";
 import { liveProjectBySlug, projectContents, vault } from "./store";
 import { toProject } from "./shapes";
 import { slugify } from "./slug";
-import type { Project, ProjectKind, TrashedProject } from "@/app/lib/writing-os/types";
-import { defaultReplyTitle, projectDisplayTitle } from "@/app/lib/writing-os/types";
+import type { Project, TrashedProject } from "@/app/lib/writing-os/types";
+import { projectDisplayTitle } from "@/app/lib/writing-os/types";
+import { isTypeOn, isWritingType, typeDeclaration } from "@/lib/plugins/writing-types";
+import type { BriefRead } from "@/lib/plugins/writing-type";
+import { getOSConfig } from "./config";
 
 // A project is one thing: its brief is the header, its draft is the body
 // (see lib/store). Its notes, comments, alt versions and threads are
-// separate things linked to it. A reply is a special kind of project
-// (artifacts/REPLY_SPEC.md): every function here handles both, and only
-// the brief fields differ.
+// separate things linked to it. What the writer sees as a "writing" is a
+// project with a type (artifacts/WRITING_TYPES_SPEC.md).
 
 /** The header fields a project's brief is stored under. `order` is only
  * present once the project has been dragged in the sidebar. The old
@@ -20,23 +22,13 @@ function briefFields(p: Omit<Project, "id" | "slug" | "createdAt" | "updatedAt">
     ...(p.order !== undefined ? { order: p.order } : {}),
     ...(p.pluginOverrides && Object.keys(p.pluginOverrides).length ? { plugin_overrides: p.pluginOverrides } : {}),
   };
-  if (p.kind === "reply") {
-    return {
-      title: p.title,
-      channel: p.channel ?? "other",
-      replying_to: p.replyingTo ?? "",
-      ...(p.replyingToUrl ? { replying_to_url: p.replyingToUrl } : {}),
-      intent: p.intent ?? "",
-      status: p.status,
-      ...shared,
-    };
-  }
   return {
+    ...(p.type ? { type: p.type } : {}),
     title: p.title,
     subtitle: p.subtitle,
     brief: p.brief,
-    title_candidates: p.titleCandidates,
-    subtitle_candidates: p.subtitleCandidates,
+    ...(p.attachments?.length ? { attachments: p.attachments } : {}),
+    ...(p.briefReads && Object.keys(p.briefReads).length ? { brief_reads: p.briefReads } : {}),
     status: p.status,
     ...shared,
   };
@@ -45,17 +37,34 @@ function briefFields(p: Omit<Project, "id" | "slug" | "createdAt" | "updatedAt">
 function writeProject(t: Thing, p: Project): Thing {
   delete t.header.order;
   delete t.header.plugin_overrides;
-  delete t.header.replying_to_url;
+  delete t.header.attachments;
+  delete t.header.brief_reads;
   Object.assign(t.header, briefFields(p), { slug: p.slug, created_at: p.createdAt, updated_at: p.updatedAt });
   return t;
 }
 
-/** Top-level app routes a project's (or reply's) URL must not shadow. */
+/** Uploads in the vault (`/api/uploads/…`) or links, each with a label. */
+function validAttachments(v: unknown): v is Project["attachments"] {
+  return (
+    Array.isArray(v) &&
+    v.every(
+      (a) =>
+        a &&
+        typeof a === "object" &&
+        ["link", "image", "pdf", "file"].includes(a.kind) &&
+        typeof a.label === "string" &&
+        typeof a.url === "string" &&
+        (a.kind === "link" ? /^https?:\/\//.test(a.url) : a.url.startsWith("/api/uploads/"))
+    )
+  );
+}
+
+/** Top-level app routes a project's URL must not shadow. */
 const RESERVED_SLUGS = ["inbox", "style", "trash", "inspector", "api"];
 
 async function liveSlugs(): Promise<Set<string>> {
   const store = await vault();
-  return new Set([...RESERVED_SLUGS, ...(await store.list({ kind: PROJECT_LIKE_KINDS })).map((p) => p.header.slug as string)]);
+  return new Set([...RESERVED_SLUGS, ...(await store.list({ kind: "project" })).map((p) => p.header.slug as string)]);
 }
 
 /** `base`, or `base-2`, `base-3`… — the first not taken. */
@@ -75,10 +84,9 @@ function orderKey(p: Project): number {
   return p.order ?? Date.parse(p.createdAt) ?? 0;
 }
 
-/** Projects (by default), replies, or both. */
-export async function listProjects(kind: ProjectKind | "all" = "project"): Promise<Project[]> {
+export async function listProjects(): Promise<Project[]> {
   const store = await vault();
-  return (await store.list({ kind: kind === "all" ? PROJECT_LIKE_KINDS : kind }))
+  return (await store.list({ kind: "project" }))
     .map(toProject)
     .sort((a, b) => orderKey(b) - orderKey(a) || a.slug.localeCompare(b.slug));
 }
@@ -88,7 +96,9 @@ export async function getProject(slug: string): Promise<Project | null> {
   return p ? toProject(p) : null;
 }
 
-export async function createProject(input: { title?: string; brief?: string; kind?: ProjectKind }): Promise<Project> {
+/** A new writing starts with no type: the writer picks one, or typing in
+ * its body makes it a document. */
+export async function createProject(input: { title?: string; brief?: string }): Promise<Project> {
   const store = await vault();
   // A brand-new project stays untitled (no fake "Untitled" title stored)
   // until the user actually sets one, or closes the brief without doing so
@@ -96,23 +106,13 @@ export async function createProject(input: { title?: string; brief?: string; kin
   // falls back to `slugify`'s own "untitled" default, uniquified below.
   const title = input.title?.trim() ?? "";
   const slug = uniqueSlug(slugify(title), await liveSlugs());
-  const kind = input.kind ?? "project";
-  const brief = {
-    kind,
-    title,
-    subtitle: "",
-    brief: input.brief ?? "",
-    titleCandidates: title ? [{ text: title, current: true }] : [],
-    subtitleCandidates: [],
-    status: "active",
-    ...(kind === "reply" ? { channel: "other" as const, replyingTo: "", intent: "" } : {}),
-  };
+  const brief = { title, subtitle: "", brief: input.brief ?? "", attachments: [], status: "active" };
   // An empty body reads as today's empty draft (one paragraph).
-  const t = await store.create({ kind, body: "", fields: { slug, ...briefFields(brief) } });
+  const t = await store.create({ kind: "project", body: "", fields: { slug, ...briefFields(brief) } });
   return toProject(t);
 }
 
-// Trashes the project (or reply) together with its contents (its notes, alt
+// Trashes the project together with its contents (its notes, alt
 // versions, threads, and the comments on them and on its draft), each
 // marked `trashed_with` it so restore brings back exactly that set.
 // Nothing is destroyed.
@@ -150,7 +150,7 @@ export async function deleteProject(slug: string): Promise<boolean> {
 export async function restoreProject(id: string): Promise<Project | null> {
   const store = await vault();
   const p = await store.get(id);
-  if (!p || !isProjectLike(p.header.kind) || p.header.trashed_at === null) return null;
+  if (!p || p.header.kind !== "project" || p.header.trashed_at === null) return null;
   const slug = uniqueSlug(p.header.slug as string, await liveSlugs());
 
   for (const t of await projectContents(store, p.header.id, { trashedWith: true })) {
@@ -172,17 +172,16 @@ export async function restoreProject(id: string): Promise<Project | null> {
 /** Most recently trashed first. */
 export async function listTrashedProjects(): Promise<TrashedProject[]> {
   const store = await vault();
-  return (await store.list({ kind: PROJECT_LIKE_KINDS, trashed: true }))
+  return (await store.list({ kind: "project", trashed: true }))
     .map((p) => ({
       id: p.header.id,
-      kind: toProject(p).kind,
       title: projectDisplayTitle(toProject(p)),
       trashedAt: p.header.trashed_at as string,
     }))
     .sort((a, b) => b.trashedAt.localeCompare(a.trashedAt));
 }
 
-/** Persists a drag-and-drop reorder of the sidebar project list. `slugs` is
+/** Persists a drag-and-drop reorder of the sidebar's Writing list. `slugs` is
  * the full list in its new top-to-bottom order; each gets a descending
  * `order` value so newest drag-drop position sorts first, without touching
  * `updatedAt` (reordering isn't an edit). */
@@ -211,14 +210,31 @@ export async function updateProject(slug: string, patch: Partial<Omit<Project, "
   const p = await liveProjectBySlug(store, slug);
   if (!p) return null;
   const current = toProject(p);
+  if (patch.type !== undefined && !isWritingType(patch.type)) {
+    const { type: _bad, ...rest } = patch;
+    patch = rest;
+  }
+  // What a brief reader read is only ever written by it (`saveBriefRead`).
+  if ("briefReads" in patch) {
+    const { briefReads: _theirs, ...rest } = patch;
+    patch = rest;
+  }
+  if (patch.attachments !== undefined && !validAttachments(patch.attachments)) {
+    const { attachments: _bad, ...rest } = patch;
+    patch = rest;
+  }
 
-  // A reply's title follows its message until the writer sets one of their
-  // own: one still empty, or still the default for the old message, is
-  // replaced by the default for the new one.
-  if (current.kind === "reply" && patch.replyingTo !== undefined && patch.title === undefined) {
-    const auto = !current.title.trim() || current.title === defaultReplyTitle(current.replyingTo ?? "");
-    const title = defaultReplyTitle(patch.replyingTo);
-    if (auto && title) patch = { ...patch, title, titleCandidates: [{ text: title, current: true }] };
+  // A type whose title is only a label (a tweet, a message) makes it from
+  // the brief until the writer sets one of their own: one still empty, or
+  // still the default for the old brief, is replaced by the default for the
+  // new one. Only while that type's plugin is on.
+  const type = patch.type ?? current.type;
+  if (type && patch.title === undefined && (patch.brief !== undefined || patch.type !== undefined)) {
+    const overrides = patch.pluginOverrides ?? current.pluginOverrides;
+    const autoTitle = typeDeclaration(type, isTypeOn(type, overrides, (await getOSConfig()).plugins)).autoTitle;
+    const auto = autoTitle && (!current.title.trim() || current.title === autoTitle(current.brief));
+    const title = autoTitle?.(patch.brief ?? current.brief);
+    if (auto && title) patch = { ...patch, title };
   }
 
   // Every rename re-slugs to match the new title — safe because nothing
@@ -230,8 +246,23 @@ export async function updateProject(slug: string, patch: Partial<Omit<Project, "
     nextSlug = uniqueSlug(slugify(newTitle), await liveSlugs(), slug);
   }
 
-  // A thing's id and kind never change, whatever the patch says.
-  const next: Project = { ...current, ...patch, id: current.id, kind: current.kind, slug: nextSlug, updatedAt: new Date().toISOString() };
+  // A thing's id never changes, whatever the patch says.
+  const next: Project = { ...current, ...patch, id: current.id, slug: nextSlug, updatedAt: new Date().toISOString() };
+  await store.update(p.header.id, (x) => writeProject(x, next), { touch: false });
+  return next;
+}
+
+/** Keeps (or with null, forgets) what a type plugin's brief reader read,
+ * without counting as an edit. */
+export async function saveBriefRead(slug: string, plugin: string, read: BriefRead | null): Promise<Project | null> {
+  const store = await vault();
+  const p = await liveProjectBySlug(store, slug);
+  if (!p) return null;
+  const current = toProject(p);
+  const reads = { ...current.briefReads };
+  if (read) reads[plugin] = read;
+  else delete reads[plugin];
+  const next: Project = { ...current, briefReads: reads };
   await store.update(p.header.id, (x) => writeProject(x, next), { touch: false });
   return next;
 }
@@ -288,7 +319,6 @@ export async function duplicateProject(slug: string): Promise<Project | null> {
     id: remap.get(src.header.id)!,
     slug: newSlug,
     title: newTitle,
-    titleCandidates: newTitle ? [{ text: newTitle, current: true }] : [],
     createdAt: now,
     updatedAt: now,
   };
@@ -315,7 +345,7 @@ export async function duplicateProject(slug: string): Promise<Project | null> {
   const srcFields = copyFields(src);
   delete srcFields.order;
   await store.create({
-    kind: source.kind,
+    kind: "project",
     id: next.id,
     body: rewrite(src.body),
     created_at: now,

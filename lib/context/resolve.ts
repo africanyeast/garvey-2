@@ -1,7 +1,9 @@
 import { commentOn } from "@/lib/store/links";
-import { isProjectLike, type Link, type Thing } from "@/lib/store/types";
+import type { Link, Thing } from "@/lib/store/types";
 import { blockPlainText, flattenBlocksToMarkdown } from "@/app/lib/writing-os/blockText";
-import { briefFromHeader, projectDisplayTitle, replyChannelLabel, type Attachment, type ReplyChannel } from "@/app/lib/writing-os/types";
+import { briefFromHeader, projectDisplayTitle, type Attachment } from "@/app/lib/writing-os/types";
+import { isTypeOn, isWritingType, typeDeclaration, type WritingType } from "@/lib/plugins/writing-types";
+import type { BriefRead, TypeDeclaration } from "@/lib/plugins/writing-type";
 import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 
 // The AI rule (artifacts/MENTAL_MODEL.md, V2_SPEC.md Phase 5): what a
@@ -11,11 +13,9 @@ import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 // is in it and why. It is pure: the caller hands it the things, the style
 // and (optionally) the editor's live copy of the document.
 //
-// A reply (artifacts/REPLY_SPEC.md) resolves the same way with its own
-// rule: its brief (channel, the message, the intent) and, if it is about a
-// project, that project's brief in step 2; that project's own notes in
-// step 4; no outline and no section material; comments and versions on
-// the cursor's block as for a project. Nothing from any other project.
+// A writing whose type has no sections (a tweet, email or message;
+// artifacts/WRITING_TYPES_SPEC.md) resolves the same way with no outline,
+// and its brief opens with how that type should read.
 
 /** What a plugin may ask for. Each part needs a permission (`PART_PERMISSION`). */
 export const CONTEXT_PARTS = [
@@ -33,8 +33,10 @@ export type ContextPart = (typeof CONTEXT_PARTS)[number];
 
 /** How much of the document the plugin gets as its text: none, the block
  * the cursor is in, its section up to the cursor, its whole section split
- * around the cursor's block (`documentParts`), or all of it. */
-export type DraftScope = "none" | "block" | "section-to-cursor" | "section" | "draft";
+ * around the cursor's block (`documentParts`), all of it, or the cursor's
+ * span (`Cursor.blocks`) as one piece, split from the rest of its section
+ * the same way. */
+export type DraftScope = "none" | "block" | "section-to-cursor" | "section" | "draft" | "span";
 
 export interface ContextDeclaration {
   include: ContextPart[];
@@ -64,8 +66,15 @@ export const PART_PERMISSION: Record<ContextPart | "draft", "read:style" | "read
  * "section-to-cursor". */
 export interface Cursor {
   thing?: string;
+  /** "" for no place in it: the writing as a whole (its title, say), which
+   * "draft" scope reads unmarked. */
   block: string;
   offset?: number;
+  /** A run of blocks the call is about (Compose's scope), `block` among
+   * them: what is linked to any of them counts as linked to this place,
+   * and "span" scope reads them as one piece. A section's id counts as
+   * its title only; its blocks are listed too. */
+  blocks?: string[];
 }
 
 /** Bundle order, V2_SPEC.md Phase 5. */
@@ -104,8 +113,10 @@ export interface ManifestEntry {
 
 export interface ContextManifest {
   cursor: Cursor;
-  /** What the cursor is in: a project's draft or a reply's. */
-  thingKind?: "project" | "reply";
+  /** The type of the writing the cursor is in, once it has one. */
+  writingType?: WritingType;
+  /** Its type plugin was off: it was read as a plain writing. */
+  typeOff?: boolean;
   /** Where the document text came from: the editor's live copy, or the
    * vault (the last save). */
   documentSource: "editor" | "vault" | "none";
@@ -174,48 +185,38 @@ function parseDoc(body: string): Block[] {
 const titleOfProject = (p: Thing) =>
   projectDisplayTitle({ title: (p.header.title as string) ?? "", slug: (p.header.slug as string) ?? "" });
 
-function briefText(p: Thing): string {
-  const h = p.header as Record<string, unknown>;
-  const subtitle = typeof h.subtitle === "string" ? h.subtitle.trim() : "";
-  const brief = briefFromHeader(h).trim();
-  return [`Title: ${titleOfProject(p)}`, subtitle && `Subtitle: ${subtitle}`, brief]
-    .filter(Boolean)
-    .join("\n");
+const typeOf = (p: Thing): WritingType | undefined => (isWritingType(p.header.type) ? p.header.type : undefined);
+
+/** What a note's or brief's attachments say: an image's read text, a
+ * link's address. A file with neither says nothing. */
+function attachmentsText(attachments: Attachment[] | undefined): string[] {
+  const parts: string[] = [];
+  for (const a of attachments ?? []) {
+    const t = a.transcription ? flattenBlocksToMarkdown(a.transcription.blocks).trim() : "";
+    if (t) parts.push(`Transcript of ${a.label}:\n${t}`);
+    else if (a.kind === "link") parts.push(`Link: ${a.url}`);
+  }
+  return parts;
 }
 
-/** How each channel's reply should read, as the assist is told. */
-const CHANNEL_LINE: Record<ReplyChannel, string> = {
-  x: "This is a reply on X: plain text, at most 280 characters.",
-  whatsapp: "This is a WhatsApp reply: plain text, conversational.",
-  email: "This is an email reply.",
-  other: "This is a reply to a message.",
-};
-
-/** A reply's brief: the channel line, the message as pasted (and the link
- * it was pasted as), and what the writer wants to say. */
-function replyBriefText(r: Thing): string {
-  const h = r.header as Record<string, unknown>;
-  const str = (v: unknown) => (typeof v === "string" ? v.trim() : "");
-  const channel = (str(h.channel) in replyChannelLabel ? str(h.channel) : "other") as ReplyChannel;
-  const url = str(h.replying_to_url);
-  return [
-    CHANNEL_LINE[channel],
-    `Replying to${url ? ` (${url})` : ""}:\n${str(h.replying_to) || "(nothing pasted yet)"}`,
-    str(h.intent) && `What I want to say: ${str(h.intent)}`,
-  ]
-    .filter(Boolean)
-    .join("\n\n");
+/** The type's assist line, the title (and a document's subtitle), the
+ * brief, what its type's reader read there, then what its attachments say. */
+function briefText(p: Thing, decl: TypeDeclaration): string {
+  const h = p.header as Record<string, unknown>;
+  const subtitle = decl.fields.subtitle !== undefined && typeof h.subtitle === "string" ? h.subtitle.trim() : "";
+  const brief = briefFromHeader(h).trim();
+  const head = [`Title: ${titleOfProject(p)}`, subtitle && `Subtitle: ${subtitle}`, brief].filter(Boolean).join("\n");
+  const type = typeOf(p);
+  const read = type ? (h.brief_reads as Record<string, BriefRead> | undefined)?.[type] : undefined;
+  // Only what the brief still points at.
+  const found = decl.briefReader && read && decl.briefReader.find(brief) === read.key ? decl.briefReader.context(read) : "";
+  return [decl.assistLine, head, found, ...attachmentsText(h.attachments as Attachment[] | undefined)].filter(Boolean).join("\n\n");
 }
 
 /** A note's own text, and its attachments' transcripts. Nothing linked to
  * the note from elsewhere comes with it. */
 function noteText(n: Thing): string {
-  const parts = [flattenBlocksToMarkdown(parseDoc(n.body) as DraftPartialBlock[]).trim()];
-  for (const a of (n.header.attachments as Attachment[] | undefined) ?? []) {
-    const t = a.transcription ? flattenBlocksToMarkdown(a.transcription.blocks).trim() : "";
-    if (t) parts.push(`Transcript of ${a.label}:\n${t}`);
-    else if (a.kind === "link") parts.push(`Link: ${a.url}`);
-  }
+  const parts = [flattenBlocksToMarkdown(parseDoc(n.body) as DraftPartialBlock[]).trim(), ...attachmentsText(n.header.attachments as Attachment[] | undefined)];
   return parts.filter(Boolean).join("\n\n");
 }
 
@@ -235,6 +236,9 @@ export interface ResolveInput {
   /** The editor's current copy of the cursor's document, which can be a
    * save ahead of the vault. */
   document?: DraftPartialBlock[];
+  /** The plugins switched on globally, for whether the writing's type
+   * plugin is on. Left out: every type plugin is. */
+  enabledPlugins?: readonly string[];
 }
 
 export function resolveBundle(input: ResolveInput): ContextBundle {
@@ -243,13 +247,16 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
   const live = input.things.filter((t) => t.header.trashed_at === null);
   const thing = cursor?.thing ? live.find((t) => t.header.id === cursor.thing) : undefined;
   if (cursor?.thing && !thing) throw new ContextError(`nothing live at ${cursor.thing}`);
-  // A reply is a special kind of project: everything below that is the
-  // same for both uses `project`; where a reply differs, `reply` says so.
-  const project = isProjectLike(thing?.header.kind) ? thing : undefined;
-  const reply = project?.header.kind === "reply";
+  const project = thing?.header.kind === "project" ? thing : undefined;
+  const writingType = project ? typeOf(project) : undefined;
+  const typeOn =
+    !writingType ||
+    isTypeOn(writingType, project?.header.plugin_overrides as Record<string, boolean> | undefined, input.enabledPlugins ?? [writingType]);
+  const typeDecl = typeDeclaration(writingType, typeOn);
+  const withSections = typeDecl.editor.sections;
 
   const needsProject = decl.include.some((p) => p !== "style");
-  if (needsProject && !project) throw new ContextError("this plugin needs a cursor in a project's or reply's draft");
+  if (needsProject && !project) throw new ContextError("this plugin needs a cursor in a project's draft");
   if (decl.draft !== "none" && !cursor) throw new ContextError("this plugin needs a cursor");
 
   const doc: Block[] = (input.document as Block[] | undefined) ?? (thing ? parseDoc(thing.body) : []);
@@ -268,6 +275,13 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
     return (b && blockPlainText(b).trim()) || id;
   };
   const inDraft = new Set(blocks.map((b) => b.block.id).filter((id): id is string => !!id));
+  // The span's blocks, as places: sections among them are section places.
+  const span = new Set(cursor?.blocks ?? []);
+  const isSectionId = (id: string) => blocks.some((b) => b.block.id === id && b.block.type === "section");
+  // Linked to the cursor's block: with a span, any block of it (a section
+  // in it, even the cursor's, is a section place).
+  const isBlockPlace = (id: string | undefined) =>
+    !!id && (span.size ? (id === cursor?.block || span.has(id)) && !isSectionId(id) : id === cursor?.block);
 
   const items: BundleItem[] = [];
   const unanchored: ContextManifest["unanchored"] = [];
@@ -278,13 +292,9 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
   }
   // 2. Brief. 3. Outline.
   if (project && wants.has("brief")) {
-    if (reply) {
-      items.push({ step: 2, kind: "brief", id: project.header.id, title: `Reply brief: ${titleOfProject(project)}`, why: "the reply's brief", text: replyBriefText(project) });
-    } else {
-      items.push({ step: 2, kind: "brief", id: project.header.id, title: `Brief: ${titleOfProject(project)}`, why: "the project's brief", text: briefText(project) });
-    }
+    items.push({ step: 2, kind: "brief", id: project.header.id, title: `Brief: ${titleOfProject(project)}`, why: "the project's brief", text: briefText(project, typeDecl) });
   }
-  if (project && !reply && wants.has("outline")) {
+  if (project && withSections && wants.has("outline")) {
     const sections = blocks.filter((b) => b.block.type === "section").map((b) => blockPlainText(b.block).trim() || "(untitled section)");
     items.push({
       step: 3,
@@ -300,11 +310,11 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
     .filter((t) => t.header.kind === "note" && !(t.header.resolved as boolean | undefined))
     .sort((a, b) => a.header.id.localeCompare(b.header.id));
 
-  // 4–6. Notes, by how they are linked to this project or reply. A note
-  // linked to a place in it is scoped to that place; one linked to it
-  // alone reaches every section (decision 3). A note linked to a reply and
-  // a project is how the two are connected: it reaches both, and nothing
-  // else of the project comes with it.
+  // 4–6. Notes, by how they are linked to this project. A note linked to
+  // a place in it is scoped to that place; one linked to it alone reaches
+  // every section (decision 3). A note linked to two projects is how the
+  // two are connected: it reaches both, and nothing else of the other
+  // project comes with it.
   if (project) {
     const P = project.header.id;
     for (const n of liveNotes) {
@@ -314,14 +324,14 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
       const title = noteTitle(n);
       const make = (step: Step, why: string): BundleItem => ({ step, kind: "note", id: n.header.id, title, why, text: noteText(n) });
       if (!places.length) {
-        if (wants.has("project-material")) items.push(make(4, `linked to the ${reply ? "reply" : "project"}, not to a place in it`));
+        if (wants.has("project-material")) items.push(make(4, "linked to the project, not to a place in it"));
         continue;
       }
-      const onBlock = cursor && places.find((l) => l.to.block === cursor.block);
-      const onSection = places.find((l) => sections.includes(l.to.block as string));
+      const onBlock = cursor && places.find((l) => isBlockPlace(l.to.block));
+      const onSection = places.find((l) => sections.includes(l.to.block as string) || (span.has(l.to.block as string) && isSectionId(l.to.block as string)));
       if (onBlock && wants.has("block-material")) items.push(make(6, `linked to this block${onBlock.label ? ` (${onBlock.label})` : ""}`));
       else if (onSection && wants.has("section-material")) {
-        const own = onSection.to.block === sectionId;
+        const own = onSection.to.block === sectionId || !sections.includes(onSection.to.block as string);
         items.push(make(5, own ? `linked to this section (${sectionTitle(sectionId as string)})` : `linked to the enclosing section "${sectionTitle(onSection.to.block as string)}"`));
       }
       else if (!onBlock && !onSection) {
@@ -340,7 +350,7 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
 
     // 6. Unresolved comments on this block or its section.
     if (wants.has("comments") && cursor) {
-      const here = new Set([cursor.block, ...sections]);
+      const here = new Set([cursor.block, ...sections, ...span]);
       for (const c of live
         .filter((t) => t.header.kind === "comment" && !(t.header.resolved as boolean | undefined))
         .sort((a, b) => a.header.id.localeCompare(b.header.id))) {
@@ -351,7 +361,12 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
           kind: "comment",
           id: c.header.id,
           title: c.body.trim().slice(0, 60),
-          why: on.block === cursor.block ? "comment on this block" : on.block === sectionId ? "comment on this section" : "comment on an enclosing section",
+          why:
+            isBlockPlace(on.block)
+              ? "comment on this block"
+              : on.block === sectionId || span.has(on.block)
+                ? "comment on this section"
+                : "comment on an enclosing section",
           text: c.body.trim(),
         });
       }
@@ -382,7 +397,15 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
     let text = "";
     let why = "";
     let parts: DraftParts | undefined;
-    if (!at) {
+    if (decl.draft === "span" && !cursor.block) {
+      // No place: the whole writing is the span.
+      parts = { heading: "", before: "", block: blocks.map((b) => blockMarkdown(b.block)).filter(Boolean).join("\n\n"), after: "" };
+      text = parts.block;
+      why = "the whole document, to compose";
+    } else if (decl.draft === "draft" && !cursor.block) {
+      text = blocks.map((b) => blockMarkdown(b.block)).filter(Boolean).join("\n\n");
+      why = "the whole document";
+    } else if (!at) {
       why = "the cursor's block is not in the document";
     } else if (decl.draft === "block") {
       text = blockPlainText(at.block);
@@ -395,6 +418,22 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
         .filter(Boolean)
         .join("\n\n");
       why = "the whole document, with the cursor marked";
+    } else if (decl.draft === "span") {
+      // The span in document order (a section's own title is its heading,
+      // not part of it), and the rest of its section around it.
+      const inSpan = (b: (typeof blocks)[number]) => !!b.block.id && (b.block.id === cursor.block || span.has(b.block.id));
+      const md = (xs: typeof blocks) => xs.map((b) => blockMarkdown(b.block)).filter(Boolean).join("\n\n");
+      const own = blocks.filter((b) => inSpan(b) && b.block.id !== sectionId);
+      const rest = blocks.filter((b) => b.section === sectionId && b.block.type !== "section" && !inSpan(b));
+      const first = own.length ? blocks.indexOf(own[0]) : blocks.indexOf(at);
+      parts = {
+        heading: sectionBlock ? blockPlainText(sectionBlock).trim() : "",
+        before: md(rest.filter((b) => blocks.indexOf(b) < first)),
+        block: md(own),
+        after: md(rest.filter((b) => blocks.indexOf(b) > first)),
+      };
+      text = [parts.heading && `## ${parts.heading}`, parts.before, parts.block, parts.after].filter(Boolean).join("\n\n");
+      why = at.block.type === "section" ? "this section, to compose" : "these blocks, to compose, and the rest of their section";
     } else if (decl.draft === "section") {
       const inSection = blocks.filter((b) => b.section === sectionId && b.block.type !== "section");
       const i = inSection.indexOf(at);
@@ -406,7 +445,7 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
         after: md(inSection.slice(i + 1)),
       };
       text = [parts.heading && `## ${parts.heading}`, parts.before, parts.block, parts.after].filter(Boolean).join("\n\n");
-      why = reply ? "the reply, around the cursor's block" : sectionId ? "this section, around the cursor's block" : "the text before the first section, around the cursor's block";
+      why = !withSections ? "the draft, around the cursor's block" : sectionId ? "this section, around the cursor's block" : "the text before the first section, around the cursor's block";
     } else {
       const upTo = blocks.indexOf(at);
       const parts = blocks.slice(0, upTo + 1).filter((b) => b.section === sectionId);
@@ -417,7 +456,7 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
         })
         .filter(Boolean)
         .join("\n\n");
-      why = reply ? "the reply, up to the cursor" : sectionId ? "this section, up to the cursor" : "the text before the first section, up to the cursor";
+      why = !withSections ? "the draft, up to the cursor" : sectionId ? "this section, up to the cursor" : "the text before the first section, up to the cursor";
     }
     if (decl.maxDraftChars && text.length > decl.maxDraftChars) {
       const tail = text.slice(-decl.maxDraftChars);
@@ -453,7 +492,8 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
     items: kept,
     manifest: {
       cursor: cursor ?? { block: "" },
-      ...(project ? { thingKind: reply ? ("reply" as const) : ("project" as const) } : {}),
+      ...(writingType ? { writingType } : {}),
+      ...(!typeOn ? { typeOff: true } : {}),
       documentSource,
       section: sectionId ? { id: sectionId, title: sectionBlock ? blockPlainText(sectionBlock).trim() : sectionId } : null,
       ...(at
@@ -484,10 +524,10 @@ const HEADINGS: Partial<Record<Step, string>> = {
   6: "Notes and comments on this block",
 };
 
-const REPLY_HEADINGS: Partial<Record<Step, string>> = {
-  2: "Reply brief",
-  4: "Notes on the project this reply is about",
-  6: "Comments on this block",
+/** For a writing with no sections: no outline, no section notes. */
+const FLAT_HEADINGS: Partial<Record<Step, string>> = {
+  2: "Brief",
+  4: "Notes linked to this writing",
 };
 
 /** The stable part of a bundle as system-prompt text: the style profile,
@@ -506,7 +546,8 @@ export function renderSystem(instruction: string, bundle: ContextBundle | null, 
  * from). */
 export function renderSteps(bundle: ContextBundle | null, steps: Step[]): string {
   const items = bundle?.items ?? [];
-  const headings = bundle?.manifest.thingKind === "reply" ? { ...HEADINGS, ...REPLY_HEADINGS } : HEADINGS;
+  const m = bundle?.manifest;
+  const headings = typeDeclaration(m?.writingType, !m?.typeOff).editor.sections ? HEADINGS : { ...HEADINGS, ...FLAT_HEADINGS };
   const sections: string[] = [];
   for (const step of steps) {
     const here = items.filter((x) => x.step === step);
