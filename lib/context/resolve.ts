@@ -2,8 +2,9 @@ import { commentOn } from "@/lib/store/links";
 import type { Link, Thing } from "@/lib/store/types";
 import { blockPlainText, flattenBlocksToMarkdown } from "@/app/lib/writing-os/blockText";
 import { briefFromHeader, projectDisplayTitle, type Attachment } from "@/app/lib/writing-os/types";
-import { isTypeOn, isWritingType, typeDeclaration, type WritingType } from "@/lib/plugins/writing-types";
-import type { BriefRead, TypeDeclaration } from "@/lib/plugins/writing-type";
+import { agentDeclaration, agentOfHeader, type AgentId } from "@/lib/plugins/writing-assist/agents";
+import type { AgentDeclaration, BriefRead } from "@/lib/plugins/writing-assist/agents/agent";
+import { agentRules } from "@/lib/plugins/writing-assist/agents/rules";
 import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 
 // The AI rule (artifacts/MENTAL_MODEL.md, V2_SPEC.md Phase 5): what a
@@ -113,10 +114,10 @@ export interface ManifestEntry {
 
 export interface ContextManifest {
   cursor: Cursor;
-  /** The type of the writing the cursor is in, once it has one. */
-  writingType?: WritingType;
-  /** Its type plugin was off: it was read as a plain writing. */
-  typeOff?: boolean;
+  /** The agent the writing the cursor is in is set as, if any. */
+  agent?: AgentId;
+  /** The draft has no sections: read as one flat text, with no outline. */
+  flat?: boolean;
   /** Where the document text came from: the editor's live copy, or the
    * vault (the last save). */
   documentSource: "editor" | "vault" | "none";
@@ -185,7 +186,6 @@ function parseDoc(body: string): Block[] {
 const titleOfProject = (p: Thing) =>
   projectDisplayTitle({ title: (p.header.title as string) ?? "", slug: (p.header.slug as string) ?? "" });
 
-const typeOf = (p: Thing): WritingType | undefined => (isWritingType(p.header.type) ? p.header.type : undefined);
 
 /** What a note's or brief's attachments say: an image's read text, a
  * link's address. A file with neither says nothing. */
@@ -199,18 +199,20 @@ function attachmentsText(attachments: Attachment[] | undefined): string[] {
   return parts;
 }
 
-/** The type's assist line, the title (and a document's subtitle), the
- * brief, what its type's reader read there, then what its attachments say. */
-function briefText(p: Thing, decl: TypeDeclaration): string {
+/** The writing's agent's rules (AGENTS_SPEC.md decision 10), the title and
+ * subtitle, the brief, what the agent's reader read there, then what its
+ * attachments say. */
+function briefText(p: Thing, agent: AgentId | undefined, decl: AgentDeclaration | undefined): string {
   const h = p.header as Record<string, unknown>;
-  const subtitle = decl.fields.subtitle !== undefined && typeof h.subtitle === "string" ? h.subtitle.trim() : "";
+  const subtitle = typeof h.subtitle === "string" ? h.subtitle.trim() : "";
   const brief = briefFromHeader(h).trim();
-  const head = [`Title: ${titleOfProject(p)}`, subtitle && `Subtitle: ${subtitle}`, brief].filter(Boolean).join("\n");
-  const type = typeOf(p);
-  const read = type ? (h.brief_reads as Record<string, BriefRead> | undefined)?.[type] : undefined;
+  const title = decl?.title ? `Title (${decl.title.charAt(0).toLowerCase()}${decl.title.slice(1)})` : "Title";
+  const head = [`${title}: ${titleOfProject(p)}`, subtitle && `Subtitle: ${subtitle}`, brief].filter(Boolean).join("\n");
+  const rules = agent && decl ? `This writing is set as ${decl.label === "Email" ? "an" : "a"} ${decl.label}. Its rules:\n${agentRules(agent)}` : "";
+  const read = agent ? (h.brief_reads as Record<string, BriefRead> | undefined)?.[agent] : undefined;
   // Only what the brief still points at.
-  const found = decl.briefReader && read && decl.briefReader.find(brief) === read.key ? decl.briefReader.context(read) : "";
-  return [decl.assistLine, head, found, ...attachmentsText(h.attachments as Attachment[] | undefined)].filter(Boolean).join("\n\n");
+  const found = decl?.briefReader && read && decl.briefReader.find(brief) === read.key ? decl.briefReader.context(read) : "";
+  return [rules, head, found, ...attachmentsText(h.attachments as Attachment[] | undefined)].filter(Boolean).join("\n\n");
 }
 
 /** A note's own text, and its attachments' transcripts. Nothing linked to
@@ -236,9 +238,6 @@ export interface ResolveInput {
   /** The editor's current copy of the cursor's document, which can be a
    * save ahead of the vault. */
   document?: DraftPartialBlock[];
-  /** The plugins switched on globally, for whether the writing's type
-   * plugin is on. Left out: every type plugin is. */
-  enabledPlugins?: readonly string[];
 }
 
 export function resolveBundle(input: ResolveInput): ContextBundle {
@@ -248,12 +247,8 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
   const thing = cursor?.thing ? live.find((t) => t.header.id === cursor.thing) : undefined;
   if (cursor?.thing && !thing) throw new ContextError(`nothing live at ${cursor.thing}`);
   const project = thing?.header.kind === "project" ? thing : undefined;
-  const writingType = project ? typeOf(project) : undefined;
-  const typeOn =
-    !writingType ||
-    isTypeOn(writingType, project?.header.plugin_overrides as Record<string, boolean> | undefined, input.enabledPlugins ?? [writingType]);
-  const typeDecl = typeDeclaration(writingType, typeOn);
-  const withSections = typeDecl.editor.sections;
+  const agent = project ? agentOfHeader(project.header as Record<string, unknown>) : undefined;
+  const agentDecl = agentDeclaration(agent);
 
   const needsProject = decl.include.some((p) => p !== "style");
   if (needsProject && !project) throw new ContextError("this plugin needs a cursor in a project's draft");
@@ -262,6 +257,8 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
   const doc: Block[] = (input.document as Block[] | undefined) ?? (thing ? parseDoc(thing.body) : []);
   const documentSource = input.document ? "editor" : thing ? "vault" : "none";
   const blocks = walk(doc);
+  // Whether the writing has sections is the draft's to say, not its agent's.
+  const withSections = blocks.some((b) => b.block.type === "section");
   const at = cursor ? blocks.find((b) => b.block.id === cursor.block) : undefined;
   const sectionId = at?.section ?? null;
   const sectionEntry = sectionId ? blocks.find((b) => b.block.id === sectionId) : undefined;
@@ -292,7 +289,7 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
   }
   // 2. Brief. 3. Outline.
   if (project && wants.has("brief")) {
-    items.push({ step: 2, kind: "brief", id: project.header.id, title: `Brief: ${titleOfProject(project)}`, why: "the project's brief", text: briefText(project, typeDecl) });
+    items.push({ step: 2, kind: "brief", id: project.header.id, title: `Brief: ${titleOfProject(project)}`, why: "the project's brief", text: briefText(project, agent, agentDecl) });
   }
   if (project && withSections && wants.has("outline")) {
     const sections = blocks.filter((b) => b.block.type === "section").map((b) => blockPlainText(b.block).trim() || "(untitled section)");
@@ -492,8 +489,8 @@ export function resolveBundle(input: ResolveInput): ContextBundle {
     items: kept,
     manifest: {
       cursor: cursor ?? { block: "" },
-      ...(writingType ? { writingType } : {}),
-      ...(!typeOn ? { typeOff: true } : {}),
+      ...(agent ? { agent } : {}),
+      ...(!withSections ? { flat: true } : {}),
       documentSource,
       section: sectionId ? { id: sectionId, title: sectionBlock ? blockPlainText(sectionBlock).trim() : sectionId } : null,
       ...(at
@@ -524,7 +521,8 @@ const HEADINGS: Partial<Record<Step, string>> = {
   6: "Notes and comments on this block",
 };
 
-/** For a writing with no sections: no outline, no section notes. */
+/** For a writing with no sections (none in its draft): no outline, no
+ * section notes. */
 const FLAT_HEADINGS: Partial<Record<Step, string>> = {
   2: "Brief",
   4: "Notes linked to this writing",
@@ -547,7 +545,7 @@ export function renderSystem(instruction: string, bundle: ContextBundle | null, 
 export function renderSteps(bundle: ContextBundle | null, steps: Step[]): string {
   const items = bundle?.items ?? [];
   const m = bundle?.manifest;
-  const headings = typeDeclaration(m?.writingType, !m?.typeOff).editor.sections ? HEADINGS : { ...HEADINGS, ...FLAT_HEADINGS };
+  const headings = m?.flat ? { ...HEADINGS, ...FLAT_HEADINGS } : HEADINGS;
   const sections: string[] = [];
   for (const step of steps) {
     const here = items.filter((x) => x.step === step);

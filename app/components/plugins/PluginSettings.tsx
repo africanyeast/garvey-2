@@ -148,16 +148,14 @@ export function PluginSettings({ details, onChange }: { details: PluginDetails; 
     <div className="flex flex-col gap-[28px]">
       <section className={`${card} flex items-center gap-[16px] py-[14px] px-[16px]`}>
         <div className="flex-1 min-w-0">
-          <div className="text-[14px] font-medium text-[var(--text-primary)]">{details.alwaysOn ? "Always on" : details.enabled ? "On" : "Off"}</div>
+          <div className="text-[14px] font-medium text-[var(--text-primary)]">{details.enabled ? "On" : "Off"}</div>
           <div className="text-[12px] text-[var(--text-muted)] mt-[1px]">
-            {details.alwaysOn
-              ? `${details.name} can't be turned off.`
-              : details.enabled
-                ? `${details.name} runs in every writing, unless a writing turns it off.`
-                : `${details.name} doesn't run anywhere, unless a writing turns it on.`}
+            {details.enabled
+              ? `${details.name} runs in every writing, unless a writing turns it off.`
+              : `${details.name} doesn't run anywhere, unless a writing turns it on.`}
           </div>
         </div>
-        <Switch on={details.enabled} disabled={details.alwaysOn} label={`${details.name} on or off`} onChange={(enabled) => save({ enabled })} />
+        <Switch on={details.enabled} label={`${details.name} on or off`} onChange={(enabled) => save({ enabled })} />
       </section>
 
       {details.entries.length > 0 && (
@@ -176,6 +174,26 @@ export function PluginSettings({ details, onChange }: { details: PluginDetails; 
             ))}
           </div>
           {!details.enabled && skills && <p className="text-[12px] text-[var(--text-muted)] mt-[8px] mb-[0]">Turn {details.name} on to use its skills.</p>}
+        </section>
+      )}
+
+      {details.agents && details.agents.length > 0 && (
+        <section>
+          <div className="flex items-baseline justify-between mb-[8px]">
+            <div className={sectionLabel}>Agents</div>
+            <div className="text-[12px] text-[var(--text-muted)]">Set a writing as one from its menu</div>
+          </div>
+          <div className={`${card} divide-y divide-[var(--border-default)]`}>
+            {details.agents.map((a) => (
+              <div key={a.id} className="py-[12px] px-[16px]">
+                <div className="text-[14px] font-medium text-[var(--text-primary)]">{a.name}</div>
+                <div className="text-[12px] text-[var(--text-muted)] mt-[1px]">{a.description}</div>
+              </div>
+            ))}
+          </div>
+          <p className="text-[12px] text-[var(--text-muted)] mt-[8px] mb-[0]">
+            An agent gives every skill its rules on the writings set as it, and adds what it reads from the brief and its actions.
+          </p>
         </section>
       )}
 

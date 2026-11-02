@@ -3,7 +3,7 @@ import { listProjects } from "./vault/project";
 import { listNotes } from "./vault/notes";
 import { getDraft } from "./vault/draft";
 import { projectDisplayTitle } from "@/app/lib/writing-os/types";
-import type { WritingType } from "@/lib/plugins/writing-types";
+import type { AgentId } from "@/lib/plugins/writing-assist/agents";
 import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 
 export type SearchResultKind = "project" | "note";
@@ -11,7 +11,7 @@ export type SearchResultKind = "project" | "note";
 export interface SearchResult {
   kind: SearchResultKind;
   /** A project's type, for its icon. */
-  writingType?: WritingType;
+  agent?: AgentId;
   projectSlug: string;
   projectTitle: string;
   /** For a note, its id (for a future deep link); absent for a project. */
@@ -77,7 +77,7 @@ export async function searchVault(query: string): Promise<SearchResult[]> {
       if (briefText.toLowerCase().includes(qLower)) {
         results.push({
           kind: "project",
-          writingType: project.type,
+          agent: project.agent,
           projectSlug: project.slug,
           projectTitle: title,
           title,
@@ -91,7 +91,7 @@ export async function searchVault(query: string): Promise<SearchResult[]> {
       if (draftText.toLowerCase().includes(qLower)) {
         results.push({
           kind: "project",
-          writingType: project.type,
+          agent: project.agent,
           projectSlug: project.slug,
           projectTitle: title,
           title,

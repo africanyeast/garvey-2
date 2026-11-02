@@ -3,7 +3,6 @@
 import { createPortal } from "react-dom";
 import { useExtension, useExtensionState } from "@blocknote/react";
 import { WritingAssistExtension, type ComposeScope } from "@/app/lib/writing-os/writingAssist";
-import { useDraftMode } from "@/app/lib/writing-os/draftMode";
 import type { DraftEditor } from "@/app/lib/writing-os/schema";
 import { AssistCard } from "@/app/components/draft/AssistCard";
 
@@ -28,7 +27,6 @@ const ACCEPT: Record<ComposeScope["kind"], string> = {
 export function ComposeCard({ editor }: { editor: DraftEditor }) {
   const assist = useExtension(WritingAssistExtension, { editor });
   const pending = useExtensionState(WritingAssistExtension, { editor, selector: (s) => s.compose });
-  const sections = useDraftMode().editor.sections;
 
   if (!pending || !assist.cardHost) return null;
 
@@ -49,7 +47,7 @@ export function ComposeCard({ editor }: { editor: DraftEditor }) {
       starters={STARTERS}
       refinements={REFINEMENTS}
       onGenerate={(instruction, revise) => assist.requestCompose(instruction, revise)}
-      onAccept={(text) => assist.acceptCompose(text, sections)}
+      onAccept={(text) => assist.acceptCompose(text)}
       onDiscard={() => {
         assist.discardCompose();
         editor.focus();

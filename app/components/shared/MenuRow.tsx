@@ -1,7 +1,7 @@
 "use client";
 
 import type { LucideIcon } from "lucide-react";
-import type { MouseEvent } from "react";
+import type { MouseEvent, ReactNode } from "react";
 
 /**
  * The single row primitive behind every app-styled dropdown/menu — the
@@ -16,23 +16,30 @@ export function MenuRow({
   onClick,
   active = false,
   shortcut,
+  trailing,
+  indent = false,
 }: {
   icon: LucideIcon;
   label: string;
   onClick: (e: MouseEvent) => void;
   active?: boolean;
   shortcut?: string;
+  /** Drawn at the row's end, after the shortcut (a chevron, say). */
+  trailing?: ReactNode;
+  /** A row nested under the one above it, as a submenu's options. */
+  indent?: boolean;
 }) {
   return (
     <button
       onClick={onClick}
-      className={`flex items-center gap-[8px] w-full text-left text-xs font-medium py-[7px] px-[10px] rounded-[4px] cursor-pointer bg-transparent border-none hover:bg-[var(--surface-hover)] ${
+      className={`flex items-center gap-[8px] w-full text-left text-xs font-medium py-[7px] ${indent ? "pl-[22px] pr-[10px]" : "px-[10px]"} rounded-[4px] cursor-pointer bg-transparent border-none hover:bg-[var(--surface-hover)] ${
         active ? "text-[var(--text-link)]" : "text-[var(--text-primary)]"
       }`}
     >
       <Icon size={13} strokeWidth={1.8} />
       <span className="flex-1">{label}</span>
       {shortcut && <span className="text-[var(--text-muted)] font-normal">{shortcut}</span>}
+      {trailing}
     </button>
   );
 }

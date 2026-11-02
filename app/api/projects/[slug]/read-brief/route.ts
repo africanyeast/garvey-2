@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
-import { readBrief } from "@/lib/plugins/type-readers";
+import { readBrief } from "@/lib/plugins/writing-assist/agents/readers";
 
-/** Runs the writing's type plugin's brief reader (a tweet: the post its
+/** Runs the writing's agent's brief reader (a tweet: the post its
  * brief links), returning the writing with what was read. */
 export async function POST(req: NextRequest, { params }: { params: Promise<{ slug: string }> }) {
   const { slug } = await params;

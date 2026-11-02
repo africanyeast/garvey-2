@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, type MouseEvent } from "react";
 import Link from "next/link";
 import { useRouter, usePathname } from "next/navigation";
-import { EllipsisVertical, Inbox, Plus, Search, Can, GripVertical, Sparkles, UserPen } from "lucide-react";
+import { EllipsisVertical, FileText, Inbox, Plus, Search, Can, GripVertical, Sparkles, UserPen } from "lucide-react";
 import {
   DndContext,
   closestCenter,
@@ -21,7 +21,7 @@ import {
 import { CSS } from "@dnd-kit/utilities";
 import type { Project } from "@/app/lib/writing-os/types";
 import { projectDisplayTitle } from "@/app/lib/writing-os/types";
-import { TYPE_PLUGINS } from "@/lib/plugins/writing-types";
+import { AGENT_PLUGINS } from "@/lib/plugins/writing-assist/agents";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { RowIconButton } from "@/app/components/shared/RowIconButton";
 import { DropdownMenu } from "@/app/components/shared/DropdownMenu";
@@ -240,8 +240,8 @@ function SortableProjectRow({
   const { attributes, listeners, setNodeRef, transform, transition, isDragging } = useSortable({
     id: project.slug,
   });
-  // Its type's icon, whether or not that plugin is on: it keeps its type.
-  const Icon = TYPE_PLUGINS[project.type ?? "document"].type.icon;
+  // Its agent's icon, whether or not that plugin is on: it keeps its agent.
+  const Icon = project.agent ? AGENT_PLUGINS[project.agent].agent.icon : FileText;
 
   return (
     <Link

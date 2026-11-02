@@ -121,8 +121,8 @@ function packContext(c: ContextManifest | null) {
   if (!c) return 0;
   return {
     cu: c.cursor,
-    ...(c.writingType ? { wt: c.writingType } : {}),
-    ...(c.typeOff ? { to: 1 as const } : {}),
+    ...(c.agent ? { ag: c.agent } : {}),
+    ...(c.flat ? { fl: 1 as const } : {}),
     src: c.documentSource,
     sec: c.section,
     w: c.where,
@@ -141,9 +141,10 @@ function unpackContext(c: PackedContext): ContextManifest | null {
   if (!c) return null;
   return {
     cursor: c.cu,
-    // Older lines marked a reply's run `tk`; it read as a message does.
-    ...(c.wt ? { writingType: c.wt } : "tk" in c && c.tk === "reply" ? { writingType: "message" as const } : {}),
-    ...(c.to ? { typeOff: true } : {}),
+    ...("ag" in c && c.ag ? { agent: c.ag } : {}),
+    // Older lines kept the writing's type (`wt`, or `tk` for a reply): a
+    // document read in sections, the others flat.
+    ...(("fl" in c && c.fl) || ("wt" in c && c.wt && c.wt !== "document") || ("tk" in c && c.tk === "reply") ? { flat: true } : {}),
     documentSource: c.src,
     section: c.sec,
     ...(c.w ? { where: c.w } : {}),

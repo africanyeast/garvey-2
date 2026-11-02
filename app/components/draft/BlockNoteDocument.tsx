@@ -55,7 +55,6 @@ import { TextSelection } from "prosemirror-state";
 import { MenuRow } from "@/app/components/shared/MenuRow";
 import { DropdownMenu } from "@/app/components/shared/DropdownMenu";
 import { useClickOutside } from "@/app/hooks/useClickOutside";
-import { blockPlainText } from "@/app/lib/writing-os/blockText";
 import { addBlockAfter, draftPageOf, fullDocumentOf, removingSections, takeBlocks } from "@/app/lib/writing-os/draftPage";
 import { draftSchema, type DraftEditor } from "@/app/lib/writing-os/schema";
 import { useWritingOS } from "@/app/lib/writing-os/context";
@@ -70,7 +69,6 @@ const assistOf = (editor: DraftEditor) => editor.getExtension("wosWritingAssist"
 /** The selected blocks Compose can take: not a section's row (a section
  * is composed on its own page). */
 const composableIds = (editor: DraftEditor) => (editor.getSelection()?.blocks ?? []).filter((b) => b.type !== "sectionLink").map((b) => b.id);
-import { useDraftMode } from "@/app/lib/writing-os/draftMode";
 import { RefineExtension } from "@/app/lib/writing-os/refine";
 import { RefinePopover } from "@/app/components/draft/RefinePopover";
 
@@ -111,7 +109,6 @@ function DraftSideMenu() {
   const Components = useComponentsContext()!;
   const editor = useBlockNoteEditor(draftSchema);
   const sideMenu = useExtension(SideMenuExtension);
-  const withSections = useDraftMode().editor.sections;
   const block = useExtensionState(SideMenuExtension, { selector: (s) => s?.block });
   const offered = useSkillOffered(useWritingOS().activeProjectId);
   const [open, setOpen] = useState<"down" | "up" | null>(null);
@@ -128,7 +125,7 @@ function DraftSideMenu() {
   const host = draftPage?.host;
   const here = draftPage?.page ?? null;
   const isSection = block.type === "sectionLink";
-  const sections = isSection || !withSections || !host ? [] : host.sectionList().filter((s) => s.id !== here);
+  const sections = isSection || !host ? [] : host.sectionList().filter((s) => s.id !== here);
   const act = (fn: () => void) => {
     fn();
     close();
@@ -217,8 +214,6 @@ function DraftSideMenu() {
  */
 function DraftSlashMenu({ findWord }: { findWord: boolean }) {
   const { activeProjectId } = useWritingOS();
-  // A reply is flat prose: no sections or headings to offer.
-  const withSections = useDraftMode().editor.sections;
   const editor = useBlockNoteEditor(draftSchema);
   const popover = useContext(SuggestPopoverContext);
   // Only the draft's editor has the writing assist.
@@ -229,13 +224,12 @@ function DraftSlashMenu({ findWord }: { findWord: boolean }) {
   const { openSection } = useSectionPage();
   const draftPage = draftPageOf(editor);
   const sectionId = draftPage?.page ?? null;
-  const offerSection = withSections && !!draftPage && draftPage.page === null;
+  const offerSection = !!draftPage && draftPage.page === null;
   // Compose: a section's page composes that section; a writing without
-  // sections, or an empty one, composes the whole writing.
+  // sections (an empty one too) composes the whole writing.
   const composeScope = (): ComposeScope | null => {
     if (sectionId) return { kind: "section", id: sectionId };
-    const empty = editor.document.every((b) => b.type !== "sectionLink" && !blockPlainText(b).trim() && !b.children.length);
-    return !withSections || empty ? { kind: "draft" } : null;
+    return editor.document.every((b) => b.type !== "sectionLink") ? { kind: "draft" } : null;
   };
 
   return (
@@ -319,8 +313,7 @@ function DraftSlashMenu({ findWord }: { findWord: boolean }) {
                   },
                 ]
               : []),
-            // The React items' type drops core's `key`, which they still carry.
-            ...getDefaultReactSlashMenuItems(editor).filter((item) => withSections || !(item as { key?: string }).key?.includes("heading")),
+            ...getDefaultReactSlashMenuItems(editor),
           ],
           query,
         )
@@ -490,8 +483,7 @@ function typographyKeyOf(block: { type: string; props?: Record<string, unknown> 
 
 function TypographyMenuItem() {
   const editor = useBlockNoteEditor(draftSchema);
-  const withSections = useDraftMode().editor.sections;
-  const options = TYPOGRAPHY_OPTIONS.filter((o) => withSections || !o.key.startsWith("heading"));
+  const options = TYPOGRAPHY_OPTIONS;
   const [open, setOpen] = useState(false);
   const activeKey = useEditorState({
     editor,

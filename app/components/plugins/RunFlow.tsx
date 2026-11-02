@@ -3,7 +3,6 @@
 import { useState, type ReactNode } from "react";
 import type { ManifestEntry } from "@/lib/context/resolve";
 import type { OutcomeStatus, PluginRun } from "@/lib/context/runs";
-import { typeDeclaration } from "@/lib/plugins/writing-types";
 import { Value } from "./Value";
 
 /**
@@ -114,7 +113,7 @@ export function RunFlow({ run }: { run: PluginRun }) {
   if (manifest) facts.push(["Context", `${fmtChars(manifest.chars)} of ${fmtChars(manifest.budget)} chars`]);
 
   const byGroup = manifest
-    ? (typeDeclaration(manifest.writingType, !manifest.typeOff).editor.sections ? GROUPS : FLAT_GROUPS).map((def) => ({
+    ? (manifest.flat ? FLAT_GROUPS : GROUPS).map((def) => ({
         def,
         entries: manifest.items.filter((x) => def.steps.includes(x.step)),
         dropped: manifest.dropped.filter((x) => def.steps.includes(x.step)),

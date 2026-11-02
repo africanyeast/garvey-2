@@ -3,7 +3,6 @@ import { migrateToSkills } from "@/lib/vault/config";
 import { parseSkill } from "./skill";
 import { builtInSkills } from "./skills";
 import { currentRunId, isSkillOn, readOverrides, skillState } from "./switches";
-import { TYPE_PLUGINS } from "../writing-types";
 
 const FILE = `---
 id: tighten
@@ -46,17 +45,11 @@ describe("a skill file", () => {
   });
 });
 
-describe("type defaults", () => {
-  const tweetOff = TYPE_PLUGINS.tweet.type.skillsOff ?? [];
-
-  test("a tweet has Suggest titles off unless the writing turns it on", () => {
-    expect(skillState("suggest-title", {}, ["writing-assist"], [], tweetOff)).toEqual({ on: false, by: "type" });
-    expect(isSkillOn("suggest-title", { "writing-assist/suggest-title": true }, ["writing-assist"], [], tweetOff)).toBe(true);
-    expect(isSkillOn("refine", {}, ["writing-assist"], [], tweetOff)).toBe(true);
-  });
-
-  test("the plugin being off still wins over the type", () => {
-    expect(skillState("suggest-title", {}, [], [], tweetOff)).toEqual({ on: false, by: "plugin" });
+describe("skill state", () => {
+  test("says why a skill is off: the writing, the plugin, or the global switch", () => {
+    expect(skillState("refine", { "writing-assist/refine": false }, ["writing-assist"])).toEqual({ on: false, by: "writing" });
+    expect(skillState("refine", {}, [])).toEqual({ on: false, by: "plugin" });
+    expect(skillState("refine", {}, ["writing-assist"], ["writing-assist/refine"])).toEqual({ on: false, by: "global" });
   });
 });
 

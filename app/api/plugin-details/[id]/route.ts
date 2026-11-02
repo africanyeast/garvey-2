@@ -1,7 +1,8 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getOSConfig, updateOSConfig, type OSConfig, type PluginOverride } from "@/lib/vault/config";
-import { getPlugin, getTypePlugin } from "@/lib/plugins/registry";
-import type { TypeManifest } from "@/lib/plugins/writing-type";
+import { getPlugin } from "@/lib/plugins/registry";
+import { AGENT_PLUGINS } from "@/lib/plugins/writing-assist/agents";
+import { WRITING_ASSIST } from "@/lib/plugins/writing-assist/switches";
 import { effectiveSettings } from "@/lib/plugins/settings";
 import { PLUGIN_EFFORTS, PLUGIN_MODELS, type PluginManifest } from "@/lib/plugins/types";
 
@@ -35,32 +36,15 @@ async function describe(manifest: PluginManifest) {
       : [entry(null, "", "", manifest, manifest.context)],
     models: PLUGIN_MODELS,
     efforts: PLUGIN_EFFORTS,
-  };
-}
-
-/** A type plugin in the same shape: no calls, so nothing to tune. */
-async function describeType(m: TypeManifest) {
-  const config = await getOSConfig();
-  return {
-    id: m.id,
-    name: m.name,
-    description: m.description,
-    trigger: "type",
-    kind: "type",
-    permissions: m.permissions,
-    data: m.data ?? [],
-    enabled: !!m.alwaysOn || config.plugins.includes(m.id),
-    alwaysOn: !!m.alwaysOn,
-    entries: [],
-    models: [],
-    efforts: [],
+    // The writing assist's agents (AGENTS_SPEC.md): listed, not switched.
+    ...(manifest.id === WRITING_ASSIST
+      ? { agents: Object.values(AGENT_PLUGINS).map((a) => ({ id: a.id, name: a.name, description: a.description, data: a.data ?? [] })) }
+      : {}),
   };
 }
 
 export async function GET(_req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const type = getTypePlugin(id);
-  if (type) return NextResponse.json(await describeType(type));
   const plugin = getPlugin(id);
   if (!plugin) return NextResponse.json({ error: "no such plugin" }, { status: 404 });
   return NextResponse.json(await describe(plugin.manifest));
@@ -72,17 +56,6 @@ export async function GET(_req: NextRequest, { params }: { params: Promise<{ id:
  * one to the manifest's. Only differences from the manifest are stored. */
 export async function PATCH(req: NextRequest, { params }: { params: Promise<{ id: string }> }) {
   const { id } = await params;
-  const type = getTypePlugin(id);
-  if (type) {
-    // A type plugin only turns on and off; Document never turns off.
-    const body = await req.json().catch(() => ({}));
-    if (typeof body.enabled !== "boolean") return NextResponse.json({ error: "a type plugin only turns on or off" }, { status: 400 });
-    if (type.alwaysOn && !body.enabled) return NextResponse.json({ error: `${type.name} is always on` }, { status: 400 });
-    const config = await getOSConfig();
-    const plugins = body.enabled ? [...new Set([...config.plugins, id])] : config.plugins.filter((p) => p !== id);
-    if (!type.alwaysOn) await updateOSConfig({ plugins });
-    return NextResponse.json(await describeType(type));
-  }
   const plugin = getPlugin(id);
   if (!plugin) return NextResponse.json({ error: "no such plugin" }, { status: 404 });
   const { manifest } = plugin;

@@ -346,7 +346,7 @@ describe("what the writing tasks see", () => {
   });
 });
 
-describe("bundle for a cursor in a message (a writing with no sections)", () => {
+describe("bundle for a cursor in a writing set as a message, with no sections", () => {
   const R = id(900);
   const draftR = [
     { id: "r1", type: "paragraph", content: text("Thanks for asking."), children: [] },
@@ -356,7 +356,7 @@ describe("bundle for a cursor in a message (a writing with no sections)", () => 
     header: {
       ...thing("project", links, "").header,
       id: R,
-      type: "message",
+      agent: "message",
       slug: "reply-to-sam",
       title: "Reply to @sam",
       subtitle: "",
@@ -382,11 +382,12 @@ describe("bundle for a cursor in a message (a writing with no sections)", () => 
       [6, "version", altR1.header.id],
       [7, "draft", R],
     ]);
-    expect(b.items[1].text).toBe(
-      "This is a message (WhatsApp, Telegram, SMS or the like): plain text, short and conversational.\n\n" +
-        "Title: Reply to @sam\n@sam: guest post next month?\n\nWhat I want to say: say yes, ask the length"
+    expect(b.items[1].text).toStartWith("This writing is set as a Message. Its rules:\nThis writing is a chat message");
+    expect(b.items[1].text).toEndWith(
+      "Title (a label for the sidebar only; the message itself has no title): Reply to @sam\n@sam: guest post next month?\n\nWhat I want to say: say yes, ask the length"
     );
-    expect(b.manifest.writingType).toBe("message");
+    expect(b.manifest.agent).toBe("message");
+    expect(b.manifest.flat).toBe(true);
     for (const x of b.items) expect(fromP.has(x.id ?? "")).toBe(false);
     expect(b.manifest.unanchored).toEqual([]);
   });
@@ -412,40 +413,30 @@ describe("bundle for a cursor in a message (a writing with no sections)", () => 
 
   test("renders under a writing's headings", () => {
     const b = run(reply([]));
-    expect(renderSystem("DO IT", b, [2])).toStartWith("STYLE\n\nDO IT\n\nBrief:\nThis is a message");
+    expect(renderSystem("DO IT", b, [2])).toStartWith("STYLE\n\nDO IT\n\nBrief:\nThis writing is set as a Message");
   });
 
   test("a tweet's brief carries the post it replies to, while the brief still links it", () => {
     const key = "https://x.com/sam/status/7";
-    const tweet = (brief: string) => reply([], { type: "tweet", brief, brief_reads: { tweet: { key, text: "@sam: guest post?" } } });
-    expect(run(tweet(`say yes ${key}`)).items[1].text).toBe(
-      `This is a post on X: plain text, at most 280 characters.\n\nTitle: Reply to @sam\nsay yes ${key}\n\nReplying to this post on X (${key}):\n@sam: guest post?`
-    );
+    const tweet = (brief: string) => reply([], { agent: "tweet", brief, brief_reads: { tweet: { key, text: "@sam: guest post?" } } });
+    const text = run(tweet(`say yes ${key}`)).items[1].text;
+    expect(text).toStartWith("This writing is set as a Tweet. Its rules:\nThis writing is for X");
+    expect(text).toContain("a thread");
+    expect(text).toEndWith(`: Reply to @sam\nsay yes ${key}\n\nReplying to this post on X (${key}):\n@sam: guest post?`);
     expect(run(tweet("say yes")).items[1].text).not.toContain("Replying to this post");
   });
 
-  test("with its type plugin off, it is read as a plain writing: no type line, no post, no outline", () => {
-    const key = "https://x.com/sam/status/7";
-    const off = reply([], { type: "tweet", brief: `say yes ${key}`, brief_reads: { tweet: { key, text: "@sam: guest post?" } } });
-    const b = resolveBundle({ things: [...things, off, onR1, onR2, altR1], style: "", cursor: { thing: R, block: "r1" }, declaration: everything, enabledPlugins: ["message"] });
-    expect(b.items.find((x) => x.step === 2)?.text).toBe(`Title: Reply to @sam\nsay yes ${key}`);
-    expect(b.items.some((x) => x.kind === "outline")).toBe(false);
-    expect(b.manifest.typeOff).toBe(true);
-    const back = resolveBundle({ things: [...things, off], style: "", cursor: { thing: R, block: "r1" }, declaration: everything, enabledPlugins: ["tweet"] });
-    expect(back.items.find((x) => x.step === 2)?.text).toStartWith("This is a post on X");
-  });
-
-  test("a writing's own switch beats the global one, and Document is never off", () => {
-    const own = reply([], { type: "message", plugin_overrides: { message: false } });
-    expect(resolveBundle({ things: [...things, own], style: "", cursor: { thing: R, block: "r1" }, declaration: everything, enabledPlugins: ["message"] }).manifest.typeOff).toBe(true);
-    const doc = reply([], { type: "document" });
-    expect(resolveBundle({ things: [...things, doc], style: "", cursor: { thing: R, block: "r1" }, declaration: everything, enabledPlugins: [] }).manifest.typeOff).toBeUndefined();
-  });
-
-  test("a document's brief has no type line, and keeps its subtitle", () => {
-    const b = run(reply([], { type: "document", subtitle: "A yes" }));
+  test("a writing with no agent: no rules, its subtitle kept; sections come from its draft, not its agent", () => {
+    const plain = reply([], { agent: undefined, subtitle: "A yes" });
+    const b = run(plain);
     expect(b.items[1].text).toStartWith("Title: Reply to @sam\nSubtitle: A yes\n@sam:");
-    expect(b.items.some((x) => x.kind === "outline")).toBe(true);
-    expect(renderSystem("DO IT", b, [2])).toStartWith("STYLE\n\nDO IT\n\nProject brief:\nTitle:");
+    expect(b.items.some((x) => x.kind === "outline")).toBe(false);
+    const withSection = { ...plain, body: JSON.stringify([...draftR, { id: "rs", type: "section", content: text("Later"), children: [] }]) };
+    const s = run(withSection);
+    expect(s.items.some((x) => x.kind === "outline")).toBe(true);
+    expect(s.manifest.flat).toBeUndefined();
+    expect(renderSystem("DO IT", s, [2])).toStartWith("STYLE\n\nDO IT\n\nProject brief:\nTitle:");
+    const tweetWithSection = { ...withSection, header: { ...withSection.header, agent: "tweet" } };
+    expect(run(tweetWithSection).items.some((x) => x.kind === "outline")).toBe(true);
   });
 });

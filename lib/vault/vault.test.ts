@@ -156,23 +156,35 @@ describe("notes, comments and trash on links", () => {
   });
 });
 
-describe("writings and their types", () => {
+describe("writings and their agents", () => {
   let r: Awaited<ReturnType<typeof P.createProject>>;
 
-  test("a new writing has no type and no candidates on disk", async () => {
+  test("a new writing has no agent and no candidates on disk", async () => {
     r = await P.createProject({});
-    expect(r.type).toBeUndefined();
+    expect(r.agent).toBeUndefined();
     const raw = await readFile(path.join(tmp, "vault", "things", `${r.id}.md`), "utf8");
     expect(raw).toContain("kind: project");
     expect(raw).not.toContain("candidates");
-    expect(raw).not.toMatch(/^type:/m);
+    expect(raw).not.toMatch(/^(type|agent):/m);
   });
 
-  test("a type is set once picked, and a made-up one is ignored", async () => {
-    r = (await P.updateProject(r.slug, { type: "nonsense" as never }))!;
-    expect(r.type).toBeUndefined();
-    r = (await P.updateProject(r.slug, { type: "message" }))!;
-    expect((await P.getProject(r.slug))?.type).toBe("message");
+  test("an agent is set once picked, and a made-up one is none", async () => {
+    r = (await P.updateProject(r.slug, { agent: "nonsense" as never }))!;
+    expect(r.agent).toBeUndefined();
+    r = (await P.updateProject(r.slug, { agent: "message" }))!;
+    expect((await P.getProject(r.slug))?.agent).toBe("message");
+    const raw = await readFile(path.join(tmp, "vault", "things", `${r.id}.md`), "utf8");
+    expect(raw).toMatch(/^agent: message$/m);
+  });
+
+  test("setting it to none (null) clears it, and nothing else changes", async () => {
+    let w = await P.createProject({ title: "Plain", brief: "keep me" });
+    w = (await P.updateProject(w.slug, { agent: "email" }))!;
+    w = (await P.updateProject(w.slug, { agent: null as never }))!;
+    expect(w.agent).toBeUndefined();
+    expect(w.brief).toBe("keep me");
+    expect((await P.getProject(w.slug))?.agent).toBeUndefined();
+    await P.deleteProject(w.slug);
   });
 
   test("a message's title follows its brief until the writer sets one", async () => {
@@ -197,19 +209,9 @@ describe("writings and their types", () => {
     expect(raw).not.toContain("attachments");
   });
 
-  test("with its type plugin off, a message's title no longer follows its brief", async () => {
-    let m = await P.createProject({});
-    m = (await P.updateProject(m.slug, { type: "message", pluginOverrides: { message: false } }))!;
-    m = (await P.updateProject(m.slug, { brief: "@sam: hi" }))!;
-    expect(m.title).toBe("");
-    m = (await P.updateProject(m.slug, { pluginOverrides: {}, brief: "@sam: hi there" }))!;
-    expect(m.title).toBe("Reply to @sam");
-    await P.deleteProject(m.slug);
-  });
-
-  test("a document's title never follows its brief", async () => {
+  test("a writing with no agent: its title never follows its brief", async () => {
     let d = await P.createProject({});
-    d = (await P.updateProject(d.slug, { type: "document", brief: "@sam: hi" }))!;
+    d = (await P.updateProject(d.slug, { brief: "@sam: hi" }))!;
     expect(d.title).toBe("");
     await P.deleteProject(d.slug);
   });
@@ -222,12 +224,12 @@ describe("writings and their types", () => {
     expect((await V.listVariants(r.slug)).length).toBe(1);
   });
 
-  test("it is trashed and restored with its comments, keeping its type", async () => {
+  test("it is trashed and restored with its comments, keeping its agent", async () => {
     await P.deleteProject(r.slug);
     expect(await P.getProject(r.slug)).toBeNull();
     expect((await C.listComments()).some((c) => c.text === "too blunt?")).toBe(false);
     const back = await P.restoreProject(r.id);
-    expect(back?.type).toBe("message");
+    expect(back?.agent).toBe("message");
     expect((await C.listComments()).some((c) => c.text === "too blunt?")).toBe(true);
     expect((await V.listVariants(back!.slug)).length).toBe(1);
   });

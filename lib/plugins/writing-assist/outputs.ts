@@ -17,7 +17,7 @@ import {
   requestParts,
   sectionAround,
 } from "../writing-shared";
-import { typeDeclaration } from "../writing-types";
+import { agentDeclaration } from "./agents";
 import type { Skill, SkillOutput } from "./skill";
 
 // Each output is what a skill's result is and where it goes, in code: what a
@@ -191,6 +191,8 @@ const wordOptions: Output<WordOptionsInput, { suggestions: WordOption[] }> = {
 // --- title-options: a few lines for a title slot -------------------------
 
 export type TitleSlot = "title" | "subtitle";
+const TITLE_MEANING = "The piece's title";
+const SUBTITLE_MEANING = "A line under the title that says what the piece is";
 export interface TitleOptionsInput {
   slot: TitleSlot;
   /** What the slot holds now, so the options differ from it. */
@@ -235,9 +237,9 @@ const titleOptions: Output<TitleOptionsInput, { options: string[] }> = {
   async run(ctx, skill) {
     const { slot, current, rejected = [] } = ctx.input;
     const at = ctx.context?.manifest;
-    // The slot's meaning is its type's (`fields`).
-    const meaning = typeDeclaration(at?.writingType, !at?.typeOff).fields[slot];
-    if (!meaning) return { ok: false, error: `this writing has no ${slot}` };
+    // A title means what the writing's agent says it does (an email's
+    // subject line), else the piece's title.
+    const meaning = slot === "title" ? (agentDeclaration(at?.agent)?.title ?? TITLE_MEANING) : SUBTITLE_MEANING;
 
     const system = buildSystemPrompt(`${skill.prompt}\n${TITLES_FORMAT}`, ctx);
     const document = contextText(ctx).trim();
@@ -361,9 +363,11 @@ const SCOPE_LABEL: Record<ComposeScope, string> = {
   draft: "the whole writing",
 };
 
-/** The shape the markdown may take, by what it replaces and whether the
- * writing has sections: code, so no skill can get it wrong. */
-function composeFormat(scope: ComposeScope, sections: boolean): string {
+/** The shape the markdown may take, by what it replaces, whether the
+ * writing has sections, and whether an agent's rules give it its shape:
+ * code, so no skill can get it wrong. */
+function composeFormat(scope: ComposeScope, sections: boolean, agent: boolean): string {
+  if (agent) return "Format: as this writing's rules (with the brief) say, in markdown. No headings unless those rules ask for them.";
   if (!sections) return "Format: markdown with no headings; this writing is flat prose. Lists only if the material is one or the writer asks for one.";
   if (scope === "draft") {
     return (
@@ -392,7 +396,8 @@ const compose: Output<ComposeInput, TextResult> = {
   async run(ctx, skill) {
     const { scope } = ctx.input;
     const at = ctx.context?.manifest;
-    const sections = typeDeclaration(at?.writingType, !at?.typeOff).editor.sections;
+    const sections = !at?.flat;
+    const agent = !!agentDeclaration(at?.agent);
     const parts = contextParts(ctx);
     const rough = parts?.block.trim() ?? "";
     const text = [
@@ -401,7 +406,7 @@ const compose: Output<ComposeInput, TextResult> = {
       rough ? tag("rough_material", rough) : "<rough_material/> (nothing written here yet: compose it from the brief, notes and comments)",
       parts?.after.trim() && tag("text_after", parts.after.trim()),
       `<scope>${SCOPE_LABEL[scope]}</scope>`,
-      composeFormat(scope, sections),
+      composeFormat(scope, sections, agent),
     ]
       .filter(Boolean)
       .join("\n\n");

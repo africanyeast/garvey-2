@@ -55,8 +55,6 @@ export interface PluginDetails {
   permissions: string[];
   data: Array<{ what: string; where: string }>;
   enabled: boolean;
-  /** A type plugin that can't be turned off (Document). */
-  alwaysOn?: boolean;
   entries: Array<{
     key: string | null;
     label: string;
@@ -69,4 +67,6 @@ export interface PluginDetails {
   }>;
   models: string[];
   efforts: string[];
+  /** The writing assist's agents (artifacts/AGENTS_SPEC.md): listed, not switched. */
+  agents?: Array<{ id: string; name: string; description: string; data: Array<{ what: string; where: string }> }>;
 }

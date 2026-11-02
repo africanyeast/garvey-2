@@ -1,24 +1,22 @@
 import { getProject, saveBriefRead } from "@/lib/vault/project";
-import { getOSConfig } from "@/lib/vault/config";
 import { fetchXPost } from "./tweet/read";
-import { isTypeOn, typeDeclaration } from "./writing-types";
+import { agentDeclaration } from "./index";
 import type { Project } from "@/app/lib/writing-os/types";
 
-// The server half of each type plugin's brief reader: what to read for the
-// key its `find` returned. Only for types that declare a reader.
+// The server half of each agent's brief reader: what to read for the key
+// its `find` returned. Only for agents that declare a reader.
 const READERS: Record<string, (key: string, signal?: AbortSignal) => Promise<string | null>> = {
   tweet: async (key, signal) => (await fetchXPost(key, signal))?.text ?? null,
 };
 
-/** Brings what the writing's type reads from its brief up to date: reads
+/** Brings what the writing's agent reads from its brief up to date: reads
  * what its reader finds there once, keeps it until the brief points
- * somewhere else, and forgets it when the brief points nowhere. Nothing is
- * read while the type's plugin is off. */
+ * somewhere else, and forgets it when the brief points nowhere. */
 export async function readBrief(slug: string, signal?: AbortSignal): Promise<Project | null> {
   const project = await getProject(slug);
-  if (!project?.type) return project;
-  const type = project.type;
-  const reader = typeDeclaration(type, isTypeOn(type, project.pluginOverrides, (await getOSConfig()).plugins)).briefReader;
+  if (!project?.agent) return project;
+  const type = project.agent;
+  const reader = agentDeclaration(type)?.briefReader;
   const read = READERS[type];
   if (!reader || !read) return project;
 

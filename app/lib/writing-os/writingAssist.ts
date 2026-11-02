@@ -113,13 +113,10 @@ function allIds(blocks: DraftBlock[]): string[] {
   return blocks.flatMap((b) => [b.id, ...allIds(b.children as DraftBlock[])]);
 }
 
-/** Compose's markdown as blocks for its scope. A writing without sections
- * has no headings; a whole writing with them turns each `#`/`##` heading
- * into a section holding what follows it. */
-export function composedBlocks(editor: DraftEditor, markdown: string, scope: ComposeScope, sections: boolean): DraftPartialBlock[] {
+/** Compose's markdown as blocks for its scope. For the whole writing, each
+ * `#`/`##` heading becomes a section holding what follows it. */
+export function composedBlocks(editor: DraftEditor, markdown: string, scope: ComposeScope): DraftPartialBlock[] {
   const parsed = editor.tryParseMarkdownToBlocks(markdown) as DraftPartialBlock[];
-  const flat = (b: DraftPartialBlock): DraftPartialBlock => (b.type === "heading" ? { ...b, type: "paragraph", props: {} } : b);
-  if (!sections) return parsed.map(flat);
   if (scope.kind !== "draft") return parsed;
   const out: DraftPartialBlock[] = [];
   let section: DraftPartialBlock | null = null;
@@ -422,19 +419,19 @@ export const WritingAssistExtension = createExtension(
     };
 
     /** Replaces the scope with the (possibly edited) text, and puts the
-     * cursor at its end. `sections`: whether the writing has them. */
-    const acceptCompose = (text: string, sections: boolean) => {
+     * cursor at its end. */
+    const acceptCompose = (text: string) => {
       const pending = store.state.compose;
       clearCompose();
       if (!pending || !text.trim()) return;
-      const blocks = composedBlocks(editor, text.trim(), pending.scope, sections);
+      const blocks = composedBlocks(editor, text.trim(), pending.scope);
       if (!blocks.length) return;
       reportOutcome(pending.runId, text.trim() === pending.text.trim() ? "accepted" : "edited", text.trim().length);
       const { scope } = pending;
       const old = scopeBlocks(scope);
       if (!old.length) return;
       let inserted: DraftBlock[] = [];
-      if (scope.kind === "draft" && sections) {
+      if (scope.kind === "draft") {
         // The whole writing: its sections become rows on this page, their
         // text kept for their own pages.
         const split = splitDocument(blocks as DraftBlock[]);

@@ -69,8 +69,8 @@ describe("run record", () => {
     expect(lines[0].length).toBeLessThan(700);
   });
 
-  test("a run keeps the type of writing it was in", async () => {
-    const tweet = { ...manifest, writingType: "tweet" as const };
+  test("a run keeps the agent of the writing it was in, and whether it was flat", async () => {
+    const tweet = { ...manifest, agent: "tweet" as const, flat: true };
     const run = await R.recordRun({ ...base, context: tweet });
     expect((await R.getRun(run.id))?.context).toEqual(tweet);
   });

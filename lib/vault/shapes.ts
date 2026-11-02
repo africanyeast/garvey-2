@@ -3,7 +3,7 @@ import { readOverrides } from "@/lib/plugins/writing-assist/switches";
 import { formatRelative } from "./time";
 import { parseBody } from "./blocks";
 import { briefFromHeader, type Attachment, type BlockVariant, type Comment, type Note, type Project } from "@/app/lib/writing-os/types";
-import { isWritingType } from "@/lib/plugins/writing-types";
+import { agentOfHeader } from "@/lib/plugins/writing-assist/agents";
 import type { DraftPartialBlock } from "@/app/lib/writing-os/schema";
 
 // Things, in the shapes the API routes return. Relationships are passed
@@ -25,7 +25,7 @@ export function toProject(t: Thing): Project {
     createdAt: t.header.created_at ?? EPOCH,
     order: h.order as number | undefined,
     pluginOverrides: h.plugin_overrides && typeof h.plugin_overrides === "object" ? readOverrides(h.plugin_overrides) : undefined,
-    ...(isWritingType(h.type) ? { type: h.type } : {}),
+    ...(agentOfHeader(h) ? { agent: agentOfHeader(h) } : {}),
     ...(h.brief_reads && typeof h.brief_reads === "object" ? { briefReads: h.brief_reads as Project["briefReads"] } : {}),
   };
 }

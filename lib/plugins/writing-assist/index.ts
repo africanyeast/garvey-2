@@ -8,7 +8,8 @@ import { WRITING_ASSIST } from "./switches";
 // ./skills. A skill is a task of this plugin: the harness checks it is on,
 // resolves its context, runs it with its own model and effort, and records
 // it under its id. What the skill's result is comes from its output
-// (./outputs.ts).
+// (./outputs.ts). Its agents (./agents) give the skills their rules on a
+// writing set as one.
 
 function manifest(): PluginManifest {
   const tasks: Record<string, PluginTask> = {};
@@ -19,7 +20,7 @@ function manifest(): PluginManifest {
     id: WRITING_ASSIST,
     name: "Writing assist",
     description:
-      "Helps you write, in your own style, from your draft, notes, comments and brief: finishing a sentence, a word that fits, refining a selection, the next paragraph, another version of a block, a title. Each is a skill you can switch off.",
+      "Helps you write, in your own style, from your draft, notes, comments and brief: finishing a sentence, a word that fits, refining a selection, the next paragraph, another version of a block, a title. Each is a skill you can switch off. A writing can be set as one of its agents (Tweet, Email, Message), whose rules every skill then follows.",
     data: [{ what: "What you did with each suggestion", where: "accepted, edited or dismissed, kept with the call" }],
     trigger: "cursor",
     kind: "completion",

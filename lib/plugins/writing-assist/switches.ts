@@ -52,21 +52,18 @@ export function readOverrides(raw: unknown): Record<string, boolean> {
 
 /** Whether a skill is on for a writing, and why not when it isn't: its own
  * switch for the skill decides; else the plugin must be on (its switch for
- * the whole plugin, else the global one); then the writing's type may have
- * the skill off by default (`typeOff`, its declaration's `skillsOff`); then
- * the skill's global switch (`skillsOff`). */
+ * the whole plugin, else the global one); then the skill's global switch
+ * (`skillsOff`). */
 export function skillState(
   skill: string,
   overrides: Record<string, boolean> | undefined,
   enabled: readonly string[],
   skillsOff: readonly string[] = [],
-  typeOff: readonly string[] = [],
-): { on: boolean; by: "writing" | "plugin" | "type" | "global" } {
+): { on: boolean; by: "writing" | "plugin" | "global" } {
   const own = overrides?.[skillKey(skill)];
   if (typeof own === "boolean") return { on: own, by: "writing" };
   const plugin = overrides?.[WRITING_ASSIST] ?? enabled.includes(WRITING_ASSIST);
   if (!plugin) return { on: false, by: "plugin" };
-  if (typeOff.includes(skill)) return { on: false, by: "type" };
   return { on: !skillsOff.includes(skillKey(skill)), by: "global" };
 }
 
@@ -75,7 +72,6 @@ export function isSkillOn(
   overrides: Record<string, boolean> | undefined,
   enabled: readonly string[],
   skillsOff: readonly string[] = [],
-  typeOff: readonly string[] = [],
 ): boolean {
-  return skillState(skill, overrides, enabled, skillsOff, typeOff).on;
+  return skillState(skill, overrides, enabled, skillsOff).on;
 }

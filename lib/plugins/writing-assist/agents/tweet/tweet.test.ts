@@ -1,7 +1,7 @@
 import { describe, expect, test } from "bun:test";
 import { firstXPost, xPost, xPostIntent } from "./post";
 import { oembedText } from "./read";
-import { manifest } from "./manifest";
+import { manifest, postInfo, postsOf } from "./manifest";
 
 describe("an X post link", () => {
   test("is read from x.com and twitter.com links, with or without a query", () => {
@@ -49,7 +49,7 @@ describe("a post's text from oEmbed", () => {
 });
 
 describe("a tweet's default title", () => {
-  const title = manifest.type.autoTitle!;
+  const title = manifest.agent.autoTitle!;
   test("names the author of the post in the brief, pasted as text or as its link", () => {
     expect(title("@sam_writes: guest post?")).toBe("Reply to @sam_writes");
     expect(title("https://x.com/sam_writes/status/123")).toBe("Reply to @sam_writes");
@@ -62,7 +62,7 @@ describe("a tweet's default title", () => {
 });
 
 describe("the tweet's brief reader", () => {
-  const reader = manifest.type.briefReader!;
+  const reader = manifest.agent.briefReader!;
   test("finds the first post link, as one canonical link", () => {
     expect(reader.find("decline politely https://twitter.com/Tola/status/123?s=20")).toBe("https://x.com/Tola/status/123");
     expect(reader.find("nothing here")).toBeNull();
@@ -77,5 +77,28 @@ describe("the tweet's brief reader", () => {
 
   test("tells the assist what the post says", () => {
     expect(reader.context({ key: "https://x.com/Tola/status/123", text: "@Tola: free?" })).toBe("Replying to this post on X (https://x.com/Tola/status/123):\n@Tola: free?");
+  });
+});
+
+describe("a tweet's posts", () => {
+  test("one post has no divider; a thread is split at its dividers", () => {
+    expect(postsOf("Just one.")).toEqual(["Just one."]);
+    expect(postsOf("First.\n\n---\n\nSecond.\n---\nThird.")).toEqual(["First.", "Second.", "Third."]);
+    expect(postsOf("---\nOnly this.\n---\n")).toEqual(["Only this."]);
+  });
+
+  test("the line under the title counts one post against 280, a thread by which posts run over", () => {
+    expect(postInfo("Hello")).toMatchObject({ text: "5 / 280", over: false });
+    expect(postInfo("x".repeat(281))).toMatchObject({ text: "281 / 280", over: true });
+    expect(postInfo("a\n---\nb\n---\nc")).toMatchObject({ text: "3 posts", over: false });
+    expect(postInfo(`a\n---\n${"x".repeat(301)}`)).toMatchObject({ text: "2 posts · post 2 is 301 / 280", over: true });
+  });
+
+  test("Open on X takes a thread's first post, and says so", () => {
+    const open = manifest.agent.actions![0];
+    const thread = "One.\n---\nTwo.";
+    expect(open.label({ brief: "", text: thread })).toBe("Open on X (first post)");
+    expect(open.href({ brief: "https://x.com/a/status/5", text: thread })).toBe("https://x.com/intent/post?in_reply_to=5&text=One.");
+    expect(open.label({ brief: "https://x.com/a/status/5", text: "One." })).toBe("Open reply on X");
   });
 });

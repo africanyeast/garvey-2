@@ -4,7 +4,7 @@ import { useEffect, useRef, useState, Fragment } from "react";
 import { useRouter } from "next/navigation";
 import { Search, Inbox } from "lucide-react";
 import type { SearchResult } from "@/lib/search";
-import { TYPE_PLUGINS } from "@/lib/plugins/writing-types";
+import { writingIcon } from "@/lib/plugins/writing-assist/agents";
 
 /** Splits `text` on case-insensitive occurrences of `query`, wrapping each
  * match in a <mark> — Notion-style highlighted search results. */
@@ -106,7 +106,7 @@ export function SearchModal({ onClose }: { onClose: () => void }) {
             </div>
           )}
           {results.map((result, i) => {
-            const Icon = result.kind === "note" ? Inbox : TYPE_PLUGINS[result.writingType ?? "document"].type.icon;
+            const Icon = result.kind === "note" ? Inbox : writingIcon(result.agent);
             return (
               <button
                 key={`${result.kind}-${result.projectSlug}-${result.noteId ?? ""}-${i}`}

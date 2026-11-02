@@ -4,7 +4,6 @@ import { useEffect, useLayoutEffect, useRef, useState, useMemo, type MouseEvent,
 import { Minimize2, MessageCircle, StickyNotes } from "lucide-react";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useDraftEditor } from "@/app/lib/writing-os/editor-context";
-import { useDraftMode } from "@/app/lib/writing-os/draftMode";
 import { useSectionPage } from "@/app/lib/writing-os/sectionPage";
 import { BlockNoteDocument } from "@/app/components/draft/BlockNoteDocument";
 import { NextBlockCard } from "@/app/components/draft/NextBlockCard";
@@ -41,7 +40,6 @@ export function DraftDocument() {
   const { commentsData, notes, activeProjectId, openExpanded } = useWritingOS();
   const { editor, syncDocument, page } = useDraftEditor();
   const { openSection } = useSectionPage();
-  const pages = useDraftMode().editor.sections;
   const containerRef = useRef<HTMLDivElement>(null);
   const titleRef = useRef<HTMLDivElement>(null);
   // A section's row opens its page; any other block expands into its
@@ -195,7 +193,7 @@ export function DraftDocument() {
   return (
     <div
       ref={containerRef}
-      className={`relative wos-doc-editor ${page !== null ? "wos-section-page" : pages ? "wos-writing-page" : ""}`}
+      className={`relative wos-doc-editor ${page !== null ? "wos-section-page" : "wos-writing-page"}`}
       onMouseDownCapture={onMouseDownCapture}
       onMouseMove={(e) => {
         // The block is whichever row the pointer is level with, read at the

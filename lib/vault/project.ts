@@ -4,14 +4,13 @@ import { toProject } from "./shapes";
 import { slugify } from "./slug";
 import type { Project, TrashedProject } from "@/app/lib/writing-os/types";
 import { projectDisplayTitle } from "@/app/lib/writing-os/types";
-import { isTypeOn, isWritingType, typeDeclaration } from "@/lib/plugins/writing-types";
-import type { BriefRead } from "@/lib/plugins/writing-type";
-import { getOSConfig } from "./config";
+import { agentDeclaration, isAgent } from "@/lib/plugins/writing-assist/agents";
+import type { BriefRead } from "@/lib/plugins/writing-assist/agents/agent";
 
 // A project is one thing: its brief is the header, its draft is the body
 // (see lib/store). Its notes, comments, alt versions and threads are
 // separate things linked to it. What the writer sees as a "writing" is a
-// project with a type (artifacts/WRITING_TYPES_SPEC.md).
+// project, which can be set as an agent (artifacts/AGENTS_SPEC.md).
 
 /** The header fields a project's brief is stored under. `order` is only
  * present once the project has been dragged in the sidebar. The old
@@ -23,7 +22,7 @@ function briefFields(p: Omit<Project, "id" | "slug" | "createdAt" | "updatedAt">
     ...(p.pluginOverrides && Object.keys(p.pluginOverrides).length ? { plugin_overrides: p.pluginOverrides } : {}),
   };
   return {
-    ...(p.type ? { type: p.type } : {}),
+    ...(p.agent ? { agent: p.agent } : {}),
     title: p.title,
     subtitle: p.subtitle,
     brief: p.brief,
@@ -39,6 +38,7 @@ function writeProject(t: Thing, p: Project): Thing {
   delete t.header.plugin_overrides;
   delete t.header.attachments;
   delete t.header.brief_reads;
+  delete t.header.agent;
   Object.assign(t.header, briefFields(p), { slug: p.slug, created_at: p.createdAt, updated_at: p.updatedAt });
   return t;
 }
@@ -96,8 +96,8 @@ export async function getProject(slug: string): Promise<Project | null> {
   return p ? toProject(p) : null;
 }
 
-/** A new writing starts with no type: the writer picks one, or typing in
- * its body makes it a document. */
+/** A new writing starts as a plain document; the writer may set it as an
+ * agent. */
 export async function createProject(input: { title?: string; brief?: string }): Promise<Project> {
   const store = await vault();
   // A brand-new project stays untitled (no fake "Untitled" title stored)
@@ -210,10 +210,8 @@ export async function updateProject(slug: string, patch: Partial<Omit<Project, "
   const p = await liveProjectBySlug(store, slug);
   if (!p) return null;
   const current = toProject(p);
-  if (patch.type !== undefined && !isWritingType(patch.type)) {
-    const { type: _bad, ...rest } = patch;
-    patch = rest;
-  }
+  // `agent: null` (or anything that isn't one) sets it to none.
+  if ("agent" in patch && !isAgent(patch.agent)) patch = { ...patch, agent: undefined };
   // What a brief reader read is only ever written by it (`saveBriefRead`).
   if ("briefReads" in patch) {
     const { briefReads: _theirs, ...rest } = patch;
@@ -224,14 +222,13 @@ export async function updateProject(slug: string, patch: Partial<Omit<Project, "
     patch = rest;
   }
 
-  // A type whose title is only a label (a tweet, a message) makes it from
-  // the brief until the writer sets one of their own: one still empty, or
-  // still the default for the old brief, is replaced by the default for the
-  // new one. Only while that type's plugin is on.
-  const type = patch.type ?? current.type;
-  if (type && patch.title === undefined && (patch.brief !== undefined || patch.type !== undefined)) {
-    const overrides = patch.pluginOverrides ?? current.pluginOverrides;
-    const autoTitle = typeDeclaration(type, isTypeOn(type, overrides, (await getOSConfig()).plugins)).autoTitle;
+  // An agent whose title is only a label (a tweet, a message) makes it
+  // from the brief until the writer sets one of their own: one still empty,
+  // or still the default for the old brief, is replaced by the default for
+  // the new one.
+  const agent = "agent" in patch ? patch.agent : current.agent;
+  if (agent && patch.title === undefined && (patch.brief !== undefined || patch.agent !== undefined)) {
+    const autoTitle = agentDeclaration(agent)?.autoTitle;
     const auto = autoTitle && (!current.title.trim() || current.title === autoTitle(current.brief));
     const title = autoTitle?.(patch.brief ?? current.brief);
     if (auto && title) patch = { ...patch, title };
@@ -252,7 +249,7 @@ export async function updateProject(slug: string, patch: Partial<Omit<Project, "
   return next;
 }
 
-/** Keeps (or with null, forgets) what a type plugin's brief reader read,
+/** Keeps (or with null, forgets) what an agent's brief reader read,
  * without counting as an edit. */
 export async function saveBriefRead(slug: string, plugin: string, read: BriefRead | null): Promise<Project | null> {
   const store = await vault();

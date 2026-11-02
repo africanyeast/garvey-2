@@ -256,6 +256,12 @@ input {
 .bn-block-content[data-content-type="sectionLink"].ProseMirror-selectednode {
   background: var(--surface-hover);
 }
+/* ...and only that: not BlockNote's blue selected-block overlay
+   (`Block.css`, a `::after` on the row) on top of it. */
+.bn-block-content[data-content-type="sectionLink"].ProseMirror-selectednode > *::after,
+.ProseMirror-selectednode > .bn-block-content[data-content-type="sectionLink"] > *::after {
+  content: none;
+}
 .wos-section-link {
   display: flex;
   align-items: center;

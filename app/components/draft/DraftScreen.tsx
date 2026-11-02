@@ -8,11 +8,11 @@ import { ProjectPlugins } from "@/app/components/plugins/ProjectPlugins";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { DraftPageProvider, useDraftHost } from "@/app/lib/writing-os/editor-context";
 import { ProjectBrief } from "@/app/components/brief/ProjectBrief";
-import { TypePicker } from "@/app/components/draft/TypePicker";
-import { DraftModeProvider } from "@/app/lib/writing-os/draftMode";
+import { AgentPicker } from "@/app/components/draft/AgentPicker";
+import { AgentProvider } from "@/app/lib/writing-os/agent";
 import { SectionPageProvider } from "@/app/lib/writing-os/sectionPage";
 import { nearestSectionId } from "@/app/lib/writing-os/sections";
-import { WRITING_TYPES, isTypeOn, typeDeclaration } from "@/lib/plugins/writing-types";
+import { AGENT_IDS, agentDeclaration, type AgentId } from "@/lib/plugins/writing-assist/agents";
 import { isSkillOn } from "@/lib/plugins/writing-assist/switches";
 import { documentPlainText } from "@/app/lib/writing-os/blockText";
 import { SaveStatusBadge, useSaveStatus } from "@/app/components/shared/FormFields";
@@ -53,7 +53,7 @@ export function DraftScreen({
 }: {
   project: Project;
   initialDocument: DraftPartialBlock[];
-  /** The plugins switched on globally, for which type plugins are on. */
+  /** The plugins switched on globally, for which agents are on. */
   enabledPlugins: string[];
   /** The skills switched off globally (`<plugin>/<skill>`). */
   skillsOff: string[];
@@ -127,8 +127,8 @@ function DraftScreenInner({
   // that already made it to disk.
   const [brief, setBrief] = useState(project.brief);
   const [attachments, setAttachments] = useState(project.attachments);
-  // Unset on a new writing until the writer picks one, or types.
-  const [type, setType] = useState(project.type);
+  // The agent it is set as (artifacts/AGENTS_SPEC.md), if any.
+  const [agent, setAgentState] = useState(project.agent);
   const [updatedAt, setUpdatedAt] = useState(project.updatedAt);
   const {
     docMode,
@@ -152,12 +152,7 @@ function DraftScreenInner({
   const [shortcutsOpen, setShortcutsOpen] = useState(false);
   const [pluginsOpen, setPluginsOpen] = useState(false);
   const [pluginOverrides, setPluginOverrides] = useState(project.pluginOverrides ?? {});
-  // Everything the type does is its plugin's: while that plugin is off
-  // (globally, or for this writing) it is a plain writing, and keeps its
-  // type for when the plugin is back on.
-  const typeOn = !type || isTypeOn(type, pluginOverrides, enabledPlugins);
-  const mode = typeDeclaration(type, typeOn);
-  const pickable = WRITING_TYPES.filter((t) => isTypeOn(t, pluginOverrides, enabledPlugins));
+  const declaration = agentDeclaration(agent);
   const savePluginOverrides = (next: Record<string, boolean>) => {
     setPluginOverrides(next);
     fetch(`/api/projects/${slug}`, { method: "PATCH", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ pluginOverrides: next }) }).then(() => window.dispatchEvent(new Event(PLUGINS_CHANGED)))
@@ -264,31 +259,32 @@ function DraftScreenInner({
     setAttachments(next);
     return save({ attachments: next });
   };
-  // A new writing starts by picking its type: the picker stands in for the
-  // body until then. One with text but no type (none is made that way now)
-  // is a document. The type is saved once set, and a picked one puts the
-  // cursor in the body.
+  // An empty writing with no agent starts with the picker in place of its
+  // body (decision 8): Document, or an agent. Picking either, or typing,
+  // puts the body back. Setting the agent changes nothing in the draft.
   const hasText = documentPlainText(draftDoc).trim() !== "";
-  if (!type && hasText) setType("document");
-  const savedType = useRef(project.type);
-  useEffect(() => {
-    if (!type || type === savedType.current) return;
-    const picked = !savedType.current;
-    savedType.current = type;
-    patchProjectInList(live.current.slug, { type });
-    void save({ type });
-    if (picked) requestAnimationFrame(() => draft.focus());
-    // Fires on a type change only.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [type]);
+  const [started, setStarted] = useState(false);
+  const setAgent = (next: AgentId | undefined) => {
+    if (next !== agent) {
+      setAgentState(next);
+      patchProjectInList(live.current.slug, { agent: next });
+      // `null`, not undefined, so "none" survives JSON.
+      void save({ agent: (next ?? null) as AgentId | undefined });
+    }
+  };
+  const start = (next: AgentId | undefined) => {
+    setAgent(next);
+    setStarted(true);
+    requestAnimationFrame(() => draft.focus());
+  };
 
   // The type's brief reader (a tweet: the post its brief links) reads
   // whatever the brief newly points at, once its save has gone out; what
   // it read is kept on the writing for the assist, and shown as a chip.
   const [briefReads, setBriefReads] = useState(project.briefReads ?? {});
-  const reader = mode.briefReader;
+  const reader = declaration?.briefReader;
   const found = reader?.find(brief) ?? null;
-  const kept = type ? briefReads[type] : undefined;
+  const kept = agent ? briefReads[agent] : undefined;
   const stale = !!reader && (found ?? null) !== (kept?.key ?? null);
   useEffect(() => {
     if (!stale) return;
@@ -332,7 +328,7 @@ function DraftScreenInner({
   // the document, so it's only ever fully hidden if the user goes fullscreen.
   const panelOpen = panelMode !== "collapsed" || !!expandedItem;
   return (
-    <DraftModeProvider value={mode}>
+    <AgentProvider value={{ agent, declaration, setAgent }}>
       <SectionPageProvider value={sectionPage}>
       {/* Each page its own editor, made fresh as the page opens. */}
       <DraftPageProvider key={sectionId ?? ""} page={sectionId}>
@@ -353,8 +349,8 @@ function DraftScreenInner({
               onOpenPlugins={() => setPluginsOpen(true)}
               onOpenShortcuts={() => setShortcutsOpen(true)}
               brief={brief}
-              typePicker={!type && !hasText ? <TypePicker types={pickable} onPick={setType} /> : undefined}
-              suggestFor={isSkillOn("suggest-title", pluginOverrides, enabledPlugins, skillsOff, mode.skillsOff) ? project.id : undefined}
+              typePicker={!agent && !hasText && !started ? <AgentPicker agents={AGENT_IDS} onPick={start} /> : undefined}
+              suggestFor={isSkillOn("suggest-title", pluginOverrides, enabledPlugins, skillsOff) ? project.id : undefined}
             />
           </div>
         </div>
@@ -387,7 +383,7 @@ function DraftScreenInner({
               // user is done with the brief and never set one — not eagerly
               // at creation (see `finalizeUntitledProject`). A tweet's or
               // message's title comes from its brief instead.
-              if (!title.trim() && !mode.autoTitle) {
+              if (!title.trim() && !declaration?.autoTitle) {
                 fetch(`/api/projects/${slug}/finalize`, { method: "POST" })
                   .then((res) => res.json())
                   .then((p: Project) => {
@@ -411,7 +407,7 @@ function DraftScreenInner({
 
         {pluginsOpen && (
           <PanelShell mode="fullscreen" onClose={() => setPluginsOpen(false)}>
-            <ProjectPlugins overrides={pluginOverrides} onChange={savePluginOverrides} typeLabel={mode.label} typeSkillsOff={mode.skillsOff ?? []} />
+            <ProjectPlugins overrides={pluginOverrides} onChange={savePluginOverrides} />
           </PanelShell>
         )}
 
@@ -423,12 +419,12 @@ function DraftScreenInner({
 
         {docMode === "preview" && (
           <PanelShell mode="fullscreen" onClose={() => setDocMode("edit")}>
-            <DraftPreview title={title} subtitle={mode.fields.subtitle !== undefined ? subtitle : ""} document={draftDoc} />
+            <DraftPreview title={title} subtitle={subtitle} document={draftDoc} />
           </PanelShell>
         )}
       </div>
       </DraftPageProvider>
       </SectionPageProvider>
-    </DraftModeProvider>
+    </AgentProvider>
   );
 }

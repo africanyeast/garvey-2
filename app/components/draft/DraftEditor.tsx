@@ -2,11 +2,12 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { useRouter } from "next/navigation";
-import { ChevronRight, Copy, CopyPlus, EllipsisVertical, ExternalLink, Eye, FileText, Keyboard, Pencil, Sparkles, StickyNotes, Can, Wand2 } from "lucide-react";
+import { Check, ChevronRight, Copy, CopyPlus, EllipsisVertical, ExternalLink, Eye, FileText, Keyboard, Pencil, Sparkles, StickyNotes, Can, Wand2 } from "lucide-react";
 import { WritingAssistExtension } from "@/app/lib/writing-os/writingAssist";
 import { useWritingOS } from "@/app/lib/writing-os/context";
 import { useDraftEditor } from "@/app/lib/writing-os/editor-context";
-import { useDraftMode } from "@/app/lib/writing-os/draftMode";
+import { useAgent } from "@/app/lib/writing-os/agent";
+import { AGENT_IDS, AGENT_PLUGINS, writingIcon, type AgentId } from "@/lib/plugins/writing-assist/agents";
 import { blockPlainText, documentPlainText } from "@/app/lib/writing-os/blockText";
 import { useSectionPage } from "@/app/lib/writing-os/sectionPage";
 import { DraftDocument } from "@/app/components/draft/DraftDocument";
@@ -39,20 +40,18 @@ export function DraftEditor({
   onOpenBrief: () => void;
   onOpenPlugins: () => void;
   onOpenShortcuts: () => void;
-  /** The brief, for the type's actions (a tweet's "Open reply on X"). */
+  /** The brief, for the agent's actions (a tweet's "Open reply on X"). */
   brief: string;
-  /** A new writing's type choices, shown in place of its body until one
-   * is picked. */
+  /** A new, empty writing's start (Document or an agent), shown in place
+   * of its body until one is picked. */
   typePicker?: ReactNode;
   /** The writing's id, while "Suggest titles" is on for it: a "Suggest"
    * beside the title (and a document's subtitle). */
   suggestFor?: string;
 }) {
-  // The type's switches, counter and actions; a plain writing's while its
-  // type plugin is off.
-  const mode = useDraftMode();
-  const { charLimit } = mode.editor;
-  const hasSubtitle = mode.fields.subtitle !== undefined;
+  // The writing's agent (artifacts/AGENTS_SPEC.md): its info line and
+  // actions while its plugin is on, and "Set as…" to change it.
+  const { agent, declaration, setAgent } = useAgent();
   const {
     openMenu,
     toggleMenu,
@@ -94,12 +93,12 @@ export function DraftEditor({
   // On a section's page, that section: its title and its text.
   const copyDoc = () => {
     const blocks = section ? [section] : draftDoc;
-    navigator.clipboard.writeText(mode.editor.copyAs === "markdown" ? editor.blocksToMarkdownLossy(blocks) : documentPlainText(blocks));
+    navigator.clipboard.writeText(editor.blocksToMarkdownLossy(blocks));
     showToast("Copied");
   };
 
   const duplicateDoc = () => {
-    if (!activeProjectSlug || !mode.editor.duplicate) return;
+    if (!activeProjectSlug) return;
     fetch(`/api/projects/${activeProjectSlug}/duplicate`, { method: "POST" })
       .then((res) => (res.ok ? res.json() : undefined))
       .then((project: Project | undefined) => {
@@ -110,6 +109,8 @@ export function DraftEditor({
   };
 
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  // The doc menu's "Set as" row: its options show only once it's clicked.
+  const [setAsOpen, setSetAsOpen] = useState(false);
   const deleteDoc = () => {
     if (!activeProjectSlug) return;
     fetch(`/api/projects/${activeProjectSlug}`, { method: "DELETE" }).then((res) => {
@@ -139,9 +140,12 @@ export function DraftEditor({
     };
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
-  }, [docMode, activeProjectSlug, editor, addProjectToList, router, mode, section, draftDoc]);
+  }, [docMode, activeProjectSlug, editor, addProjectToList, router, section, draftDoc]);
 
-  const charCount = charLimit ? documentPlainText(draftDoc).length : 0;
+  const draftText = documentPlainText(draftDoc);
+  const info = declaration?.info?.(draftText);
+  // "Set as…": none, or each agent.
+  const settable: Array<AgentId | undefined> = [undefined, ...AGENT_IDS];
 
   return (
     <>
@@ -177,49 +181,69 @@ export function DraftEditor({
               {suggestFor && <TitleSuggest project={suggestFor} slot="title" current={title} onPick={onTitleChange} top={7} />}
             </div>
             <div className="flex items-center flex-wrap gap-x-[8px]">
-              {hasSubtitle && (
-                <span className="group relative min-w-[0]">
-                  <div
-                    key={subtitle}
-                    contentEditable
-                    suppressContentEditableWarning
-                    data-placeholder="Add a subtitle"
-                    onBlur={(e) => onSubtitleChange(e.currentTarget.textContent ?? "")}
-                    className="text-subtitle border-none outline-none bg-transparent p-[0] break-words"
-                  >
-                    {subtitle}
-                  </div>
-                  {suggestFor && <TitleSuggest project={suggestFor} slot="subtitle" current={subtitle} onPick={onSubtitleChange} />}
-                </span>
-              )}
+              <span className="group relative min-w-[0]">
+                <div
+                  key={subtitle}
+                  contentEditable
+                  suppressContentEditableWarning
+                  data-placeholder="Add a subtitle"
+                  onBlur={(e) => onSubtitleChange(e.currentTarget.textContent ?? "")}
+                  className="text-subtitle border-none outline-none bg-transparent p-[0] break-words"
+                >
+                  {subtitle}
+                </div>
+                {suggestFor && <TitleSuggest project={suggestFor} slot="subtitle" current={subtitle} onPick={onSubtitleChange} />}
+              </span>
               {updatedAt && (
                 <>
-                  {hasSubtitle && <span className="text-[var(--text-muted)] text-sm select-none">•</span>}
+                  <span className="text-[var(--text-muted)] text-sm select-none">•</span>
                   <span className="text-subtitle text-xs whitespace-nowrap">
                     {formatRelativeClient(updatedAt)}
                   </span>
                 </>
               )}
-              {charLimit && (
+              {agent && (
+                <>
+                  <span className="text-[var(--text-muted)] text-sm select-none">•</span>
+                  {(() => {
+                    const Icon = writingIcon(agent);
+                    return (
+                      <button
+                        onClick={(e) => {
+                          stop(e);
+                          setSetAsOpen(true);
+                          toggleMenu("docmenu");
+                        }}
+                        title={`Set as ${AGENT_PLUGINS[agent].name} · change it in the menu`}
+                        className="inline-flex items-center gap-[4px] bg-transparent border-none p-[0] cursor-pointer text-subtitle text-xs whitespace-nowrap hover:text-[var(--text-primary)]"
+                      >
+                        <Icon size={11} strokeWidth={1.8} />
+                        {AGENT_PLUGINS[agent].agent.label}
+                      </button>
+                    );
+                  })()}
+                </>
+              )}
+              {info && (
                 <>
                   <span className="text-[var(--text-muted)] text-sm select-none">•</span>
                   <span
-                    title={`${charLimit} characters at most`}
-                    className={`text-xs whitespace-nowrap tabular-nums ${charCount > charLimit ? "text-[var(--color-oxblood-500)] font-semibold" : "text-subtitle"}`}
+                    title={info.title}
+                    className={`text-xs whitespace-nowrap tabular-nums ${info.over ? "text-[var(--color-oxblood-500)] font-semibold" : "text-subtitle"}`}
                   >
-                    {charCount}/{charLimit}
+                    {info.text}
                   </span>
                 </>
               )}
-              {mode.actions?.map((action) => (
+              {declaration?.actions?.map((action) => (
                 <span key={action.id} className="contents">
                   <span className="text-[var(--text-muted)] text-sm select-none">•</span>
                   <button
-                    onClick={() => window.open(action.href({ brief, text: documentPlainText(draftDoc) }), "_blank", "noopener")}
+                    onClick={() => window.open(action.href({ brief, text: draftText }), "_blank", "noopener")}
                     title={action.title}
                     className="inline-flex items-center gap-[4px] bg-transparent border-none p-[0] cursor-pointer text-subtitle text-xs whitespace-nowrap hover:text-[var(--text-primary)]"
                   >
-                    {action.label({ brief })}
+                    {action.label({ brief, text: draftText })}
                     <ExternalLink size={11} strokeWidth={1.8} />
                   </button>
                 </span>
@@ -246,6 +270,7 @@ export function DraftEditor({
           <button
             onClick={(e) => {
               stop(e);
+              setSetAsOpen(false);
               toggleMenu("docmenu");
             }}
             className="bg-transparent border-none text-[var(--text-muted)] cursor-pointer p-[4px] flex"
@@ -270,35 +295,51 @@ export function DraftEditor({
                   closeMenu();
                 }}
               />
-              {mode.editor.duplicate && (
-                <MenuRow
-                  icon={CopyPlus}
-                  label="Duplicate"
-                  onClick={() => {
-                    duplicateDoc();
-                    closeMenu();
-                  }}
-                />
-              )}
               <MenuRow
-                icon={Can}
-                label="Delete"
+                icon={CopyPlus}
+                label="Duplicate"
                 onClick={() => {
-                  setDeleteConfirmOpen(true);
+                  duplicateDoc();
                   closeMenu();
                 }}
               />
-              <div className="h-px bg-[var(--border-default)] my-[4px]" />
               {/* The page being shown: this section, or the whole writing. */}
               {docMode === "edit" && !typePicker && (
                 <MenuRow
                   icon={Wand2}
-                  label={section ? "Compose section" : "Compose writing"}
+                  label={section ? "Compose section" : "Compose"}
                   onClick={() => {
                     editor.getExtension(WritingAssistExtension)?.askCompose(sectionId ? { kind: "section", id: sectionId } : { kind: "draft" });
                     closeMenu();
                   }}
                 />
+              )}
+              {/* What the writing is set as: changing it rewrites nothing. */}
+              {!typePicker && (
+                <>
+                  {/* One row; its options open under it on click. */}
+                  <MenuRow
+                    icon={writingIcon(agent)}
+                    label="Set as"
+                    shortcut={agent ? AGENT_PLUGINS[agent].agent.label : "Document"}
+                    trailing={<ChevronRight size={12} strokeWidth={1.8} className={`text-[var(--text-muted)] transition-transform ${setAsOpen ? "rotate-90" : ""}`} />}
+                    onClick={() => setSetAsOpen((o) => !o)}
+                  />
+                  {setAsOpen &&
+                    settable.map((a) => (
+                      <MenuRow
+                        key={a ?? "none"}
+                        indent
+                        icon={a === agent ? Check : writingIcon(a)}
+                        label={a ? AGENT_PLUGINS[a].agent.label : "Document"}
+                        active={a === agent}
+                        onClick={() => {
+                          setAgent(a);
+                          closeMenu();
+                        }}
+                      />
+                    ))}
+                </>
               )}
               <MenuRow
                 icon={Sparkles}
@@ -313,6 +354,14 @@ export function DraftEditor({
                 label="Shortcuts"
                 onClick={() => {
                   onOpenShortcuts();
+                  closeMenu();
+                }}
+              />
+              <MenuRow
+                icon={Can}
+                label="Delete"
+                onClick={() => {
+                  setDeleteConfirmOpen(true);
                   closeMenu();
                 }}
               />

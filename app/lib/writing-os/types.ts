@@ -1,7 +1,7 @@
 import type { DraftPartialBlock } from "./schema";
 import type { Link } from "@/lib/store/types";
-import type { WritingType } from "@/lib/plugins/writing-types";
-import type { BriefRead } from "@/lib/plugins/writing-type";
+import type { AgentId } from "@/lib/plugins/writing-assist/agents";
+import type { BriefRead } from "@/lib/plugins/writing-assist/agents/agent";
 
 export type { Link, Ref } from "@/lib/store/types";
 
@@ -135,13 +135,12 @@ export interface Project {
   /** Per plugin id: on or off for this project only, whatever the global
    * setting says. A plugin with no entry follows the global setting. */
   pluginOverrides?: Record<string, boolean>;
-  /** Document, Tweet, Email or Message (artifacts/WRITING_TYPES_SPEC.md);
-   * unset until the writer picks one, and until then it behaves as a
-   * document. Everything that differs by type is its plugin's
-   * (lib/plugins/writing-types.ts). */
-  type?: WritingType;
-  /** What the type's brief reader found and read in the brief (a tweet:
-   * the post it replies to), by type plugin id. */
+  /** The agent the writing is set as (artifacts/AGENTS_SPEC.md), if any:
+   * Tweet, Email or Message. It extends the document; it never changes
+   * what the document is (lib/plugins/agents.ts). */
+  agent?: AgentId;
+  /** What the agent's brief reader found and read in the brief (a tweet:
+   * the post it replies to), by agent id. */
   briefReads?: Record<string, BriefRead>;
 }
 

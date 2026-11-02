@@ -10,7 +10,6 @@ interface Entry {
   name: string;
   description: string;
   enabled: boolean;
-  alwaysOn: boolean;
   /** A plugin's skills, each with its own global switch (under the
    * plugin's). */
   skills?: Array<{ id: string; name: string; description: string; enabled: boolean }>;
@@ -20,20 +19,14 @@ interface Entry {
  * follows the global setting until the project switches it, either way;
  * switching it back to match the global setting makes it follow again. A
  * plugin's skills are listed under it, each with its own switch
- * (`<plugin>/<skill>`); a skill follows its plugin's switch here, then the
- * writing's type (which may have it off by default), then its own global
- * one. */
+ * (`<plugin>/<skill>`); a skill follows its plugin's switch here, then its
+ * own global one. */
 export function ProjectPlugins({
   overrides,
   onChange,
-  typeLabel,
-  typeSkillsOff = [],
 }: {
   overrides: Record<string, boolean>;
   onChange: (overrides: Record<string, boolean>) => void;
-  /** The writing's type, and the skills it has off by default. */
-  typeLabel?: string;
-  typeSkillsOff?: string[];
 }) {
   const [plugins, setPlugins] = useState<Entry[] | null>(null);
 
@@ -63,12 +56,11 @@ export function ProjectPlugins({
             <div className="flex-1 min-w-0">
               <div className="text-sm font-medium text-[var(--text-primary)]">{p.name}</div>
               <div className="text-xs text-[var(--text-muted)]">
-                {p.description} · {p.alwaysOn ? "Always on" : overridden ? `${on ? "On" : "Off"} here, ${p.enabled ? "on" : "off"} globally` : `Follows global (${p.enabled ? "on" : "off"})`}
+                {p.description} · {overridden ? `${on ? "On" : "Off"} here, ${p.enabled ? "on" : "off"} globally` : `Follows global (${p.enabled ? "on" : "off"})`}
               </div>
             </div>
             <Switch
               on={on}
-              disabled={p.alwaysOn}
               label={`${p.name} on or off for this writing`}
               onChange={(next) => {
                 const rest = { ...overrides };
@@ -85,7 +77,7 @@ export function ProjectPlugins({
             delete rest[key];
             const followed =
               p.id === WRITING_ASSIST
-                ? skillState(k.id, rest, on ? [WRITING_ASSIST] : [], k.enabled ? [] : [skillKey(k.id)], typeSkillsOff)
+                ? skillState(k.id, rest, on ? [WRITING_ASSIST] : [], k.enabled ? [] : [skillKey(k.id)])
                 : { on: on && k.enabled, by: "global" as const };
             const follows = followed.on;
             const own = key in overrides;
@@ -97,9 +89,7 @@ export function ProjectPlugins({
                   <div className="text-xs text-[var(--text-muted)]">
                     {own
                       ? `${skillOn ? "On" : "Off"} here`
-                      : followed.by === "type"
-                        ? `Off for ${typeLabel ? `a ${typeLabel.toLowerCase()}` : "this type"} by default`
-                        : `Follows ${p.name} (${follows ? "on" : "off"})`}
+                      : `Follows ${p.name} (${follows ? "on" : "off"})`}
                   </div>
                 </div>
                 <Switch
